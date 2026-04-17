@@ -1,0 +1,24 @@
+services:
+  # Development-specific overrides for the backend
+  backend:
+    build: 
+      context: ./backend
+    volumes:
+      - ./project:/project
+      - ./backend:/app
+
+  # The frontend service is only needed in development (Vite HMR)
+  frontend:
+    build:
+      context: ./frontend
+    container_name: knx_frontend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped

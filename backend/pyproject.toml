@@ -1,0 +1,19 @@
+[tool.ruff]
+# Target Python version
+target-version = "py311"
+
+# Standard linting rules
+select = ["E", "F", "B", "I", "U"]
+ignore = []
+
+# Exclude common directories
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+]
+
+[tool.ruff.mccabe]
+max-complexity = 15

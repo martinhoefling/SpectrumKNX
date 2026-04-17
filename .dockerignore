@@ -1,0 +1,26 @@
+.git
+.gitignore
+.dockerignore
+
+# Editor
+.vscode
+.idea
+*.suo
+*.sln
+
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Config
+.env
+*.knxproj
+
+# Build Output
+frontend/dist/
+dist/
+
+# Temporary Directories
+tmp/
