@@ -1,0 +1,35 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: knx_timescale
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-knxuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knxpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-knx_analyzer}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - knx_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    image: ${APP_IMAGE:-ghcr.io/m-hoermann/spectrum-knx:latest}
+    container_name: knx_backend
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-knxuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-knxpassword}
+      - POSTGRES_DB=${POSTGRES_DB:-knx_analyzer}
+      - POSTGRES_HOST=${POSTGRES_HOST:-db}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+volumes:
+  knx_db_data:

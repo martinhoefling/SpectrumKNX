@@ -1,0 +1,12 @@
+# Production-specific configuration for Spectrum KNX
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  backend:
+    # Use standard production restart policy
+    restart: always
+    # Ensure no development volumes are accidentally attached
+    volumes: []
+
+  db:
+    restart: always
