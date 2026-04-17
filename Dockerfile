@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Serve with Python
-FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 # Install system dependencies if needed (e.g. for xknx)
