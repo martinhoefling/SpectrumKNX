@@ -1,0 +1,65 @@
+name: CI (Test & Lint)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Lint with Ruff
+        run: |
+          cd backend
+          ruff check .
+          
+      - name: Run Tests with Pytest
+        run: |
+          cd backend
+          # Mock database for unit tests
+          export DATABASE_URL=sqlite+aiosqlite:///unittest.db
+          # Ensure modules are found from the root of the backend folder
+          export PYTHONPATH=.
+          python -m pytest tests/
+          
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+          
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm install
+          
+      - name: Lint
+        run: |
+          cd frontend
+          npm run lint
+          
+      - name: Build
+        run: |
+          cd frontend
+          npm run build

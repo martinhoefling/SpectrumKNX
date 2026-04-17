@@ -1,0 +1,25 @@
+[tool.ruff]
+# Target Python version
+target-version = "py311"
+
+# Standard linting rules
+select = ["E", "F", "B", "I", "U", "UP"]
+ignore = [
+    "E501", # Line too long (Relaxed for long URLs and comments)
+    "B008", # Do not perform function call `Depends` in argument defaults (Standard FastAPI pattern)
+]
+
+# Max line length for auto-format or other rules
+line-length = 120
+
+# Exclude common directories
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+]
+
+[tool.ruff.mccabe]
+max-complexity = 15
