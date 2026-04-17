@@ -29,8 +29,6 @@ COPY --from=frontend-builder /app/frontend/dist ./static
 EXPOSE 8000
 
 # Environment variables
-ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/knx
-ENV KNX_PROJECT_PATH=/app/project.knxproj
 ENV LOG_LEVEL=INFO
 
 # Command to run the application

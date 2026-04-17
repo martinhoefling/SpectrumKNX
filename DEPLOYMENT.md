@@ -32,7 +32,7 @@ You can configure the application via environment variables. These can be set in
 ### DB Connection
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | (Optional) Full SQLAlchemy connection string | N/A |
+| `DATABASE_URL` | (Optional) Full SQLAlchemy connection string (must use `postgresql+asyncpg://`) | N/A |
 | `POSTGRES_USER` | Database username | `knxuser` |
 | `POSTGRES_PASSWORD`| Database password | `knxpassword` |
 | `POSTGRES_DB` | Database name | `knx_analyzer` |
