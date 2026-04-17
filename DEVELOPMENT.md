@@ -30,7 +30,7 @@ This document provides instructions for setting up the development environment, 
 ### 1. Prerequisites
 - Docker and Docker Compose installed.
 - Python 3.11 installed (for local backend development).
-- Node.js installed (for local frontend development).
+- Node.js 24+ installed (for local frontend development).
 
 ### 2. Environment Configuration
 Copy the example environment file and adjust the values as needed:

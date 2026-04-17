@@ -1,5 +1,9 @@
 name: Release (Docker Build & GHCR)
 
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     tags:
