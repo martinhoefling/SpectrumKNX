@@ -38,7 +38,7 @@ Copy the example environment file and adjust the values as needed:
 cp .env_example .env
 ```
 Key variables:
-- `DATABASE_URL`: (Optional) Full connection string for the PostgreSQL database.
+- `DATABASE_URL`: (Optional) Full connection string for the PostgreSQL database (must start with `postgresql+asyncpg://`).
 - `POSTGRES_USER/PASSWORD/DB`: Individual credentials used if `DATABASE_URL` is omitted.
 - `KNX_PASSWORD`: Password for your ETS project export.
 - `KNX_GATEWAY_IP`: IP of your KNX interface (or `AUTO`).
