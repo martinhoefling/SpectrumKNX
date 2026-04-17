@@ -7,11 +7,11 @@ from sqlalchemy import insert
 from xknx import XKNX
 from xknx.io import ConnectionConfig, ConnectionType, GatewayScanner
 from xknx.telegram import Telegram as XknxTelegram
+from xknx.telegram.address import IndividualAddress
 
 from database import AsyncSessionLocal
 from models import telegrams_table
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
-from xknx.telegram.address import IndividualAddress
 from ws_manager import manager
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
