@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from parsers import (
     convert_value_for_db,
     format_dpt_name,
@@ -170,3 +172,20 @@ def test_format_dpt_name():
     assert "9.001" in name
     
     assert format_dpt_name(None, None) == (None, None)
+
+def test_format_dpt_name_invalid_inputs():
+    # When DPTBase.parse_transcoder fails to find a valid match, it may just return None.
+    # To truly hit the 'except Exception' fallback block requested, we force an exception.
+    # Alternatively we can try invalid combinations if they throw. xknx usually returns None
+    # instead of throwing on unknown string format (e.g., '9999').
+    # So we use mock to ensure the 'except Exception' block runs.
+    with patch('parsers.DPTBase.parse_transcoder', side_effect=Exception("Test Error")):
+        # Test with main and sub
+        name, unit = format_dpt_name(999, 999)
+        assert name == "999.999"
+        assert unit is None
+
+        # Test with main only
+        name, unit = format_dpt_name(999, None)
+        assert name == "999"
+        assert unit is None
