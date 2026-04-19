@@ -1,5 +1,7 @@
 # Stage 1: Build the frontend
 FROM node:24-alpine AS frontend-builder
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=$APP_VERSION
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -8,6 +10,8 @@ RUN npm run build
 
 # Stage 2: Serve with Python
 FROM python:3.11-slim
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 WORKDIR /app
 
 # Install system dependencies if needed (e.g. for xknx)
