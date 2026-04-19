@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -239,11 +238,10 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             # Client sends filters over WS as JSON
-            data = await websocket.receive_text()
             try:
-                filters = json.loads(data)
+                filters = await websocket.receive_json()
                 await manager.update_filters(websocket, filters)
-            except json.JSONDecodeError:
+            except ValueError:
                 pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
