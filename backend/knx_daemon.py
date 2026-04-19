@@ -23,6 +23,74 @@ xknx_instance = None
 global_knx_project = None
 project_name_map = {"ga": {}, "ia": {}}
 
+async def _load_project_data():
+    global global_knx_project, project_name_map, xknx_instance
+    ets_project_file = os.getenv("KNX_PROJECT_PATH")
+    ets_password = os.getenv("KNX_PASSWORD")
+    
+    if not ets_project_file or not os.path.exists(ets_project_file):
+        logger.warning(f"Project file not found: {ets_project_file}")
+        return
+
+    try:
+        from xknxproject import XKNXProj
+        xknxproj = XKNXProj(ets_project_file, password=ets_password)
+        global_knx_project = xknxproj.parse()
+        logger.info(f"Successfully loaded KNX project from {ets_project_file}")
+        
+        # Pre-populate name lookup maps
+        new_name_map = {"ga": {}, "ia": {}}
+        gas = global_knx_project.get("group_addresses", {})
+        for ga, data in gas.items():
+            new_name_map["ga"][ga] = data.get("name")
+        
+        # Individual addresses (devices)
+        devices = global_knx_project.get("devices", {})
+        for addr, data in devices.items():
+            name = data.get("name")
+            if addr:
+                try:
+                    ia_str = str(IndividualAddress(addr))
+                    new_name_map["ia"][ia_str] = name
+                except Exception:
+                    new_name_map["ia"][str(addr)] = name
+        
+        project_name_map = new_name_map
+        
+        if xknx_instance:
+            dpt_dict = {
+                ga: data["dpt"]
+                for ga, data in global_knx_project["group_addresses"].items()
+                if data["dpt"] is not None
+            }
+            xknx_instance.group_address_dpt.set(dpt_dict)
+            logger.info("Updated XKNX DPT mappings from project.")
+            
+    except Exception as e:
+        logger.error(f"Error loading/parsing KNX project: {e}")
+
+async def watch_project_file():
+    ets_project_file = os.getenv("KNX_PROJECT_PATH")
+    if not ets_project_file:
+        return
+        
+    last_mtime = 0
+    if os.path.exists(ets_project_file):
+        last_mtime = os.path.getmtime(ets_project_file)
+        
+    logger.info(f"Starting project file watcher for {ets_project_file} (interval: 60s)")
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if os.path.exists(ets_project_file):
+                current_mtime = os.path.getmtime(ets_project_file)
+                if current_mtime > last_mtime:
+                    logger.info(f"Detected change in {ets_project_file}, reloading project...")
+                    await _load_project_data()
+                    last_mtime = current_mtime
+        except Exception as e:
+            logger.error(f"Error in project file watcher: {e}")
+
 
 
 
@@ -97,8 +165,6 @@ async def knx_startup():
     
     knx_ip = os.getenv("KNX_GATEWAY_IP", "AUTO")
     knx_port = int(os.getenv("KNX_GATEWAY_PORT", 3671))
-    ets_project_file = os.getenv("KNX_PROJECT_PATH")
-    ets_password = os.getenv("KNX_PASSWORD")
 
     connection_config = None
     if knx_ip == "AUTO" or not knx_ip:
@@ -122,35 +188,7 @@ async def knx_startup():
             gateway_port=knx_port
         )
         
-    global_knx_project = None
-    project_name_map = {"ga": {}, "ia": {}}
-    
-    if ets_project_file and os.path.exists(ets_project_file):
-        try:
-             from xknxproject import XKNXProj
-             xknxproj = XKNXProj(ets_project_file, password=ets_password)
-             global_knx_project = xknxproj.parse()
-             logger.info(f"Loaded KNX project from {ets_project_file}")
-             
-             # Pre-populate name lookup maps
-             gas = global_knx_project.get("group_addresses", {})
-             for ga, data in gas.items():
-                 project_name_map["ga"][ga] = data.get("name")
-             
-             # Individual addresses (devices)
-             devices = global_knx_project.get("devices", {})
-             for addr, data in devices.items():
-                 name = data.get("name")
-                 if addr:
-                     # Standardize to string 1.1.1 format
-                     try:
-                         ia_str = str(IndividualAddress(addr))
-                         project_name_map["ia"][ia_str] = name
-                     except Exception:
-                        project_name_map["ia"][str(addr)] = name
-                     
-        except Exception as e:
-             logger.error(f"Error loading KNX project names: {e}")
+    await _load_project_data()
              
     xknx_instance = XKNX(connection_config=connection_config)
     
@@ -166,6 +204,8 @@ async def knx_startup():
     try:
         await xknx_instance.start()
         logger.info("KNX Daemon connected to bus and listening.")
+        # Start background project file watcher
+        asyncio.create_task(watch_project_file())
     except Exception as e:
         logger.error(f"Failed to connect to KNX bus: {e}")
 
