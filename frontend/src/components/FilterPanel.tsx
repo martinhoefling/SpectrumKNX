@@ -63,13 +63,15 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
     onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
   >
-    <label style={{
+    <label 
+      onClick={(e) => { e.preventDefault(); onToggle(); }}
+      style={{
       display: 'flex', alignItems: 'center', gap: '0.6rem',
-      padding: '0.35rem 0.25rem', cursor: 'pointer', flex: 1, minWidth: 0
+      padding: '0.35rem 0.25rem', cursor: 'pointer', flex: 1, minWidth: 0,
+      userSelect: 'none'
     }}>
       {/* Custom checkbox */}
       <div
-        onClick={(e) => { e.preventDefault(); onToggle(); }}
         style={{
           width: 14, height: 14, flexShrink: 0, borderRadius: 3,
           border: `1.5px solid ${checked ? 'var(--accent-primary)' : 'var(--border-color)'}`,
