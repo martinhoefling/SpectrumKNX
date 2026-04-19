@@ -25,6 +25,45 @@ def test_api_project_with_project():
     assert response.json()["status"] == "ok"
     assert "1/1/1" in response.json()["group_addresses"]
 
+def test_get_filter_options_no_project():
+    knx_daemon.global_knx_project = None
+    response = client.get("/api/filter-options")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sources"] == []
+    assert data["targets"] == []
+    assert data["dpts"] == []
+    assert "types" in data
+
+def test_get_filter_options_with_project():
+    knx_daemon.global_knx_project = {
+        "devices": {
+            "1.1.1": {"name": "Test Device 1"},
+            "1.1.2": {"name": "Test Device 2"},
+        },
+        "group_addresses": {
+            "1/2/3": {"name": "Test GA 1", "dpt": {"main": 1, "sub": 1}},
+            "1/2/4": {"name": "Test GA 2", "dpt": {"main": 9}},
+        }
+    }
+    response = client.get("/api/filter-options")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["sources"]) == 2
+    assert data["sources"][0]["address"] == "1.1.1"
+    assert data["sources"][0]["name"] == "Test Device 1"
+
+    assert len(data["targets"]) == 2
+    assert data["targets"][0]["address"] == "1/2/3"
+    assert data["targets"][0]["name"] == "Test GA 1"
+
+    assert len(data["dpts"]) == 2
+    assert data["dpts"][0]["main"] == 1
+    assert data["dpts"][0]["sub"] == 1
+    assert data["dpts"][1]["main"] == 9
+    assert data["dpts"][1]["sub"] is None
+
 # Mock Database Dependency
 async def override_get_db():
     class MockResult:
