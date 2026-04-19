@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 
@@ -16,16 +17,6 @@ interface TelegramTableProps {
   sortConfig: SortConfig;
   onSort: (key: SortKey) => void;
 }
-
-interface SortIconProps {
-  column: SortKey;
-  sortConfig: SortConfig;
-}
-
-const SortIcon = ({ column, sortConfig }: SortIconProps) => {
-  if (sortConfig.key !== column) return null;
-  return sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
-};
 
 const getTypeColor = (type?: string | null) => {
   switch (type) {
@@ -44,6 +35,7 @@ const getDPTColor = (dpt_main: number | null) => {
 };
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visibleColumns, sortConfig, onSort }) => {
+  const parentRef = useRef<HTMLDivElement>(null);
 
   // Compute time deltas between consecutive rows (by visual order)
   const telegramRows = useMemo(() => {
@@ -62,88 +54,206 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visible
     });
   }, [telegrams]);
 
+  const virtualizer = useVirtualizer({
+    count: telegramRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 60, // Slightly larger estimate
+    overscan: 10,
+  });
+
+  // Track if we are at the top to handle auto-scroll
+  const isAtTopRef = useRef(true);
+  const handleScroll = () => {
+    if (parentRef.current) {
+      isAtTopRef.current = parentRef.current.scrollTop < 10;
+    }
+  };
+
+  // Handle auto-scroll to top when new telegrams arrive
+  const lastFirstIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const firstId = telegrams[0]?.timestamp + telegrams[0]?.source_address;
+    if (lastFirstIdRef.current && firstId !== lastFirstIdRef.current) {
+      if (isAtTopRef.current) {
+        virtualizer.scrollToIndex(0);
+      }
+    }
+    lastFirstIdRef.current = firstId;
+  }, [telegrams, virtualizer]);
+
+  // Grid layout configuration - ensure consistent spacing
+  const gridTemplate = [
+    '130px', // Time
+    '200px', // Source
+    '240px', // Target
+    visibleColumns.type ? '110px' : null,
+    visibleColumns.dpt ? '140px' : null,
+    'minmax(200px, 1fr)', // Value (slightly wider min)
+  ].filter(Boolean).join(' ');
+
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-      <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-panel)', zIndex: 10, backdropFilter: 'blur(8px)' }}>
-        <tr style={{ textAlign: 'left', color: 'var(--text-dim)', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          <th style={{ padding: '0.75rem 1rem', width: '130px' }}><button className="sort-header" onClick={() => onSort('timestamp')}>TIME <SortIcon column="timestamp" sortConfig={sortConfig} /></button></th>
-          <th style={{ padding: '0.75rem 1rem', width: '200px' }}><button className="sort-header" onClick={() => onSort('source_address')}>SOURCE <SortIcon column="source_address" sortConfig={sortConfig} /></button></th>
-          <th style={{ padding: '0.75rem 1rem', width: '240px' }}><button className="sort-header" onClick={() => onSort('target_address')}>TARGET <SortIcon column="target_address" sortConfig={sortConfig} /></button></th>
-          {visibleColumns.type && <th style={{ padding: '0.75rem 1rem', width: '110px' }}><button className="sort-header" onClick={() => onSort('simplified_type')}>TYPE <SortIcon column="simplified_type" sortConfig={sortConfig} /></button></th>}
-          {visibleColumns.dpt && <th style={{ padding: '0.75rem 1rem', width: '140px' }}><button className="sort-header" onClick={() => onSort('dpt_name')}>DPT <SortIcon column="dpt_name" sortConfig={sortConfig} /></button></th>}
-          <th style={{ padding: '0.75rem 1rem', minWidth: '180px' }}><button className="sort-header" onClick={() => onSort('value_numeric')}>VALUE <SortIcon column="value_numeric" sortConfig={sortConfig} /></button></th>
-        </tr>
-      </thead>
-      <tbody>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header - added padding to match row content */}
+      <div 
+        style={{ 
+          display: 'grid', 
+          gridTemplateColumns: gridTemplate,
+          background: 'var(--bg-panel)',
+          zIndex: 10,
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid var(--border-color)',
+          flexShrink: 0,
+          color: 'var(--text-dim)',
+          fontSize: '0.65rem',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          fontWeight: 700,
+          paddingRight: '12px' // Anticipate scrollbar
+        }}
+      >
+        <div style={{ padding: '1rem' }}>
+          <button className="sort-header" onClick={() => onSort('timestamp')}>
+            TIME {sortConfig.key === 'timestamp' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+          </button>
+        </div>
+        <div style={{ padding: '1rem' }}>
+          <button className="sort-header" onClick={() => onSort('source_address')}>
+            SOURCE {sortConfig.key === 'source_address' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+          </button>
+        </div>
+        <div style={{ padding: '1rem' }}>
+          <button className="sort-header" onClick={() => onSort('target_address')}>
+            TARGET {sortConfig.key === 'target_address' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+          </button>
+        </div>
+        {visibleColumns.type && (
+          <div style={{ padding: '1rem' }}>
+            <button className="sort-header" onClick={() => onSort('simplified_type')}>
+              TYPE {sortConfig.key === 'simplified_type' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+            </button>
+          </div>
+        )}
+        {visibleColumns.dpt && (
+          <div style={{ padding: '1rem' }}>
+            <button className="sort-header" onClick={() => onSort('dpt_name')}>
+              DPT {sortConfig.key === 'dpt_name' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+            </button>
+          </div>
+        )}
+        <div style={{ padding: '1rem' }}>
+          <button className="sort-header" onClick={() => onSort('value_numeric')}>
+            VALUE {sortConfig.key === 'value_numeric' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+          </button>
+        </div>
+      </div>
+
+      {/* Virtualized Body */}
+      <div 
+        ref={parentRef} 
+        onScroll={handleScroll}
+        style={{ flex: 1, overflowY: 'auto', position: 'relative' }}
+        className="custom-scrollbar"
+      >
         {telegramRows.length === 0 ? (
-          <tr><td colSpan={20} style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.875rem' }}>No data available.</td></tr>
-        ) : telegramRows.map((t, idx) => (
-          <tr key={`${t.timestamp}-${idx}`} className="log-row" style={{ borderBottom: '1px solid var(--border-color)', fontSize: '0.8125rem' }}>
-
-            {/* Time + Delta subtitle */}
-            <td style={{ padding: '0.75rem 1rem' }}>
-              <div className="mono-addr" style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
-                {format(new Date(t.timestamp), 'HH:mm:ss.SS')}
-              </div>
-              {visibleColumns.delta && t.deltaStr && (
-                <div className="subtitle-name">{t.deltaStr}</div>
-              )}
-            </td>
-
-            {/* Source + Name subtitle */}
-            <td style={{ padding: '0.75rem 1rem' }}>
-              <div className="mono-addr highlight">{t.source_address}</div>
-              {visibleColumns.sourceName && (
-                <div className="subtitle-name">{t.source_name || '-'}</div>
-              )}
-            </td>
-
-            {/* Target + Name subtitle */}
-            <td style={{ padding: '0.75rem 1rem' }}>
-              <div className="mono-addr highlight-target">{t.target_address}</div>
-              {visibleColumns.targetName && (
-                <div className="subtitle-name" style={{ color: 'var(--text-main)', fontWeight: 500 }}>{t.target_name || '-'}</div>
-              )}
-            </td>
-
-            {/* Type */}
-            {visibleColumns.type && (
-              <td style={{ padding: '0.75rem 1rem' }}>
-                <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
-                  {t.simplified_type || t.telegram_type}
-                </div>
-                <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
-              </td>
-            )}
-
-            {/* DPT */}
-            {visibleColumns.dpt && (
-              <td style={{ padding: '0.75rem 1rem' }}>
-                {t.dpt_name ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{t.dpt_name}</span>
+          <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.875rem' }}>
+            No data available.
+          </div>
+        ) : (
+          <div 
+            style={{ 
+              height: `${virtualizer.getTotalSize()}px`, 
+              width: '100%', 
+              position: 'relative' 
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const t = telegramRows[virtualRow.index];
+              return (
+                <div
+                  key={virtualRow.key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                    display: 'grid',
+                    gridTemplateColumns: gridTemplate,
+                    borderBottom: '1px solid var(--border-color)',
+                    fontSize: '0.8125rem',
+                    background: virtualRow.index % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent',
+                    alignItems: 'start' // Align items to top to prevent vertical stretch issues
+                  }}
+                  className="log-row"
+                >
+                  {/* Time + Delta subtitle */}
+                  <div style={{ padding: '0.85rem 1rem' }}>
+                    <div className="mono-addr" style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+                      {format(new Date(t.timestamp), 'HH:mm:ss.SS')}
+                    </div>
+                    {visibleColumns.delta && t.deltaStr && (
+                      <div className="subtitle-name">{t.deltaStr}</div>
+                    )}
                   </div>
-                ) : '-'}
-              </td>
-            )}
 
-            {/* Value + Raw hex subtitle */}
-            <td style={{ padding: '0.75rem 1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.9375rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                  {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '-')}
-                </span>
-                {t.unit && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500 }}>{t.unit}</span>}
-              </div>
-              {visibleColumns.data && t.raw_hex && (
-                <div className="raw-badge" style={{ marginTop: '0.2rem' }}>{t.raw_hex}</div>
-              )}
-            </td>
+                  {/* Source + Name subtitle */}
+                  <div style={{ padding: '0.85rem 1rem' }}>
+                    <div className="mono-addr highlight">{t.source_address}</div>
+                    {visibleColumns.sourceName && (
+                      <div className="subtitle-name" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.source_name || '-'}</div>
+                    )}
+                  </div>
 
-          </tr>
-        ))}
-      </tbody>
-    </table>
+                  {/* Target + Name subtitle */}
+                  <div style={{ padding: '0.85rem 1rem' }}>
+                    <div className="mono-addr highlight-target">{t.target_address}</div>
+                    {visibleColumns.targetName && (
+                      <div className="subtitle-name" style={{ color: 'var(--text-main)', fontWeight: 500, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.target_name || '-'}</div>
+                    )}
+                  </div>
+
+                  {/* Type */}
+                  {visibleColumns.type && (
+                    <div style={{ padding: '0.85rem 1rem' }}>
+                      <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                        {t.simplified_type || t.telegram_type}
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
+                    </div>
+                  )}
+
+                  {/* DPT */}
+                  {visibleColumns.dpt && (
+                    <div style={{ padding: '0.85rem 1rem' }}>
+                      {t.dpt_name ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{t.dpt_name}</span>
+                        </div>
+                      ) : '-'}
+                    </div>
+                  )}
+
+                  {/* Value + Raw hex subtitle */}
+                  <div style={{ padding: '0.85rem 1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.9375rem', wordBreak: 'break-all', whiteSpace: 'normal' }}>
+                        {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '-')}
+                      </span>
+                      {t.unit && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500 }}>{t.unit}</span>}
+                    </div>
+                    {visibleColumns.data && t.raw_hex && (
+                      <div className="raw-badge" style={{ marginTop: '0.35rem' }}>{t.raw_hex}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };

@@ -486,7 +486,7 @@ function App() {
               </div>
 
               {/* Content body */}
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {isVisualizerOpen ? (
                   <Visualizer telegrams={filteredLiveTelegrams} onClose={() => setIsVisualizerOpen(false)} />
                 ) : (

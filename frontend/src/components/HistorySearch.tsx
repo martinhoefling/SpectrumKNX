@@ -190,7 +190,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
         </div>
 
         {/* Table/Chart area */}
-        <div style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
           {isVisualizerOpen && telegrams.length > 0 ? (
             <Visualizer telegrams={sortedTelegrams} onClose={() => setIsVisualizerOpen(false)} />
           ) : telegrams.length === 0 ? (
