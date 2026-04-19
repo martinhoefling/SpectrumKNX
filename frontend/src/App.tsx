@@ -148,6 +148,32 @@ function App() {
   const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
 
+  const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
+    setActiveFilters((prevFilters) => {
+      const updatedFilters = typeof newFilters === 'function' ? newFilters(prevFilters) : newFilters;
+      
+      const addedTargets = updatedFilters.targets.filter(t => !prevFilters.targets.includes(t));
+      const removedTargets = prevFilters.targets.filter(t => !updatedFilters.targets.includes(t));
+      
+      const addedSources = updatedFilters.sources.filter(s => !prevFilters.sources.includes(s));
+      const removedSources = prevFilters.sources.filter(s => !updatedFilters.sources.includes(s));
+      
+      const added = [...addedTargets, ...addedSources];
+      const removed = [...removedTargets, ...removedSources];
+      
+      if (added.length > 0 || removed.length > 0) {
+        setSelectedVisualizationTargets(prevSelected => {
+          let next = [...prevSelected];
+          added.forEach(a => { if (!next.includes(a)) next.push(a); });
+          removed.forEach(r => { next = next.filter(t => t !== r); });
+          return next;
+        });
+      }
+      
+      return updatedFilters;
+    });
+  }, []);
+
   // Load filter options from backend on mount
   useEffect(() => {
     fetch('/api/filter-options')
@@ -250,7 +276,7 @@ function App() {
   };
 
   const handleQuickFilter = (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => {
-    setActiveFilters(prev => {
+    handleFiltersChange(prev => {
       const current = prev[key] as (string | number)[];
       const isPresent = current.includes(value as never);
       return {
@@ -526,7 +552,7 @@ function App() {
                   <FilterPanel
                     options={filterOptions}
                     activeFilters={activeFilters}
-                    onFiltersChange={setActiveFilters}
+                    onFiltersChange={handleFiltersChange}
                     counts={filterCounts}
                     mode="live"
                   />
@@ -562,8 +588,10 @@ function App() {
             loadLimit={loadLimit}
             filterOptions={filterOptions}
             activeFilters={activeFilters}
-            onFiltersChange={setActiveFilters}
+            onFiltersChange={handleFiltersChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            selectedVisualizationTargets={selectedVisualizationTargets}
+            onVisualizationTargetsChange={setSelectedVisualizationTargets}
           />
         )}
       </main>

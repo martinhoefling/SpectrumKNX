@@ -24,5 +24,10 @@ __pycache__/
 frontend/dist/
 dist/
 
+# Assets and Documentation
+kubernetes/
+assets/
+project/
+
 # Temporary Directories
 tmp/

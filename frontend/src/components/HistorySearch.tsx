@@ -18,10 +18,13 @@ interface HistorySearchProps {
   activeFilters: ActiveFilters;
   onFiltersChange: (f: ActiveFilters) => void;
   onOpenSettings: () => void;
+  selectedVisualizationTargets: string[];
+  onVisualizationTargetsChange: (targets: string[] | ((prev: string[]) => string[])) => void;
 }
 
 export const HistorySearch: React.FC<HistorySearchProps> = ({ 
-  visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings 
+  visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings,
+  selectedVisualizationTargets, onVisualizationTargetsChange
 }) => {
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
@@ -29,7 +32,6 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
-  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>([]);
   // activeFilters and onFiltersChange come from App.tsx (shared with live view)
 
   const handleSort = (key: SortKey) => {
@@ -50,7 +52,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   };
 
   const handleQuickVisualize = (targetAddress: string) => {
-    setSelectedVisualizationTargets(prev => 
+    onVisualizationTargetsChange(prev => 
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
     setIsVisualizerOpen(true);
@@ -214,7 +216,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
             <Visualizer 
               telegrams={sortedTelegrams} 
               selectedTargets={selectedVisualizationTargets}
-              onTargetsChange={setSelectedVisualizationTargets}
+              onTargetsChange={onVisualizationTargetsChange}
               onClose={() => setIsVisualizerOpen(false)} 
             />
           ) : telegrams.length === 0 ? (
