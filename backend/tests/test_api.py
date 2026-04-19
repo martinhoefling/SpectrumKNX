@@ -1,3 +1,5 @@
+from datetime import UTC
+
 from fastapi.testclient import TestClient
 
 import knx_daemon
@@ -129,8 +131,8 @@ def test_get_telegrams_delta_no_match():
         app.dependency_overrides.pop(get_db, None)
 
 def test_get_telegrams_delta_with_matches():
-    from datetime import datetime, timezone, timedelta
-    base_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    from datetime import datetime, timedelta
+    base_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=UTC)
 
     # We will mock the DB connection differently: instead of a single mock returning everything,
     # we inspect the SQL query. The real API endpoint does two queries:
