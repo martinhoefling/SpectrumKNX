@@ -7,6 +7,8 @@
 .idea
 *.suo
 *.sln
+*.code-workspace
+.pythonenv
 
 # Dependencies
 node_modules/
