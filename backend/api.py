@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
 from database import get_db
@@ -185,7 +186,6 @@ async def get_filter_options():
         # Sources — from devices (individual addresses)
         devices = knx_daemon.global_knx_project.get("devices", {})
         for addr, data in devices.items():
-            from xknx.telegram.address import IndividualAddress
             try:
                 ia_str = str(IndividualAddress(addr))
             except Exception:
