@@ -41,9 +41,16 @@ if os.path.exists(STATIC_DIR):
     async def serve_spa(full_path: str):
         # If the path looks like a file (has an extension), but wasn't caught by /assets, 
         # it might be a missing file. Otherwise, serve index.html for SPA routing.
-        file_path = os.path.join(STATIC_DIR, full_path)
-        if full_path and os.path.isfile(file_path):
-            return FileResponse(file_path)
+
+        # Security: Resolve absolute paths and verify the requested file is within STATIC_DIR
+        abs_static_dir = os.path.abspath(STATIC_DIR)
+        requested_path = os.path.abspath(os.path.join(abs_static_dir, full_path))
+
+        if full_path and os.path.isfile(requested_path):
+            # Check if the requested path is within the static directory
+            if os.path.commonpath([abs_static_dir, requested_path]) == abs_static_dir:
+                return FileResponse(requested_path)
+
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 else:
     @app.get("/")
