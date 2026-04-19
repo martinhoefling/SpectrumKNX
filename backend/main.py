@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from api import router as api_router
 from database import engine
 from knx_daemon import knx_shutdown, knx_startup
+from security import is_safe_path
 
 
 @asynccontextmanager
@@ -41,9 +42,11 @@ if os.path.exists(STATIC_DIR):
     async def serve_spa(full_path: str):
         # If the path looks like a file (has an extension), but wasn't caught by /assets, 
         # it might be a missing file. Otherwise, serve index.html for SPA routing.
-        file_path = os.path.join(STATIC_DIR, full_path)
-        if full_path and os.path.isfile(file_path):
-            return FileResponse(file_path)
+        requested_path = os.path.join(STATIC_DIR, full_path)
+        if full_path and os.path.isfile(requested_path):
+            if is_safe_path(STATIC_DIR, full_path):
+                return FileResponse(requested_path)
+
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 else:
     @app.get("/")
