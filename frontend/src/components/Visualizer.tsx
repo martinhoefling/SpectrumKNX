@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef } from 'react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { VisualizerSidebar } from './VisualizerSidebar';
 import { useChartData } from '../hooks/useChartData';
@@ -7,11 +7,12 @@ import { Download } from 'lucide-react';
 
 interface VisualizerProps {
   telegrams: Telegram[];
+  selectedTargets: string[];
+  onTargetsChange: (targets: string[]) => void;
   onClose: () => void;
 }
 
-export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, onClose }) => {
-  const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
+export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTargets, onTargetsChange, onClose }) => {
   
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
@@ -32,7 +33,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, onClose }) =>
         <VisualizerSidebar
           telegrams={telegrams}
           selectedTargets={selectedTargets}
-          onTargetsChange={setSelectedTargets}
+          onTargetsChange={onTargetsChange}
           onClose={onClose}
         />
 

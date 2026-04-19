@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart } from 'lucide-react';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
 
@@ -16,6 +16,8 @@ interface TelegramTableProps {
   visibleColumns: { [key: string]: boolean };
   sortConfig: SortConfig;
   onSort: (key: SortKey) => void;
+  onQuickFilter: (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => void;
+  onQuickVisualize: (targetAddress: string) => void;
 }
 
 const getTypeColor = (type?: string | null) => {
@@ -34,7 +36,9 @@ const getDPTColor = (dpt_main: number | null) => {
   return 'var(--dpt-unknown, #6b7280)';
 };
 
-export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visibleColumns, sortConfig, onSort }) => {
+export const TelegramTable: React.FC<TelegramTableProps> = ({ 
+  telegrams, visibleColumns, sortConfig, onSort, onQuickFilter, onQuickVisualize 
+}) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
   // Compute time deltas between consecutive rows (by visual order)
@@ -211,9 +215,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visible
                   </div>
 
                   {/* Source + Name subtitle */}
-                  <div style={{ padding: cellPadding }}>
-                    <div className="mono-addr highlight" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
-                      {t.source_address}
+                  <div style={{ padding: cellPadding }} className="filterable-cell">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <div className="mono-addr highlight" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                        {t.source_address}
+                      </div>
+                      <button 
+                        className="quick-filter-btn" 
+                        onClick={(e) => { e.stopPropagation(); onQuickFilter('sources', t.source_address); }}
+                        title="Toggle source filter"
+                      >
+                        <Filter size={12} />
+                      </button>
                     </div>
                     {visibleColumns.sourceName && (
                       <div className="subtitle-name" style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -223,9 +236,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visible
                   </div>
 
                   {/* Target + Name subtitle */}
-                  <div style={{ padding: cellPadding }}>
-                    <div className="mono-addr highlight-target" style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
-                      {t.target_address}
+                  <div style={{ padding: cellPadding }} className="filterable-cell">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <div className="mono-addr highlight-target" style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
+                        {t.target_address}
+                      </div>
+                      <button 
+                        className="quick-filter-btn" 
+                        onClick={(e) => { e.stopPropagation(); onQuickFilter('targets', t.target_address); }}
+                        title="Toggle target filter"
+                      >
+                        <Filter size={12} />
+                      </button>
                     </div>
                     {visibleColumns.targetName && (
                       <div className="subtitle-name" style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -236,9 +258,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visible
 
                   {/* Type */}
                   {visibleColumns.type && (
-                    <div style={{ padding: cellPadding }}>
-                      <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
-                        {t.simplified_type || t.telegram_type}
+                    <div style={{ padding: cellPadding }} className="filterable-cell">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                          {t.simplified_type || t.telegram_type}
+                        </div>
+                        <button 
+                          className="quick-filter-btn" 
+                          onClick={(e) => { e.stopPropagation(); onQuickFilter('types', t.simplified_type || t.telegram_type); }}
+                          title="Toggle type filter"
+                        >
+                          <Filter size={12} />
+                        </button>
                       </div>
                       <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
                     </div>
@@ -246,23 +277,38 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visible
 
                   {/* DPT */}
                   {visibleColumns.dpt && (
-                    <div style={{ padding: cellPadding }}>
-                      {t.dpt_name ? (
+                    <div style={{ padding: cellPadding }} className="filterable-cell">
+                      {t.dpt_name && t.dpt_main != null ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{t.dpt_name}</span>
+                          <button 
+                            className="quick-filter-btn" 
+                            onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', t.dpt_main); }}
+                            title="Toggle DPT filter"
+                          >
+                            <Filter size={12} />
+                          </button>
                         </div>
                       ) : '-'}
                     </div>
                   )}
 
                   {/* Value + Raw hex subtitle */}
-                  <div style={{ padding: cellPadding }}>
+                  <div style={{ padding: cellPadding }} className="filterable-cell">
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.9375rem', wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: 1.2 }}>
                         {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '-')}
                       </span>
                       {t.unit && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500 }}>{t.unit}</span>}
+                      
+                      <button 
+                        className="quick-visualize-btn" 
+                        onClick={(e) => { e.stopPropagation(); onQuickVisualize(t.target_address); }}
+                        title="Visualize this target"
+                      >
+                        <LineChart size={14} />
+                      </button>
                     </div>
                     {visibleColumns.data && t.raw_hex && (
                       <div className="raw-badge" style={{ marginTop: '0.4rem', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.65rem', color: 'var(--text-dim)', display: 'inline-block', fontFamily: 'var(--font-mono)' }}>
@@ -279,3 +325,38 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({ telegrams, visible
     </div>
   );
 };
+
+// Add styles for quick filter buttons
+const style = document.createElement('style');
+style.textContent = `
+  .quick-filter-btn, .quick-visualize-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-dim);
+    padding: 0.2rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.2s;
+  }
+  
+  .log-row:hover .quick-filter-btn,
+  .log-row:hover .quick-visualize-btn {
+    opacity: 0.6;
+  }
+  
+  .quick-filter-btn:hover, .quick-visualize-btn:hover {
+    opacity: 1 !important;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--accent-primary);
+    transform: scale(1.1);
+  }
+
+  .quick-visualize-btn:hover {
+    color: #10b981;
+  }
+`;
+document.head.appendChild(style);

@@ -129,6 +129,7 @@ function App() {
   const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getCookie('rateMode') as 's' | 'm' | 'h') || 's');
 
   const [isHistoryLoaderOpen, setIsHistoryLoaderOpen] = useState(false);
+  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>([]);
 
   // ── Live State ──────────────────────────────────────────────────────────────
   const [liveTelegrams, setLiveTelegrams] = useState<Telegram[]>([]);
@@ -237,6 +238,25 @@ function App() {
       key,
       direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
     }));
+  };
+
+  const handleQuickFilter = (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => {
+    setActiveFilters(prev => {
+      const current = prev[key] as (string | number)[];
+      const isPresent = current.includes(value as never);
+      return {
+        ...prev,
+        [key]: isPresent ? current.filter(v => v !== value) : [...current, value]
+      };
+    });
+  };
+
+  const handleQuickVisualize = (targetAddress: string) => {
+    setSelectedVisualizationTargets(prev => 
+      prev.includes(targetAddress) ? prev : [...prev, targetAddress]
+    );
+    setIsVisualizerOpen(true);
+    setIsFilterOpen(false);
   };
 
   const sortedLiveTelegrams = useMemo(() => {
@@ -488,13 +508,20 @@ function App() {
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {isVisualizerOpen ? (
-                  <Visualizer telegrams={filteredLiveTelegrams} onClose={() => setIsVisualizerOpen(false)} />
+                  <Visualizer 
+                    telegrams={filteredLiveTelegrams} 
+                    selectedTargets={selectedVisualizationTargets}
+                    onTargetsChange={setSelectedVisualizationTargets}
+                    onClose={() => setIsVisualizerOpen(false)} 
+                  />
                 ) : (
                   <TelegramTable
                     telegrams={filteredLiveTelegrams}
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
                     onSort={handleSort}
+                    onQuickFilter={handleQuickFilter}
+                    onQuickVisualize={handleQuickVisualize}
                   />
                 )}
               </div>
