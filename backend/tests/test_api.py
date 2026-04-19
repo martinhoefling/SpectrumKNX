@@ -106,3 +106,105 @@ def test_get_telegrams():
     assert len(data["telegrams"]) == 1
     assert data["telegrams"][0]["source_address"] == "1.1.1"
     assert data["telegrams"][0]["raw_data"] == "01" 
+
+def test_get_telegrams_delta_no_match():
+    # If delta search matches no core rows, it returns empty
+    async def override_db_no_match():
+        class MockResult:
+            def fetchall(self):
+                return []
+        class MockSession:
+            async def execute(self, query):
+                return MockResult()
+        yield MockSession()
+
+    app.dependency_overrides[get_db] = override_db_no_match
+    try:
+        response = client.get("/api/telegrams?delta_before_ms=100&source_address=9.9.9")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["telegrams"] == []
+        assert data["metadata"]["total_count"] == 0
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+def test_get_telegrams_delta_with_matches():
+    from datetime import datetime, timezone, timedelta
+    base_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    # We will mock the DB connection differently: instead of a single mock returning everything,
+    # we inspect the SQL query. The real API endpoint does two queries:
+    # 1. Fetching the matching timestamps
+    # 2. Context query with bounds min_ts - before and max_ts + after
+    async def override_db_matches():
+        class MockMappings:
+            def all(self):
+                return [
+                    {
+                        "timestamp": base_time - timedelta(milliseconds=50),
+                        "source_address": "1.1.2",
+                        "target_address": "1/2/4",
+                        "telegram_type": "GroupValueRead",
+                        "dpt": "1.001",
+                        "dpt_main": 1,
+                        "dpt_sub": 1,
+                        "raw_data": b"\x00",
+                        "value_numeric": 0.0,
+                        "value_json": None
+                    },
+                    {
+                        "timestamp": base_time,
+                        "source_address": "1.1.1",
+                        "target_address": "1/2/3",
+                        "telegram_type": "GroupValueWrite",
+                        "dpt": "1.001",
+                        "dpt_main": 1,
+                        "dpt_sub": 1,
+                        "raw_data": b"\x01",
+                        "value_numeric": 1.0,
+                        "value_json": None
+                    },
+                    {
+                        "timestamp": base_time + timedelta(milliseconds=150),
+                        "source_address": "1.1.3",
+                        "target_address": "1/2/5",
+                        "telegram_type": "GroupValueResponse",
+                        "dpt": "1.001",
+                        "dpt_main": 1,
+                        "dpt_sub": 1,
+                        "raw_data": b"\x01",
+                        "value_numeric": 1.0,
+                        "value_json": None
+                    }
+                ]
+        class MockResultContext:
+            def mappings(self):
+                return MockMappings()
+
+        class MockResultTs:
+            def fetchall(self):
+                return [(base_time,)]
+
+        class MockSession:
+            async def execute(self, query):
+                query_str = str(query)
+                # Ensure we only return MockResultTs when it's just selecting the timestamp
+                if "SELECT telegrams.timestamp \nFROM telegrams" in query_str:
+                    return MockResultTs()
+                # Otherwise it's the context query
+                return MockResultContext()
+        yield MockSession()
+
+    app.dependency_overrides[get_db] = override_db_matches
+    try:
+        response = client.get("/api/telegrams?delta_before_ms=100&delta_after_ms=100&source_address=1.1.1")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["telegrams"]) == 2
+        assert data["metadata"]["total_count"] == 2
+        sources = [t["source_address"] for t in data["telegrams"]]
+        assert "1.1.1" in sources
+        assert "1.1.2" in sources
+        assert "1.1.3" not in sources
+    finally:
+        app.dependency_overrides.pop(get_db, None)
