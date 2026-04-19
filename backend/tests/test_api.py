@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi.testclient import TestClient
 
 import knx_daemon
@@ -65,6 +67,8 @@ def test_get_filter_options_with_project():
     assert data["dpts"][1]["sub"] is None
 
 # Mock Database Dependency
+
+
 async def override_get_db():
     class MockResult:
         def mappings(self):
@@ -72,7 +76,7 @@ async def override_get_db():
                 def all(self):
                     return [
                         {
-                            "timestamp": "2023-01-01T00:00:00Z", 
+                            "timestamp": datetime(2023, 1, 1),
                             "source_address": "1.1.1", 
                             "target_address": "1/2/3",
                             "telegram_type": "GroupValueWrite",
@@ -85,6 +89,8 @@ async def override_get_db():
                         }
                     ]
             return MockMappings()
+        def fetchall(self):
+            return [[datetime(2023, 1, 1)]]
 
     class MockSession:
         async def execute(self, query):
@@ -106,3 +112,79 @@ def test_get_telegrams():
     assert len(data["telegrams"]) == 1
     assert data["telegrams"][0]["source_address"] == "1.1.1"
     assert data["telegrams"][0]["raw_data"] == "01" 
+
+def test_get_filter_options_invalid_device_address():
+    knx_daemon.global_knx_project = {
+        "devices": {
+            "invalid_address": {"name": "Broken Device"},
+        },
+        "group_addresses": {}
+    }
+    response = client.get("/api/filter-options")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["sources"]) == 1
+    assert data["sources"][0]["address"] == "invalid_address"
+    assert data["sources"][0]["name"] == "Broken Device"
+
+def test_get_filter_options_dpt_deduplication():
+    knx_daemon.global_knx_project = {
+        "devices": {},
+        "group_addresses": {
+            "1/2/3": {"name": "Test GA 1", "dpt": {"main": 1, "sub": 1}},
+            "1/2/4": {"name": "Test GA 2", "dpt": {"main": 1, "sub": 1}},
+            "1/2/5": {"name": "Test GA 3", "dpt": {"main": 9}},
+            "1/2/6": {"name": "Test GA 4", "dpt": {"main": 9}},
+        }
+    }
+    response = client.get("/api/filter-options")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["dpts"]) == 2
+    # Ensure they are sorted and deduplicated
+    assert data["dpts"][0]["main"] == 1
+    assert data["dpts"][0]["sub"] == 1
+    assert data["dpts"][1]["main"] == 9
+    assert data["dpts"][1]["sub"] is None
+
+def test_get_telegrams_extended_filters():
+    # Test with dpt_main, start_time, and end_time
+    response = client.get("/api/telegrams?limit=10&dpt_main=1,9&start_time=2023-01-01T00:00:00Z&end_time=2023-12-31T23:59:59Z")
+    assert response.status_code == 200
+    data = response.json()
+    assert "telegrams" in data
+    # Ensure our mock returns the 1 item
+    assert len(data["telegrams"]) == 1
+
+def test_get_telegrams_with_delta():
+    # Test with delta_before_ms and delta_after_ms
+    response = client.get("/api/telegrams?limit=10&source_address=1.1.1&delta_before_ms=5000&delta_after_ms=5000")
+    assert response.status_code == 200
+    data = response.json()
+    assert "telegrams" in data
+    # The mock returns 1 item, so it should be included
+    assert len(data["telegrams"]) == 1
+    assert data["metadata"]["total_count"] == 1
+
+def test_get_telegrams_with_delta_no_match():
+    # If fetchall returns empty, we return empty list
+    class EmptyMockResult:
+        def fetchall(self):
+            return []
+
+    class EmptyMockSession:
+        async def execute(self, query):
+            return EmptyMockResult()
+
+    app.dependency_overrides[get_db] = lambda: EmptyMockSession()
+
+    response = client.get("/api/telegrams?limit=10&source_address=1.1.1&delta_before_ms=5000&delta_after_ms=5000")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["telegrams"]) == 0
+    assert data["metadata"]["total_count"] == 0
+
+    # Restore override
+    app.dependency_overrides[get_db] = override_get_db
