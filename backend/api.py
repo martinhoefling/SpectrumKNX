@@ -130,8 +130,7 @@ async def get_telegrams(
         def is_in_delta(row_ts):
             ts = row_ts.replace(tzinfo=None) if hasattr(row_ts, 'tzinfo') and row_ts.tzinfo else row_ts
             for mts in matching_ts_set:
-                mts_naive = mts.replace(tzinfo=None) if hasattr(mts, 'tzinfo') and mts.tzinfo else mts
-                diff_ms = (ts - mts_naive).total_seconds() * 1000
+                diff_ms = (ts - mts).total_seconds() * 1000
                 # Row is within window if it is at most delta_before_ms before OR delta_after_ms after
                 if -delta_before_ms <= diff_ms <= delta_after_ms:
                     return True
