@@ -17,9 +17,12 @@ interface HistorySearchProps {
   filterOptions: FilterOptions;
   activeFilters: ActiveFilters;
   onFiltersChange: (f: ActiveFilters) => void;
+  onOpenSettings: () => void;
 }
 
-export const HistorySearch: React.FC<HistorySearchProps> = ({ visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange }) => {
+export const HistorySearch: React.FC<HistorySearchProps> = ({ 
+  visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings 
+}) => {
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
   const [metadata, setMetadata] = useState<{ total_count: number; limit_reached: boolean } | null>(null);
@@ -71,7 +74,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({ visibleColumns, lo
         seenNew.add(t.timestamp);
         return true;
       });
-      return [...prev, ...deduped];
+      const next = [...prev, ...deduped];
+      return next.length > loadLimit ? next.slice(0, loadLimit) : next;
     });
     setMetadata(meta || null);
   };
@@ -97,7 +101,11 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({ visibleColumns, lo
             </span>
           )}
           {metadata?.limit_reached && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24' }}>
+            <span 
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              onClick={onOpenSettings}
+              title={`Limit reached (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
+            >
               <AlertTriangle size={13} /> Limit reached
             </span>
           )}
@@ -182,7 +190,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({ visibleColumns, lo
         </div>
 
         {/* Table/Chart area */}
-        <div style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
           {isVisualizerOpen && telegrams.length > 0 ? (
             <Visualizer telegrams={sortedTelegrams} onClose={() => setIsVisualizerOpen(false)} />
           ) : telegrams.length === 0 ? (
