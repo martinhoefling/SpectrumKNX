@@ -112,13 +112,19 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
     axes: [
       {
         space: 50,
-        stroke: 'var(--text-dim)',
+        stroke: '#94a3b8',
         grid: { stroke: 'rgba(255,255,255,0.05)' },
         values: (_u, splits) => splits.map(v => 
           new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
         )
       },
-      { show: false } // Hide Y axis
+      {
+        show: true,
+        stroke: '#94a3b8',
+        grid: { stroke: 'rgba(255,255,255,0.05)' },
+        size: 1, // Minimal size just to show the line
+        values: () => [] // No labels needed since they are on the right
+      }
     ],
     series: [
       {

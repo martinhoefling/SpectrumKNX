@@ -106,17 +106,20 @@ code, pre {
   overflow: hidden;
 }
 
-/* uPlot white background override */
+/* Custom uPlot styles for dark mode transparency */
 .uplot {
-  background: white !important;
-  color: black !important;
-  border-radius: 6px;
-  overflow: hidden;
+  background: transparent !important;
+  border-radius: 8px;
 }
-.uplot .u-title { color: black !important; }
-.uplot .u-axis text { fill: black !important; }
-.uplot .u-legend { color: black !important; }
-.uplot .u-legend th, .uplot .u-legend td { color: black !important; }
+
+.u-legend {
+  font-size: 11px !important;
+  color: var(--text-dim) !important;
+}
+
+.u-legend .u-label {
+  color: var(--text-main) !important;
+}
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
