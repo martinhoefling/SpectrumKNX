@@ -46,6 +46,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       ...activeFilters,
       [key]: isPresent ? current.filter(v => v !== value) : [...current, value]
     });
+    setIsFilterOpen(true);
   };
 
   const handleQuickVisualize = (targetAddress: string) => {
@@ -246,6 +247,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               visibleColumns={visibleColumns}
               sortConfig={sortConfig}
               onSort={handleSort}
+              activeFilters={activeFilters}
               onQuickFilter={handleQuickFilter}
               onQuickVisualize={handleQuickVisualize}
             />
