@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const backendUrl = env.VITE_BACKEND_URL || 'http://localhost:8000';
   const wsBackendUrl = backendUrl.replace(/^http/, 'ws');
-  const appVersion = process.env.VITE_APP_VERSION || gitVersion;
+  const appVersion = process.env.VITE_APP_VERSION || env.VITE_APP_VERSION || gitVersion;
 
   return {
     define: {

@@ -19,8 +19,7 @@ from ws_manager import manager
 
 router = APIRouter()
 
-@router.get("/api/version")
-async def get_version():
+def get_backend_version() -> str:
     """Returns the backend version from ENV or git"""
     version = os.getenv("APP_VERSION", "")
     if not version or version == "dev":
@@ -33,7 +32,12 @@ async def get_version():
             ).strip()
         except Exception:
             version = "dev"
-    return {"version": version}
+    return version
+
+@router.get("/api/version")
+async def get_version():
+    """Returns the backend version from ENV or git"""
+    return {"version": get_backend_version()}
 
 
 def _build_telegram_response(rows) -> list:

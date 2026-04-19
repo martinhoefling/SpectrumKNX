@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -6,15 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from api import get_backend_version
 from api import router as api_router
 from database import engine
 from knx_daemon import knx_shutdown, knx_startup
 from security import is_safe_path
 
+logger = logging.getLogger("uvicorn.error")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    version = get_backend_version()
+    logger.info(f"Starting Spectrum KNX Backend (Version: {version})")
     await knx_startup()
     yield
     # Shutdown
