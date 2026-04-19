@@ -3,6 +3,7 @@ import type { Telegram } from '../hooks/useWebSocket';
 import { VisualizerSidebar } from './VisualizerSidebar';
 import { useChartData } from '../hooks/useChartData';
 import { MixedChart } from './MixedChart';
+import { TimelineChart } from './TimelineChart';
 import { Download } from 'lucide-react';
 
 interface VisualizerProps {
@@ -63,7 +64,11 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
           
           <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
             {buckets.map(b => (
-              <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+              b.isBinary ? (
+                <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+              ) : (
+                <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+              )
             ))}
             
             {buckets.length === 0 && selectedTargets.length > 0 && (

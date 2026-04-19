@@ -83,6 +83,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
         space: 50,
         grid: { stroke: 'rgba(0,0,0,0.1)', width: 1 },
         stroke: 'var(--bg-dark)',
+        values: (_u, splits) => splits.map(v => 
+          new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+        )
       },
       {
         grid: { stroke: 'rgba(0,0,0,0.1)', width: 1 },
@@ -94,7 +97,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
     ],
     series: [
       {
-        value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString()
+        value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
       },
       ...series.map((s, idx) => ({
         label: s.name,
@@ -106,7 +109,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
         points: { show: false }, // Hide explicit dots for performance/cleanliness
         value: (_u: uPlot, v: number | null) => {
           if (v === null) return '-';
-          if (isBinary) return v === 1 ? 'Ein' : 'Aus';
+          if (isBinary) return v === 1 ? 'On' : 'Off';
           return v + ' ' + unit;
         }
       }))

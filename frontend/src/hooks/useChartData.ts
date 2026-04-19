@@ -90,10 +90,9 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
             } else if (val === null && typeof match.value_json === 'number') {
               val = match.value_json;
             }
-            lastVal = val !== null ? Number(val) : null;
-            return lastVal;
+            if (val !== null) lastVal = Number(val);
           }
-          return null; // Return null to indicate missing value (uPlot can gap-fill later)
+          return lastVal;
         });
 
         return { address: addr, name, data };
