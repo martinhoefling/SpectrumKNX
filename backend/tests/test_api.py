@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi.testclient import TestClient
 
 import knx_daemon
@@ -65,7 +67,7 @@ def test_get_filter_options_with_project():
     assert data["dpts"][1]["sub"] is None
 
 # Mock Database Dependency
-from datetime import datetime
+
 
 async def override_get_db():
     class MockResult:
