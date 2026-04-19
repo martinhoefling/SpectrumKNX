@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, ChevronDown, AlertTriangle } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { HistoryLoader } from './components/HistoryLoader';
 import { HistorySearch } from './components/HistorySearch';
@@ -170,12 +170,15 @@ function App() {
     }
 
     if (!isPaused) {
-      setLiveTelegrams(prev => [t, ...prev].slice(0, 1000));
+      setLiveTelegrams(prev => {
+        const next = [t, ...prev];
+        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
+      });
     } else {
       bufferRef.current.push(t);
       setBufferedCount(prev => prev + 1);
     }
-  }, [isPaused]);
+  }, [isPaused, loadLimit]);
 
   const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/telegrams`;
   const { isConnected } = useWebSocket(wsUrl, handleTelegram);
@@ -205,7 +208,10 @@ function App() {
   // ── Pause / Resume ──────────────────────────────────────────────────────────
   const togglePause = () => {
     if (isPaused) {
-      setLiveTelegrams(prev => [...bufferRef.current, ...prev].slice(0, 5000));
+      setLiveTelegrams(prev => {
+        const next = [...bufferRef.current, ...prev];
+        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
+      });
       bufferRef.current = [];
       setBufferedCount(0);
     }
@@ -219,7 +225,8 @@ function App() {
     setLiveTelegrams(prev => {
       const existingTs = new Set(prev.map(t => t.timestamp));
       const deduped = newTelegrams.filter(t => !existingTs.has(t.timestamp));
-      return [...deduped, ...prev].slice(0, 5000);
+      const next = [...deduped, ...prev];
+      return next.length > loadLimit ? next.slice(0, loadLimit) : next;
     });
   };
 
@@ -364,6 +371,15 @@ function App() {
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     WS: <span style={{ color: isConnected ? 'var(--success)' : 'var(--error)', fontWeight: 500 }}>{isConnected ? 'Active' : 'Offline'}</span>
                   </span>
+                  {filteredLiveTelegrams.length >= loadLimit && (
+                    <span 
+                      style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#fbbf24', cursor: 'pointer' }}
+                      onClick={() => setIsSettingsOpen(true)}
+                      title={`Buffer full (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
+                    >
+                      <AlertTriangle size={13} /> Limit reached
+                    </span>
+                  )}
                 </div>
                 
                 <button
@@ -491,6 +507,7 @@ function App() {
             filterOptions={filterOptions}
             activeFilters={activeFilters}
             onFiltersChange={setActiveFilters}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
         )}
       </main>
