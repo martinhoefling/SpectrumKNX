@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: spectrumknx-timescale
+  labels:
+    app: spectrumknx-timescale
+spec:
+  capacity:
+    storage: 10Gi # Adjusted to a more common default
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  # Replace with your actual storage provider (e.g. hostPath, local, nfs, or cloud provider disk)
+  hostPath:
+    path: /mnt/data/timescaledb

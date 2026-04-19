@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: spectrumknx-knxproj
+  labels:
+    app: spectrumknx-knxproj
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  # Replace with your actual storage provider
+  hostPath:
+    path: /mnt/data/knxproj

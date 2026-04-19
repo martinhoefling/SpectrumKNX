@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spectrumknx
+  annotations:
+    # Use your preferred ingress controller class (e.g. nginx, traefik)
+    kubernetes.io/ingress.class: "traefik"
+spec:
+  rules:
+    - host: spectrumknx.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spectrumknx
+                port:
+                  number: 80
