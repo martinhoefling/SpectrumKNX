@@ -1,5 +1,4 @@
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -114,6 +113,51 @@ def test_get_telegrams():
     assert data["telegrams"][0]["source_address"] == "1.1.1"
     assert data["telegrams"][0]["raw_data"] == "01" 
 
+def test_get_filter_options_invalid_device_address():
+    knx_daemon.global_knx_project = {
+        "devices": {
+            "invalid_address": {"name": "Broken Device"},
+        },
+        "group_addresses": {}
+    }
+    response = client.get("/api/filter-options")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["sources"]) == 1
+    assert data["sources"][0]["address"] == "invalid_address"
+    assert data["sources"][0]["name"] == "Broken Device"
+
+def test_get_filter_options_dpt_deduplication():
+    knx_daemon.global_knx_project = {
+        "devices": {},
+        "group_addresses": {
+            "1/2/3": {"name": "Test GA 1", "dpt": {"main": 1, "sub": 1}},
+            "1/2/4": {"name": "Test GA 2", "dpt": {"main": 1, "sub": 1}},
+            "1/2/5": {"name": "Test GA 3", "dpt": {"main": 9}},
+            "1/2/6": {"name": "Test GA 4", "dpt": {"main": 9}},
+        }
+    }
+    response = client.get("/api/filter-options")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["dpts"]) == 2
+    # Ensure they are sorted and deduplicated
+    assert data["dpts"][0]["main"] == 1
+    assert data["dpts"][0]["sub"] == 1
+    assert data["dpts"][1]["main"] == 9
+    assert data["dpts"][1]["sub"] is None
+
+def test_get_telegrams_extended_filters():
+    # Test with dpt_main, start_time, and end_time
+    response = client.get("/api/telegrams?limit=10&dpt_main=1,9&start_time=2023-01-01T00:00:00Z&end_time=2023-12-31T23:59:59Z")
+    assert response.status_code == 200
+    data = response.json()
+    assert "telegrams" in data
+    # Ensure our mock returns the 1 item
+    assert len(data["telegrams"]) == 1
+
 def test_get_telegrams_delta_no_match():
     # If delta search matches no core rows, it returns empty
     async def override_db_no_match():
@@ -215,78 +259,3 @@ def test_get_telegrams_delta_with_matches():
         assert "1.1.3" not in sources
     finally:
         app.dependency_overrides.pop(get_db, None)
-def test_get_filter_options_invalid_device_address():
-    knx_daemon.global_knx_project = {
-        "devices": {
-            "invalid_address": {"name": "Broken Device"},
-        },
-        "group_addresses": {}
-    }
-    response = client.get("/api/filter-options")
-    assert response.status_code == 200
-    data = response.json()
-
-    assert len(data["sources"]) == 1
-    assert data["sources"][0]["address"] == "invalid_address"
-    assert data["sources"][0]["name"] == "Broken Device"
-
-def test_get_filter_options_dpt_deduplication():
-    knx_daemon.global_knx_project = {
-        "devices": {},
-        "group_addresses": {
-            "1/2/3": {"name": "Test GA 1", "dpt": {"main": 1, "sub": 1}},
-            "1/2/4": {"name": "Test GA 2", "dpt": {"main": 1, "sub": 1}},
-            "1/2/5": {"name": "Test GA 3", "dpt": {"main": 9}},
-            "1/2/6": {"name": "Test GA 4", "dpt": {"main": 9}},
-        }
-    }
-    response = client.get("/api/filter-options")
-    assert response.status_code == 200
-    data = response.json()
-
-    assert len(data["dpts"]) == 2
-    # Ensure they are sorted and deduplicated
-    assert data["dpts"][0]["main"] == 1
-    assert data["dpts"][0]["sub"] == 1
-    assert data["dpts"][1]["main"] == 9
-    assert data["dpts"][1]["sub"] is None
-
-def test_get_telegrams_extended_filters():
-    # Test with dpt_main, start_time, and end_time
-    response = client.get("/api/telegrams?limit=10&dpt_main=1,9&start_time=2023-01-01T00:00:00Z&end_time=2023-12-31T23:59:59Z")
-    assert response.status_code == 200
-    data = response.json()
-    assert "telegrams" in data
-    # Ensure our mock returns the 1 item
-    assert len(data["telegrams"]) == 1
-
-def test_get_telegrams_with_delta():
-    # Test with delta_before_ms and delta_after_ms
-    response = client.get("/api/telegrams?limit=10&source_address=1.1.1&delta_before_ms=5000&delta_after_ms=5000")
-    assert response.status_code == 200
-    data = response.json()
-    assert "telegrams" in data
-    # The mock returns 1 item, so it should be included
-    assert len(data["telegrams"]) == 1
-    assert data["metadata"]["total_count"] == 1
-
-def test_get_telegrams_with_delta_no_match():
-    # If fetchall returns empty, we return empty list
-    class EmptyMockResult:
-        def fetchall(self):
-            return []
-
-    class EmptyMockSession:
-        async def execute(self, query):
-            return EmptyMockResult()
-
-    app.dependency_overrides[get_db] = lambda: EmptyMockSession()
-
-    response = client.get("/api/telegrams?limit=10&source_address=1.1.1&delta_before_ms=5000&delta_after_ms=5000")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["telegrams"]) == 0
-    assert data["metadata"]["total_count"] == 0
-
-    # Restore override
-    app.dependency_overrides[get_db] = override_get_db
