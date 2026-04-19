@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { X, Clock, Database, AlertCircle, CheckCircle2, Calendar, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { ActiveFilters } from '../types/filters';
@@ -55,7 +55,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
 
-  const doFetch = async (url: string) => {
+  const doFetch = useCallback(async (url: string) => {
     setIsLoading(true);
     setError(null);
     setStatus('loading');
@@ -76,26 +76,26 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [limit, filters, onLoad, onClose]);
 
-  const loadRelative = (seconds: number) => {
+  const handleLoadRelative = useCallback((seconds: number) => {
     const start = new Date(Date.now() - seconds * 1000).toISOString();
     const base = `/api/telegrams?limit=${limit}&start_time=${encodeURIComponent(start)}`;
     doFetch(applyFilterParams(base, filters));
-  };
+  }, [limit, filters, doFetch]);
 
-  const loadCustomRelative = () => {
+  const handleLoadCustomRelative = useCallback(() => {
     if (!relValue || relValue <= 0) { setError('Enter a positive value.'); return; }
-    loadRelative(relValue * UNIT_TO_SECONDS[relUnit]);
-  };
+    handleLoadRelative(relValue * UNIT_TO_SECONDS[relUnit]);
+  }, [relValue, relUnit, handleLoadRelative]);
 
-  const loadCustomAbsolute = () => {
+  const handleLoadCustomAbsolute = useCallback(() => {
     if (!startTime && !endTime) { setError('Enter at least a start or end time.'); return; }
     let url = `/api/telegrams?limit=${limit}`;
     if (startTime) url += `&start_time=${encodeURIComponent(startTime + ':00Z')}`;
     if (endTime) url += `&end_time=${encodeURIComponent(endTime + ':00Z')}`;
     doFetch(applyFilterParams(url, filters));
-  };
+  }, [limit, startTime, endTime, filters, doFetch]);
 
   return (
     <div className="modal-overlay">
@@ -149,7 +149,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
             ['24 h',   24 * 3600],
             ['7 d',    7 * 86400],
           ] as [string, number][]).map(([label, secs]) => (
-            <button key={label} className="quick-load-btn" onClick={() => loadRelative(secs)} disabled={isLoading}>
+            <button key={label} className="quick-load-btn" onClick={() => handleLoadRelative(secs)} disabled={isLoading}>
               {label}
             </button>
           ))}
@@ -179,7 +179,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
           </select>
           <button
             className="quick-load-btn"
-            onClick={loadCustomRelative}
+            onClick={handleLoadCustomRelative}
             disabled={isLoading}
             style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 1rem' }}
           >
@@ -207,7 +207,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
             </div>
             <button
               className="search-submit-btn"
-              onClick={loadCustomAbsolute}
+              onClick={handleLoadCustomAbsolute}
               disabled={isLoading}
               style={{ width: '100%', marginBottom: '1.25rem' }}
             >
