@@ -1,10 +1,18 @@
 from parsers import (
     convert_value_for_db,
     format_dpt_name,
+    get_simplified_type,
     parse_telegram_dpt,
     parse_telegram_payload,
 )
 
+
+def test_get_simplified_type():
+    assert get_simplified_type("GroupValueWrite") == "Write"
+    assert get_simplified_type("GroupValueRead") == "Read"
+    assert get_simplified_type("GroupValueResponse") == "Response"
+    assert get_simplified_type("UnknownType") == "UnknownType"
+    assert get_simplified_type("") == ""
 
 def test_convert_value_for_db_basic_types():
     assert convert_value_for_db(22.5) == 22.5
