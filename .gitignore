@@ -6,6 +6,8 @@
 *.njsproj
 *.sln
 *.sw?
+*.code-workspace
+.pythonenv
 
 # Environments
 .env
