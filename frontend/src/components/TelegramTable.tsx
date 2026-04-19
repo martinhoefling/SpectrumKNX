@@ -2,7 +2,8 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, X } from 'lucide-react';
+import type { ActiveFilters } from '../types/filters';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
 
@@ -16,6 +17,7 @@ interface TelegramTableProps {
   visibleColumns: { [key: string]: boolean };
   sortConfig: SortConfig;
   onSort: (key: SortKey) => void;
+  activeFilters: ActiveFilters;
   onQuickFilter: (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => void;
   onQuickVisualize: (targetAddress: string) => void;
 }
@@ -37,7 +39,7 @@ const getDPTColor = (dpt_main: number | null) => {
 };
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({ 
-  telegrams, visibleColumns, sortConfig, onSort, onQuickFilter, onQuickVisualize 
+  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize 
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -93,12 +95,12 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
   // Unified grid layout configuration - shared between header and rows
   const gridTemplate = [
-    '120px', // Time (slightly more compact)
-    '180px', // Source
-    '220px', // Target
-    visibleColumns.type ? '100px' : null,
-    visibleColumns.dpt ? '130px' : null,
-    'minmax(200px, 1fr)', // Value
+    '125px', // Time
+    '190px', // Source
+    '230px', // Target
+    visibleColumns.type ? '95px' : null,
+    visibleColumns.dpt ? '150px' : null,
+    'minmax(220px, 1fr)', // Value
   ].filter(Boolean).join(' ');
 
   const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
@@ -215,17 +217,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   </div>
 
                   {/* Source + Name subtitle */}
-                  <div style={{ padding: cellPadding }} className="filterable-cell">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
                       <div className="mono-addr highlight" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
                         {t.source_address}
                       </div>
                       <button 
-                        className="quick-filter-btn" 
+                        className={`quick-filter-btn ${activeFilters.sources.includes(t.source_address) ? 'active' : ''}`} 
                         onClick={(e) => { e.stopPropagation(); onQuickFilter('sources', t.source_address); }}
                         title="Toggle source filter"
                       >
-                        <Filter size={12} />
+                        <Filter className="filter-icon" size={12} />
+                        <X className="cancel-icon" size={12} />
                       </button>
                     </div>
                     {visibleColumns.sourceName && (
@@ -236,17 +239,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   </div>
 
                   {/* Target + Name subtitle */}
-                  <div style={{ padding: cellPadding }} className="filterable-cell">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
                       <div className="mono-addr highlight-target" style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
                         {t.target_address}
                       </div>
                       <button 
-                        className="quick-filter-btn" 
+                        className={`quick-filter-btn ${activeFilters.targets.includes(t.target_address) ? 'active' : ''}`} 
                         onClick={(e) => { e.stopPropagation(); onQuickFilter('targets', t.target_address); }}
                         title="Toggle target filter"
                       >
-                        <Filter size={12} />
+                        <Filter className="filter-icon" size={12} />
+                        <X className="cancel-icon" size={12} />
                       </button>
                     </div>
                     {visibleColumns.targetName && (
@@ -258,17 +262,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
                   {/* Type */}
                   {visibleColumns.type && (
-                    <div style={{ padding: cellPadding }} className="filterable-cell">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
                         <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
                           {t.simplified_type || t.telegram_type}
                         </div>
                         <button 
-                          className="quick-filter-btn" 
+                          className={`quick-filter-btn ${activeFilters.types.includes(t.simplified_type || t.telegram_type) ? 'active' : ''}`} 
                           onClick={(e) => { e.stopPropagation(); onQuickFilter('types', t.simplified_type || t.telegram_type); }}
                           title="Toggle type filter"
                         >
-                          <Filter size={12} />
+                          <Filter className="filter-icon" size={12} />
+                          <X className="cancel-icon" size={12} />
                         </button>
                       </div>
                       <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
@@ -277,17 +282,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
                   {/* DPT */}
                   {visibleColumns.dpt && (
-                    <div style={{ padding: cellPadding }} className="filterable-cell">
+                    <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
                       {t.dpt_name && t.dpt_main != null ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                           <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{t.dpt_name}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
                           <button 
-                            className="quick-filter-btn" 
+                            className={`quick-filter-btn ${activeFilters.dpts.includes(t.dpt_main) ? 'active' : ''}`} 
                             onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', t.dpt_main); }}
                             title="Toggle DPT filter"
                           >
-                            <Filter size={12} />
+                            <Filter className="filter-icon" size={12} />
+                            <X className="cancel-icon" size={12} />
                           </button>
                         </div>
                       ) : '-'}
@@ -341,9 +347,28 @@ style.textContent = `
     justify-content: center;
     opacity: 0;
     transition: all 0.2s;
+    position: relative;
   }
   
-  .log-row:hover .quick-filter-btn,
+  .quick-filter-btn.active {
+    opacity: 1;
+    color: var(--accent-primary);
+  }
+
+  .quick-filter-btn .cancel-icon {
+    display: none;
+  }
+
+  .quick-filter-btn.active:hover .filter-icon {
+    display: none;
+  }
+  
+  .quick-filter-btn.active:hover .cancel-icon {
+    display: block;
+    color: #ef4444; /* red for cancel */
+  }
+
+  .log-row:hover .quick-filter-btn:not(.active),
   .log-row:hover .quick-visualize-btn {
     opacity: 0.6;
   }

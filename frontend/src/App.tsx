@@ -249,6 +249,7 @@ function App() {
         [key]: isPresent ? current.filter(v => v !== value) : [...current, value]
       };
     });
+    setIsFilterOpen(true);
   };
 
   const handleQuickVisualize = (targetAddress: string) => {
@@ -520,6 +521,7 @@ function App() {
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
                     onSort={handleSort}
+                    activeFilters={activeFilters}
                     onQuickFilter={handleQuickFilter}
                     onQuickVisualize={handleQuickVisualize}
                   />

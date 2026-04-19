@@ -51,62 +51,84 @@ interface OptionRowProps {
   checked: boolean;
   count?: number;
   onToggle: () => void;
+  onRemove?: () => void;
 }
 
-export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle }) => (
-  <label style={{
-    display: 'flex', alignItems: 'center', gap: '0.6rem',
-    padding: '0.35rem 0.25rem', cursor: 'pointer', borderRadius: '6px',
-    transition: 'background 0.15s',
+export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: '0.4rem',
+    borderRadius: '6px', transition: 'background 0.15s',
+    paddingRight: '0.25rem'
   }}
     onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
   >
-    {/* Custom checkbox */}
-    <div
-      onClick={onToggle}
-      style={{
-        width: 14, height: 14, flexShrink: 0, borderRadius: 3,
-        border: `1.5px solid ${checked ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-        background: checked ? 'var(--accent-primary)' : 'transparent',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.15s',
-      }}
-    >
-      {checked && (
-        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-          <path d="M1.5 4L3.5 6L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-    </div>
+    <label style={{
+      display: 'flex', alignItems: 'center', gap: '0.6rem',
+      padding: '0.35rem 0.25rem', cursor: 'pointer', flex: 1, minWidth: 0
+    }}>
+      {/* Custom checkbox */}
+      <div
+        onClick={(e) => { e.preventDefault(); onToggle(); }}
+        style={{
+          width: 14, height: 14, flexShrink: 0, borderRadius: 3,
+          border: `1.5px solid ${checked ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+          background: checked ? 'var(--accent-primary)' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all 0.15s',
+        }}
+      >
+        {checked && (
+          <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+            <path d="M1.5 4L3.5 6L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
 
-    {/* Label */}
-    <div style={{ flex: 1, minWidth: 0 }} onClick={onToggle}>
-      <div style={{
-        fontSize: '0.8125rem', color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace",
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{label}</div>
-      {sublabel && (
+      {/* Label */}
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: '0.65rem', color: 'var(--text-dim)',
+          fontSize: '0.8125rem', color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace",
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{sublabel}</div>
-      )}
-    </div>
+        }}>{label}</div>
+        {sublabel && (
+          <div style={{
+            fontSize: '0.65rem', color: 'var(--text-dim)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{sublabel}</div>
+        )}
+      </div>
 
-    {/* Count bubble */}
-    {count !== undefined && (
-      <span style={{
-        fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
-        padding: '0.1rem 0.4rem', borderRadius: '999px',
-        background: count > 0 ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
-        color: count > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
-        border: count > 0 ? '1px solid rgba(99,102,241,0.3)' : '1px solid var(--border-color)',
-      }}>
-        {count}
-      </span>
+      {/* Count bubble */}
+      {count !== undefined && (
+        <span style={{
+          fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
+          padding: '0.1rem 0.4rem', borderRadius: '999px',
+          background: count > 0 ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+          color: count > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
+          border: count > 0 ? '1px solid rgba(99,102,241,0.3)' : '1px solid var(--border-color)',
+        }}>
+          {count}
+        </span>
+      )}
+    </label>
+
+    {onRemove && (
+      <button 
+        onClick={onRemove}
+        title="Remove filter"
+        style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: 'var(--text-dim)', padding: '0.2rem', borderRadius: '4px',
+          display: 'flex', alignItems: 'center', transition: 'all 0.2s'
+        }}
+        onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+      >
+        <X size={14} />
+      </button>
     )}
-  </label>
+  </div>
 );
 
 export const FilterPanel: React.FC<FilterPanelProps> = ({
@@ -189,6 +211,69 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           </button>
         )}
       </div>
+
+      {/* Active filters */}
+      {activeCount > 0 && (
+        <div style={{ 
+          padding: '0.5rem 0.75rem', 
+          borderBottom: '1px solid var(--border-color)', 
+          background: 'rgba(255,255,255,0.02)',
+          flexShrink: 0
+        }}>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem', paddingLeft: '0.25rem' }}>Active Filters</div>
+          {activeFilters.sources.map(s => {
+            const name = options.sources.find(opt => opt.address === s)?.name;
+            return (
+              <OptionRow
+                key={`active-s-${s}`}
+                label={s}
+                sublabel={name || undefined}
+                checked={true}
+                count={mode === 'live' ? (counts?.sources[s] ?? 0) : undefined}
+                onToggle={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
+                onRemove={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
+              />
+            );
+          })}
+          {activeFilters.targets.map(t => {
+            const name = options.targets.find(opt => opt.address === t)?.name;
+            return (
+              <OptionRow
+                key={`active-t-${t}`}
+                label={t}
+                sublabel={name || undefined}
+                checked={true}
+                count={mode === 'live' ? (counts?.targets[t] ?? 0) : undefined}
+                onToggle={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
+                onRemove={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
+              />
+            );
+          })}
+          {activeFilters.types.map(t => (
+            <OptionRow
+              key={`active-type-${t}`}
+              label={t}
+              checked={true}
+              count={mode === 'live' ? (counts?.types[t] ?? 0) : undefined}
+              onToggle={() => update({ types: activeFilters.types.filter(v => v !== t) })}
+              onRemove={() => update({ types: activeFilters.types.filter(v => v !== t) })}
+            />
+          ))}
+          {activeFilters.dpts.map(d => {
+            const label = options.dpts.find(opt => opt.main === d)?.label;
+            return (
+              <OptionRow
+                key={`active-dpt-${d}`}
+                label={label || `DPT ${d}`}
+                checked={true}
+                count={mode === 'live' ? (counts?.dpts[d] ?? 0) : undefined}
+                onToggle={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
+                onRemove={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* Search bar */}
       <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
@@ -348,3 +433,12 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
     </div>
   );
 };
+
+// Add styles for filter section
+const style = document.createElement('style');
+style.textContent = `
+  .filter-chip-removed { 
+    /* Placeholder to remove old styles if needed, but we'll just rewrite the whole block */
+  }
+`;
+document.head.appendChild(style);
