@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spectrumknx-timescaledb
+spec:
+  serviceName: spectrumknx-timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spectrumknx-timescaledb
+  template:
+    metadata:
+      labels:
+        app: spectrumknx-timescaledb
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: timescaledb
+          image: timescale/timescaledb:latest-pg16
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              value: "knxuser"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spectrumknx-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "knx"
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: timescale-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: timescale-data
+          persistentVolumeClaim:
+            claimName: spectrumknx-timescale

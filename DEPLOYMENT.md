@@ -19,10 +19,16 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ---
 
-## 2. Kubernetes (Helm / Manifests)
-*(Coming Soon)*
-> [!NOTE]
-> Helm charts and standard K8s Deployment manifests will be updated here. The application respects standard environment variables for configuration.
+## 2. Kubernetes
+Example manifests for deploying Spectrum KNX on Kubernetes can be found in the [kubernetes/](kubernetes/) directory.
+
+These templates cover:
+- StatefulSets for the Backend and TimescaleDB
+- Persistent Volume Claims for data persistence
+- Ingress configuration
+- Secret management
+
+See the [Kubernetes README](kubernetes/README.md) for specific deployment instructions.
 
 ---
 

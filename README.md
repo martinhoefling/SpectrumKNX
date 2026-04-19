@@ -45,7 +45,7 @@ The easiest way to run Spectrum KNX is with Docker Compose. This automatically p
 4. Access the web interface at `http://localhost:8000` (or `http://localhost:5173` in Dev mode).
 
 ### Detailed Guides
-See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup and [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
 
 ## 🛠 Tech Stack
 - **Backend:** Python 3.11+, FastAPI, `xknx`, WebSocket Streaming

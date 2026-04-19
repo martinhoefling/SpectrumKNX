@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spectrumknx
+spec:
+  serviceName: spectrumknx
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spectrumknx
+  template:
+    metadata:
+      labels:
+        app: spectrumknx
+    spec:
+      containers:
+        - name: spectrumknx
+          image: "ghcr.io/martinhoefling/spectrumknx:latest"
+          imagePullPolicy: Always
+          env:
+            - name: POSTGRES_USER
+              value: "knxuser"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spectrumknx-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "knx"
+            - name: POSTGRES_HOST
+              value: "spectrumknx-timescaledb" # Standard service DNS
+            - name: KNX_GATEWAY_IP
+              value: "YOUR_KNX_GATEWAY_IP"
+            - name: KNX_PROJECT_PATH
+              value: "/knxproj/YOUR_PROJECT.knxproj"
+            - name: KNX_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spectrumknx-secret
+                  key: KNX_PASSWORD
+          ports:
+            - containerPort: 8000
+              name: http
+          volumeMounts:
+            - name: knxproj
+              mountPath: "/knxproj"
+      volumes:
+        - name: knxproj
+          persistentVolumeClaim:
+            claimName: spectrumknx-knxproj
