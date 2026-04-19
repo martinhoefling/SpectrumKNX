@@ -1,3 +1,5 @@
+import os
+import subprocess
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -16,6 +18,22 @@ from parsers import (
 from ws_manager import manager
 
 router = APIRouter()
+
+@router.get("/api/version")
+async def get_version():
+    """Returns the backend version from ENV or git"""
+    version = os.getenv("APP_VERSION", "")
+    if not version or version == "dev":
+        try:
+            # Fallback to git if running locally
+            version = subprocess.check_output(
+                ["git", "describe", "--tags", "--always"], 
+                stderr=subprocess.DEVNULL,
+                text=True
+            ).strip()
+        except Exception:
+            version = "dev"
+    return {"version": version}
 
 
 def _build_telegram_response(rows) -> list:

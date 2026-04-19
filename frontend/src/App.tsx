@@ -15,6 +15,8 @@ import {
   type FilterCounts,
 } from './types/filters';
 
+declare const __APP_VERSION__: string;
+
 const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [] };
 
 const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: string, isSettingsOpen: boolean, onChange: (id: string) => void }) => {
@@ -111,6 +113,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
+  const [backendVersion, setBackendVersion] = useState<string>('loading...');
 
   // ── Settings & Persistence ──────────────────────────────────────────────────
   const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 25000));
@@ -159,6 +162,12 @@ function App() {
         // Fallback: populate only the static types
         setFilterOptions(prev => ({ ...prev, types: ['Write', 'Read', 'Response'] }));
       });
+
+    // Load backend version
+    fetch('/api/version')
+      .then(r => r.json())
+      .then(data => setBackendVersion(data.version || 'unknown'))
+      .catch(() => setBackendVersion('error'));
   }, []);
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
@@ -477,6 +486,24 @@ function App() {
                   value={loadLimit}
                   onChange={e => setLoadLimit(Number(e.target.value))}
                 />
+              </div>
+
+              <div style={{ marginTop: '3rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  System Information
+                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                  <span style={{ color: 'var(--text-dim)' }}>Frontend Version:</span>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
+                    {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'unknown'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                  <span style={{ color: 'var(--text-dim)' }}>Backend Version:</span>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
+                    {backendVersion}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
