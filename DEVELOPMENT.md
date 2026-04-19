@@ -43,6 +43,7 @@ Key variables:
 - `KNX_PASSWORD`: Password for your ETS project export.
 - `KNX_GATEWAY_IP`: IP of your KNX interface (or `AUTO`).
 - `APP_IMAGE`: Docker image to use for production stacks.
+- `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8000`).
 
 ### 3. Database Setup
 The easiest way to run the database is via Docker Compose. This will automatically set up TimescaleDB and run the initialization scripts in `./db/init.sql`.
