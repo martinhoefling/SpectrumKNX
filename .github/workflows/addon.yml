@@ -10,7 +10,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-addon
+  # Explicit lowercase image name (must match config.yaml `image:` field)
+  IMAGE_BASE: ghcr.io/martinhoefling/spectrum-knx-addon
 
 jobs:
   build-and-push-addon:
@@ -36,6 +37,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Read Add-on version from config.yaml
+        id: addon_version
+        run: |
+          VERSION=$(grep '^version:' ha-addon/config.yaml | sed 's/version: *"\(.*\)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Add-on version: $VERSION"
+
       - name: Set up QEMU
         if: matrix.arch == 'aarch64'
         uses: docker/setup-qemu-action@v3
@@ -50,15 +58,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=ref,event=tag
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -68,5 +67,6 @@ jobs:
           build-args: |
             BUILD_FROM=${{ matrix.base_image }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.IMAGE_BASE }}-${{ matrix.ha_arch }}:${{ steps.addon_version.outputs.version }}
+            ${{ env.IMAGE_BASE }}-${{ matrix.ha_arch }}:latest
