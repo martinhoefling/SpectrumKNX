@@ -85,7 +85,7 @@ export function ProjectUploadWizard({ onSuccess, isClosable = false, onClose }: 
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', zIndex: 1 }}>
-          <img src="/logo.svg" alt="Spectrum KNX" style={{ width: 32, height: 32 }} />
+          <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="Spectrum KNX" style={{ width: 32, height: 32 }} />
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Project Setup</h2>
         </div>
         
