@@ -1,0 +1,27 @@
+#!/usr/bin/with-contenv bashio
+DATADIR="/var/lib/postgresql/data"
+chown -R postgres:postgres "$DATADIR"
+chmod 700 "$DATADIR"
+
+if [ ! -s "$DATADIR/PG_VERSION" ]; then
+    bashio::log.info "Initializing database..."
+    s6-setuidgid postgres /usr/lib/postgresql/15/bin/initdb -D "$DATADIR"
+    
+    # Add timescaledb to preload libraries
+    echo "shared_preload_libraries = 'timescaledb'" >> "$DATADIR/postgresql.conf"
+    
+    # Allow connections from localhost and docker network
+    echo "listen_addresses = '*'" >> "$DATADIR/postgresql.conf"
+    echo "host all all 0.0.0.0/0 md5" >> "$DATADIR/pg_hba.conf"
+    echo "host all all 0.0.0.0/0 trust" >> "$DATADIR/pg_hba.conf"
+    
+    # Start temporarily to create the database
+    bashio::log.info "Creating database and extensions..."
+    s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -w start
+    s6-setuidgid postgres psql -c "CREATE DATABASE spectrum_knx;" || true
+    s6-setuidgid postgres psql -d spectrum_knx -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" || true
+    s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -m fast -w stop
+fi
+
+bashio::log.info "Starting PostgreSQL..."
+exec s6-setuidgid postgres /usr/lib/postgresql/15/bin/postgres -D "$DATADIR"
