@@ -2,7 +2,7 @@ import os
 import subprocess
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from xknx.telegram.address import IndividualAddress
@@ -251,6 +251,65 @@ async def get_project():
         "group_addresses": knx_daemon.global_knx_project.get("group_addresses", {}),
         "devices": knx_daemon.global_knx_project.get("devices", {}),
     }
+
+
+@router.get("/api/project/status")
+async def get_project_status():
+    """Returns the status of the project upload feature"""
+    env_proj = os.getenv("KNX_PROJECT_PATH")
+    env_pwd = os.getenv("KNX_PASSWORD")
+    
+    upload_feature_active = not env_proj and not env_pwd
+    project_loaded = knx_daemon.global_knx_project is not None
+    upload_required = upload_feature_active and not project_loaded
+    
+    return {
+        "upload_feature_active": upload_feature_active,
+        "project_loaded": project_loaded,
+        "upload_required": upload_required
+    }
+
+
+@router.post("/api/project/upload")
+async def upload_project(
+    file: UploadFile = File(...),
+    password: str = Form(...)
+):
+    """Uploads a KNX project file and password, saving them to the default volume"""
+    env_proj = os.getenv("KNX_PROJECT_PATH")
+    env_pwd = os.getenv("KNX_PASSWORD")
+    
+    if env_proj or env_pwd:
+        raise HTTPException(status_code=400, detail="Upload feature is disabled because environment variables are set.")
+        
+    if not file.filename or not file.filename.endswith(".knxproj"):
+        raise HTTPException(status_code=400, detail="File must be a .knxproj file")
+        
+    default_dir = "/project"
+    default_file = os.path.join(default_dir, "knx_project.knxproj")
+    default_pwd = os.path.join(default_dir, "knx_project_password")
+    
+    os.makedirs(default_dir, exist_ok=True)
+    
+    content = await file.read()
+    
+    with open(default_file, "wb") as f:
+        f.write(content)
+        
+    with open(default_pwd, "w", encoding="utf-8") as f:
+        f.write(password)
+        
+    # Trigger reload
+    success = await knx_daemon._load_project_data()
+    
+    if not success:
+        if os.path.exists(default_file):
+            os.remove(default_file)
+        if os.path.exists(default_pwd):
+            os.remove(default_pwd)
+        raise HTTPException(status_code=400, detail="Failed to load project. Incorrect password or invalid file.")
+        
+    return {"status": "ok", "message": "Project loaded successfully"}
 
 
 @router.websocket("/ws/telegrams")

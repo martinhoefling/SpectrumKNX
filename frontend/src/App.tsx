@@ -7,6 +7,7 @@ import { HistoryLoader } from './components/HistoryLoader';
 import { HistorySearch } from './components/HistorySearch';
 import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
+import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
@@ -114,6 +115,12 @@ function App() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
+  const [projectStatus, setProjectStatus] = useState<{
+    upload_feature_active: boolean;
+    project_loaded: boolean;
+    upload_required: boolean;
+  } | null>(null);
+  const [isUploadWizardOpen, setIsUploadWizardOpen] = useState(false);
 
   // ── Settings & Persistence ──────────────────────────────────────────────────
   const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 25000));
@@ -194,6 +201,17 @@ function App() {
       .then(r => r.json())
       .then(data => setBackendVersion(data.version || 'unknown'))
       .catch(() => setBackendVersion('error'));
+
+    // Load project status
+    fetch('/api/project/status')
+      .then(r => r.json())
+      .then(data => {
+        setProjectStatus(data);
+        if (data.upload_required) {
+          setIsUploadWizardOpen(true);
+        }
+      })
+      .catch(err => console.error("Failed to check project status", err));
   }, []);
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
@@ -514,6 +532,21 @@ function App() {
                 />
               </div>
 
+              {projectStatus?.upload_feature_active && (
+                <>
+                  <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
+                    Project File
+                  </h3>
+                  <button 
+                    className="glass-input" 
+                    onClick={() => setIsUploadWizardOpen(true)}
+                    style={{ width: '100%', padding: '0.75rem', textAlign: 'left', cursor: 'pointer', fontSize: '0.85rem' }}
+                  >
+                    Upload / Replace ETS Project File
+                  </button>
+                </>
+              )}
+
               <div style={{ marginTop: '3rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   System Information
@@ -602,6 +635,17 @@ function App() {
           onLoad={handleHistoricalLoad}
           limit={loadLimit}
           mode="monitor"
+        />
+      )}
+
+      {isUploadWizardOpen && (
+        <ProjectUploadWizard 
+          isClosable={!projectStatus?.upload_required} 
+          onClose={() => setIsUploadWizardOpen(false)}
+          onSuccess={() => {
+            setIsUploadWizardOpen(false);
+            window.location.reload();
+          }} 
         />
       )}
 

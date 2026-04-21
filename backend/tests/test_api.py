@@ -259,3 +259,101 @@ def test_get_telegrams_delta_with_matches():
         assert "1.1.3" not in sources
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_get_project_status_active(monkeypatch):
+    monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+    knx_daemon.global_knx_project = None
+    
+    response = client.get("/api/project/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["upload_feature_active"] is True
+    assert data["project_loaded"] is False
+    assert data["upload_required"] is True
+
+def test_get_project_status_inactive(monkeypatch):
+    monkeypatch.setenv("KNX_PROJECT_PATH", "/some/path")
+    monkeypatch.setenv("KNX_PASSWORD", "secret")
+    knx_daemon.global_knx_project = None
+    
+    response = client.get("/api/project/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["upload_feature_active"] is False
+    assert data["upload_required"] is False
+
+def test_upload_project_disabled(monkeypatch):
+    monkeypatch.setenv("KNX_PROJECT_PATH", "/some/path")
+    response = client.post("/api/project/upload", data={"password": "test"}, files={"file": ("test.knxproj", b"dummy")})
+    assert response.status_code == 400
+    assert "disabled" in response.json()["detail"]
+
+def test_upload_project_invalid_file(monkeypatch):
+    monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+    response = client.post("/api/project/upload", data={"password": "test"}, files={"file": ("test.txt", b"dummy")})
+    assert response.status_code == 400
+    assert "must be a .knxproj file" in response.json()["detail"]
+
+def test_upload_project_success(monkeypatch, tmp_path):
+    monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+    
+    # Mock os.makedirs to ignore creating /project
+    import os
+    original_makedirs = os.makedirs
+    def mock_makedirs(name, exist_ok=False):
+        if name == "/project":
+            return
+        original_makedirs(name, exist_ok=exist_ok)
+        
+    monkeypatch.setattr(os, "makedirs", mock_makedirs)
+    
+    # Mock open using unittest.mock to intercept writes to /project/...
+    from unittest.mock import mock_open
+    m = mock_open()
+    monkeypatch.setattr("builtins.open", m)
+    
+    # Mock knx_daemon._load_project_data
+    async def mock_load():
+        knx_daemon.global_knx_project = {"fake": "project"}
+        return True
+    monkeypatch.setattr(knx_daemon, "_load_project_data", mock_load)
+    
+    response = client.post("/api/project/upload", data={"password": "test_pass"}, files={"file": ("test.knxproj", b"dummy_content")})
+    assert response.status_code == 200
+    
+    # Verify open was called correctly
+    m.assert_any_call(os.path.join("/project", "knx_project.knxproj"), "wb")
+    m.assert_any_call(os.path.join("/project", "knx_project_password"), "w", encoding="utf-8")
+
+def test_upload_project_failure(monkeypatch, tmp_path):
+    monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+    
+    import os
+    original_makedirs = os.makedirs
+    def mock_makedirs(name, exist_ok=False):
+        if name == "/project":
+            return
+        original_makedirs(name, exist_ok=exist_ok)
+    monkeypatch.setattr(os, "makedirs", mock_makedirs)
+    
+    from unittest.mock import mock_open
+    m = mock_open()
+    monkeypatch.setattr("builtins.open", m)
+    
+    # Mock os.remove to avoid deleting actual files
+    def mock_remove(path):
+        pass
+    monkeypatch.setattr(os, "remove", mock_remove)
+    
+    async def mock_load():
+        return False
+    monkeypatch.setattr(knx_daemon, "_load_project_data", mock_load)
+    
+    response = client.post("/api/project/upload", data={"password": "bad"}, files={"file": ("test.knxproj", b"dummy")})
+    assert response.status_code == 400
+    assert "Incorrect password" in response.json()["detail"]

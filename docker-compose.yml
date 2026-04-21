@@ -25,6 +25,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     env_file:
       - .env
+    volumes:
+      - knx_project_data:/project
     ports:
       - "8000:8000"
     depends_on:
@@ -33,3 +35,4 @@ services:
 
 volumes:
   knx_db_data:
+  knx_project_data:
