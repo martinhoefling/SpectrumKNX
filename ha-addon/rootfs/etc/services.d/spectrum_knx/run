@@ -1,0 +1,43 @@
+#!/usr/bin/with-contenv bashio
+
+# Wait for Postgres to be ready
+bashio::log.info "Waiting for PostgreSQL to start..."
+until s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_isready -h 127.0.0.1 -p 5432; do
+    sleep 1
+done
+bashio::log.info "PostgreSQL is ready!"
+
+# Read KNX options from Add-on config if provided
+if bashio::config.has_value 'KNX_PROJECT_PATH'; then
+    export KNX_PROJECT_PATH=$(bashio::config 'KNX_PROJECT_PATH')
+fi
+if bashio::config.has_value 'KNX_PASSWORD'; then
+    export KNX_PASSWORD=$(bashio::config 'KNX_PASSWORD')
+fi
+if bashio::config.has_value 'KNX_GATEWAY_IP'; then
+    export KNX_GATEWAY_IP=$(bashio::config 'KNX_GATEWAY_IP')
+fi
+if bashio::config.has_value 'KNX_GATEWAY_PORT'; then
+    export KNX_GATEWAY_PORT=$(bashio::config 'KNX_GATEWAY_PORT')
+fi
+if bashio::config.has_value 'LOG_LEVEL'; then
+    export LOG_LEVEL=$(bashio::config 'LOG_LEVEL')
+else
+    export LOG_LEVEL="INFO"
+fi
+
+# Ingress support path (provided by Home Assistant)
+if bashio::config.has_value 'ingress_port'; then
+    # We serve directly on the port and Home Assistant handles the Ingress proxying
+    export PORT=8000
+fi
+
+# Set root path if running under HA Ingress
+# Home Assistant supervisor sets standard HTTP headers, but we might need to tell FastAPI
+# about the root_path if we want to build URLs properly, but relative paths usually work.
+
+
+
+cd /app/backend
+bashio::log.info "Starting Spectrum KNX Backend..."
+exec /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
