@@ -1,7 +1,15 @@
 #!/usr/bin/with-contenv bashio
-DATADIR="/var/lib/postgresql/data"
+# ── Persistent data directory ─────────────────────────────────────────────────
+# Home Assistant persists /data across container restarts and updates.
+# We store PostgreSQL data and KNX project files there.
+DATADIR="/data/postgres"
+mkdir -p "$DATADIR"
 chown -R postgres:postgres "$DATADIR"
 chmod 700 "$DATADIR"
+
+# Symlink /project → /data/project so the backend can use its default path
+mkdir -p /data/project
+ln -sfn /data/project /project
 
 if [ ! -s "$DATADIR/PG_VERSION" ]; then
     bashio::log.info "Initializing database..."
@@ -20,6 +28,28 @@ if [ ! -s "$DATADIR/PG_VERSION" ]; then
     s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -w start
     s6-setuidgid postgres psql -c "CREATE DATABASE spectrum_knx;" || true
     s6-setuidgid postgres psql -d spectrum_knx -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" || true
+
+    # Create the telegrams table and hypertable (mirrors db/init.sql)
+    bashio::log.info "Creating telegrams schema..."
+    s6-setuidgid postgres psql -d spectrum_knx -c "
+        CREATE TABLE IF NOT EXISTS telegrams (
+            timestamp TIMESTAMPTZ NOT NULL,
+            source_address VARCHAR(20) NOT NULL,
+            target_address VARCHAR(20) NOT NULL,
+            telegram_type VARCHAR(50) NOT NULL,
+            dpt VARCHAR(20),
+            dpt_main INTEGER,
+            dpt_sub INTEGER,
+            raw_data BYTEA,
+            value_numeric DOUBLE PRECISION,
+            value_json JSONB
+        );
+        SELECT create_hypertable('telegrams', 'timestamp', if_not_exists => TRUE);
+        CREATE INDEX IF NOT EXISTS ix_telegrams_target ON telegrams (target_address, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS ix_telegrams_source ON telegrams (source_address, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS ix_telegrams_dpt ON telegrams (dpt_main, dpt_sub, timestamp DESC);
+    " || true
+
     s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -m fast -w stop
 fi
 

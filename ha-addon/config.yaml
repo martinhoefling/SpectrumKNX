@@ -1,6 +1,6 @@
 name: "Spectrum KNX"
 description: "A professional KNX bus monitor and analyzer"
-version: "1.0.0"
+version: "1.0.1"
 slug: "spectrum_knx"
 image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"
 init: false
@@ -13,9 +13,6 @@ ingress_stream: true
 panel_icon: mdi:knx
 panel_title: "Spectrum KNX"
 panel_admin: true
-map:
-  - config:rw
-  - share:rw
 options:
   KNX_GATEWAY_IP: "AUTO"
   KNX_GATEWAY_PORT: 3671

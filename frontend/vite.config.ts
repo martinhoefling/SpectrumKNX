@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
   const appVersion = process.env.VITE_APP_VERSION || env.VITE_APP_VERSION || gitVersion;
 
   return {
+    base: './',
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
     },

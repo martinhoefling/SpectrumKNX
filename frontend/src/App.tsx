@@ -3,6 +3,7 @@ import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, ChevronDown, AlertTriangle } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
+import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
 import { HistorySearch } from './components/HistorySearch';
 import { Visualizer } from './components/Visualizer';
@@ -183,7 +184,7 @@ function App() {
 
   // Load filter options from backend on mount
   useEffect(() => {
-    fetch('/api/filter-options')
+    fetch(apiUrl('/api/filter-options'))
       .then(r => r.json())
       .then(data => setFilterOptions({
         sources: data.sources || [],
@@ -197,13 +198,13 @@ function App() {
       });
 
     // Load backend version
-    fetch('/api/version')
+    fetch(apiUrl('/api/version'))
       .then(r => r.json())
       .then(data => setBackendVersion(data.version || 'unknown'))
       .catch(() => setBackendVersion('error'));
 
     // Load project status
-    fetch('/api/project/status')
+    fetch(apiUrl('/api/project/status'))
       .then(r => r.json())
       .then(data => {
         setProjectStatus(data);
@@ -234,8 +235,8 @@ function App() {
     }
   }, [isPaused, loadLimit]);
 
-  const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/telegrams`;
-  const { isConnected } = useWebSocket(wsUrl, handleTelegram);
+  const wsEndpoint = wsUrl('/ws/telegrams');
+  const { isConnected } = useWebSocket(wsEndpoint, handleTelegram);
 
   // ── Persist settings to cookies ─────────────────────────────────────────────
   useEffect(() => {
