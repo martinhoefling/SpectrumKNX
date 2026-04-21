@@ -23,19 +23,30 @@ xknx_instance = None
 global_knx_project = None
 project_name_map = {"ga": {}, "ia": {}}
 
-async def _load_project_data():
+async def _load_project_data() -> bool:
     global global_knx_project, project_name_map, xknx_instance
     ets_project_file = os.getenv("KNX_PROJECT_PATH")
     ets_password = os.getenv("KNX_PASSWORD")
     
+    if not ets_project_file and not ets_password:
+        default_file = "/project/knx_project.knxproj"
+        default_pwd = "/project/knx_project_password"
+        if os.path.exists(default_file) and os.path.exists(default_pwd):
+            ets_project_file = default_file
+            with open(default_pwd, encoding="utf-8") as f:
+                ets_password = f.read().strip()
+                
     if not ets_project_file or not os.path.exists(ets_project_file):
         logger.warning(f"Project file not found: {ets_project_file}")
-        return
+        return False
 
     try:
         from xknxproject import XKNXProj
         xknxproj = XKNXProj(ets_project_file, password=ets_password)
-        global_knx_project = xknxproj.parse()
+        parsed_project = xknxproj.parse()
+        
+        # Only assign to globals if parsing succeeded
+        global_knx_project = parsed_project
         logger.info(f"Successfully loaded KNX project from {ets_project_file}")
         
         # Pre-populate name lookup maps
@@ -66,11 +77,16 @@ async def _load_project_data():
             xknx_instance.group_address_dpt.set(dpt_dict)
             logger.info("Updated XKNX DPT mappings from project.")
             
+        return True
     except Exception as e:
         logger.error(f"Error loading/parsing KNX project: {e}")
+        return False
 
 async def watch_project_file():
     ets_project_file = os.getenv("KNX_PROJECT_PATH")
+    if not ets_project_file and not os.getenv("KNX_PASSWORD"):
+        ets_project_file = "/project/knx_project.knxproj"
+        
     if not ets_project_file:
         return
         

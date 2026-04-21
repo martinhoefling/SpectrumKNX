@@ -5,8 +5,9 @@ services:
   backend:
     # Use standard production restart policy
     restart: always
-    # Ensure no development volumes are accidentally attached
-    volumes: []
+    # Mount the project volume but not development volumes
+    volumes:
+      - knx_project_data:/project
 
   db:
     restart: always
