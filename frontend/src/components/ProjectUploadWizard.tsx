@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Upload, KeyRound, AlertTriangle, Loader2 } from 'lucide-react';
+import { apiUrl } from '../utils/basePath';
 
 interface ProjectUploadWizardProps {
   onSuccess: () => void;
@@ -32,7 +33,7 @@ export function ProjectUploadWizard({ onSuccess, isClosable = false, onClose }: 
     formData.append('password', password);
     
     try {
-      const response = await fetch('/api/project/upload', {
+      const response = await fetch(apiUrl('/api/project/upload'), {
         method: 'POST',
         body: formData,
       });

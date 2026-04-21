@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { X, Clock, Database, AlertCircle, CheckCircle2, Calendar, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { ActiveFilters } from '../types/filters';
+import { apiUrl } from '../utils/basePath';
 
 interface Metadata {
   total_count: number;
@@ -80,7 +81,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
 
   const handleLoadRelative = useCallback((seconds: number) => {
     const start = new Date(Date.now() - seconds * 1000).toISOString();
-    const base = `/api/telegrams?limit=${limit}&start_time=${encodeURIComponent(start)}`;
+    const base = apiUrl(`/api/telegrams?limit=${limit}&start_time=${encodeURIComponent(start)}`);
     doFetch(applyFilterParams(base, filters));
   }, [limit, filters, doFetch]);
 
@@ -91,7 +92,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
 
   const handleLoadCustomAbsolute = useCallback(() => {
     if (!startTime && !endTime) { setError('Enter at least a start or end time.'); return; }
-    let url = `/api/telegrams?limit=${limit}`;
+    let url = apiUrl(`/api/telegrams?limit=${limit}`);
     if (startTime) url += `&start_time=${encodeURIComponent(startTime + ':00Z')}`;
     if (endTime) url += `&end_time=${encodeURIComponent(endTime + ':00Z')}`;
     doFetch(applyFilterParams(url, filters));
