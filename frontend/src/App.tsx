@@ -422,7 +422,7 @@ function App() {
 
           {/* Center: Brand */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-            <img src="/logo.svg" alt="Spectrum KNX" style={{ width: 22, height: 22 }} />
+            <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="Spectrum KNX" style={{ width: 22, height: 22 }} />
             <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Spectrum KNX</h1>
           </div>
 
