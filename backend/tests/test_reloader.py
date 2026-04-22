@@ -6,7 +6,7 @@ import pytest
 
 sys.modules['xknxproject'] = MagicMock()
 
-from knx_daemon import _load_project_data, watch_project_file  # noqa: E402
+from knx_daemon import _load_project_data, _watch_files  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -54,11 +54,13 @@ async def test_load_project_data(mock_xknxproj_class, mock_getenv, mock_exists):
 @patch("knx_daemon.os.path.getmtime")
 @patch("knx_daemon._load_project_data", new_callable=AsyncMock)
 @patch("knx_daemon.asyncio.sleep", new_callable=AsyncMock)
-async def test_watch_project_file(mock_sleep, mock_load, mock_getmtime, mock_exists):
+@patch("knx_daemon._resolve_knxkeys_path", return_value=(None, None))
+async def test_watch_files(mock_resolve, mock_sleep, mock_load, mock_getmtime, mock_exists):
     # Setup
     mock_exists.return_value = True
-    # First call to getmtime is in init, second is in loop
-    mock_getmtime.side_effect = [100, 200] 
+    # First call to getmtime is in init (project), second is init (keys doesn't exist),
+    # third is loop check (project changed), fourth would be keys check
+    mock_getmtime.side_effect = [100, 0, 200, 0] 
     
     # Break infinite loop by raising an exception in the second sleep call
     mock_sleep.side_effect = [None, Exception("StopLoop")]
@@ -67,12 +69,11 @@ async def test_watch_project_file(mock_sleep, mock_load, mock_getmtime, mock_exi
         mock_getenv.return_value = "fake_path.knxproj"
         
         try:
-            await watch_project_file()
+            await _watch_files()
         except Exception as e:
             if str(e) != "StopLoop":
                 raise e
         
         # Verify _load_project_data was called due to mtime change (100 -> 200)
         assert mock_load.called
-        logger_call_count = mock_load.call_count
-        assert logger_call_count == 1
+        assert mock_load.call_count == 1

@@ -2,16 +2,21 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
 
-from api import get_backend_version
-from api import router as api_router
-from database import engine
-from knx_daemon import knx_shutdown, knx_startup
-from security import is_safe_path
+# Load environment variables from .env file if it exists
+load_dotenv()
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+from api import get_backend_version  # noqa: E402
+from api import router as api_router  # noqa: E402
+from database import engine  # noqa: E402
+from knx_daemon import knx_shutdown, knx_startup  # noqa: E402
+from security import is_safe_path  # noqa: E402
 
 logger = logging.getLogger("uvicorn.error")
 

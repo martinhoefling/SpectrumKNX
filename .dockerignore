@@ -24,10 +24,14 @@ __pycache__/
 frontend/dist/
 dist/
 
+# Backend envfile
+backend/.env
+
 # Assets and Documentation
 kubernetes/
 assets/
 project/
+backend/.env
 
 # Temporary Directories
 tmp/
