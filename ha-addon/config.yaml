@@ -1,6 +1,6 @@
 name: "Spectrum KNX"
 description: "A professional KNX bus monitor and analyzer"
-version: "1.0.3"
+version: "1.0.4"
 slug: "spectrum_knx"
 image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"
 host_network: true
