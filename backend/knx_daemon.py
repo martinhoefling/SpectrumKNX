@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import insert
 from xknx import XKNX
-from xknx.io import ConnectionConfig, ConnectionType, GatewayScanner
+from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
 from xknx.telegram.address import IndividualAddress
 
@@ -175,34 +175,99 @@ def telegram_received_cb(telegram: XknxTelegram):
     except Exception as e:
         logger.error(f"Failed to create task for telegram: {e}")
 
+def _build_secure_config() -> SecureConfig | None:
+    """Build SecureConfig from environment variables, avoiding conflicting options."""
+    knxkeys_file = os.getenv("KNX_KNXKEYS_FILE")
+    knxkeys_password = os.getenv("KNX_KNXKEYS_PASSWORD")
+    
+    user_id = os.getenv("KNX_SECURE_USER_ID")
+    user_password = os.getenv("KNX_SECURE_USER_PASSWORD")
+    device_password = os.getenv("KNX_SECURE_DEVICE_PASSWORD")
+    
+    backbone_key = os.getenv("KNX_SECURE_BACKBONE_KEY")
+    latency_ms = os.getenv("KNX_SECURE_LATENCY_MS")
+
+    # Priority 1: knxkeys file (Contains both tunneling and routing credentials)
+    if knxkeys_file:
+        if any([user_id, user_password, device_password, backbone_key, latency_ms]):
+            logger.warning("KNX_KNXKEYS_FILE is provided. Ignoring other manual KNX Secure variables.")
+        return SecureConfig(
+            knxkeys_file_path=knxkeys_file,
+            knxkeys_password=knxkeys_password,
+        )
+
+    # Priority 2: Secure Routing (Backbone Key)
+    if backbone_key:
+        if any([user_id, user_password, device_password]):
+            logger.warning("KNX_SECURE_BACKBONE_KEY is provided. Ignoring manual tunnel credentials.")
+        return SecureConfig(
+            backbone_key=backbone_key,
+            latency_ms=int(latency_ms) if latency_ms else None,
+        )
+
+    # Priority 3: Manual Tunneling Credentials
+    if user_id:
+        return SecureConfig(
+            user_id=int(user_id),
+            user_password=user_password,
+            device_authentication_password=device_password,
+        )
+
+    return None
+
+def _build_connection_config() -> ConnectionConfig:
+    """Build ConnectionConfig from environment variables with backward compatibility."""
+    conn_type_str = os.getenv("KNX_CONNECTION_TYPE")
+    knx_ip = os.getenv("KNX_GATEWAY_IP", "AUTO")
+    knx_port = int(os.getenv("KNX_GATEWAY_PORT", 3671))
+    
+    # Backward compatibility logic
+    if conn_type_str:
+        try:
+            connection_type = ConnectionType[conn_type_str.upper()]
+        except KeyError:
+            logger.error(f"Invalid KNX_CONNECTION_TYPE: {conn_type_str}. Falling back to AUTOMATIC.")
+            connection_type = ConnectionType.AUTOMATIC
+    elif knx_ip == "AUTO" or not knx_ip:
+        connection_type = ConnectionType.AUTOMATIC
+    else:
+        connection_type = ConnectionType.TUNNELING
+
+    individual_address = os.getenv("KNX_INDIVIDUAL_ADDRESS")
+    local_ip = os.getenv("KNX_LOCAL_IP")
+    route_back = os.getenv("KNX_ROUTE_BACK", "false").lower() == "true"
+    
+    multicast_group = os.getenv("KNX_MULTICAST_GROUP", "224.0.23.12")
+    multicast_port = int(os.getenv("KNX_MULTICAST_PORT", 3671))
+
+    secure_config = _build_secure_config()
+
+    return ConnectionConfig(
+        connection_type=connection_type,
+        gateway_ip=knx_ip if connection_type not in [ConnectionType.AUTOMATIC, ConnectionType.ROUTING, ConnectionType.ROUTING_SECURE] else None,
+        gateway_port=knx_port,
+        local_ip=local_ip,
+        individual_address=individual_address,
+        route_back=route_back,
+        multicast_group=multicast_group,
+        multicast_port=multicast_port,
+        secure_config=secure_config
+    )
+
 async def knx_startup():
     global xknx_instance, global_knx_project, project_name_map
     logger.info("Starting KNX Daemon...")
     
-    knx_ip = os.getenv("KNX_GATEWAY_IP", "AUTO")
-    knx_port = int(os.getenv("KNX_GATEWAY_PORT", 3671))
-
-    connection_config = None
-    if knx_ip == "AUTO" or not knx_ip:
-        logger.info("Scanning for KNX gateway...")
-        try:
-            async with XKNX() as xknx_for_scan:
-                gateways = await GatewayScanner(xknx_for_scan).scan()
-                if gateways:
-                   gateway = gateways[0]
-                   logger.info(f"Gateway found: {gateway.ip_addr}:{gateway.port}")
-                   connection_config = ConnectionConfig(gateway_ip=gateway.ip_addr, gateway_port=gateway.port)
-                else:
-                   logger.warning("No KNX gateway found via AUTO scan.")
-        except Exception as e:
-            logger.error(f"Error during AUTO scan: {e}")
-    else:
-        logger.info(f"Using configured KNX gateway: {knx_ip}:{knx_port}")
-        connection_config = ConnectionConfig(
-            connection_type=ConnectionType.TUNNELING,
-            gateway_ip=knx_ip, 
-            gateway_port=knx_port
-        )
+    connection_config = _build_connection_config()
+    
+    logger.info(
+        f"Connecting to KNX bus: type={connection_config.connection_type.name}, "
+        f"gateway={connection_config.gateway_ip if connection_config.gateway_ip else 'AUTO'}, "
+        f"port={connection_config.gateway_port}, "
+        f"local_ip={connection_config.local_ip if connection_config.local_ip else 'default'}, "
+        f"route_back={connection_config.route_back}, "
+        f"secure={'yes' if connection_config.secure_config else 'no'}"
+    )
         
     await _load_project_data()
              

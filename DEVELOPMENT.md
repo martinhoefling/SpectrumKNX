@@ -41,7 +41,8 @@ Key variables:
 - `DATABASE_URL`: (Optional) Full connection string for the PostgreSQL database (must start with `postgresql+asyncpg://`).
 - `POSTGRES_USER/PASSWORD/DB`: Individual credentials used if `DATABASE_URL` is omitted.
 - `KNX_PASSWORD`: Password for your ETS project export.
-- `KNX_GATEWAY_IP`: IP of your KNX interface (or `AUTO`).
+- `KNX_PROJECT_PATH`: Path to the `.knxproj` file inside the container.
+- `KNX_GATEWAY_IP`: IP of your KNX interface (or `AUTO`). See `DEPLOYMENT.md` for advanced connection settings.
 - `APP_IMAGE`: Docker image to use for production stacks.
 - `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8000`).
 

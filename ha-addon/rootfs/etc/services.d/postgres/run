@@ -18,10 +18,9 @@ if [ ! -s "$DATADIR/PG_VERSION" ]; then
     # Add timescaledb to preload libraries
     echo "shared_preload_libraries = 'timescaledb'" >> "$DATADIR/postgresql.conf"
     
-    # Allow connections from localhost and docker network
-    echo "listen_addresses = '*'" >> "$DATADIR/postgresql.conf"
-    echo "host all all 0.0.0.0/0 md5" >> "$DATADIR/pg_hba.conf"
-    echo "host all all 0.0.0.0/0 trust" >> "$DATADIR/pg_hba.conf"
+    # Allow connections only from localhost
+    echo "listen_addresses = '127.0.0.1'" >> "$DATADIR/postgresql.conf"
+    echo "host all all 127.0.0.1/32 trust" >> "$DATADIR/pg_hba.conf"
     
     # Start temporarily to create the database
     bashio::log.info "Creating database and extensions..."
@@ -54,4 +53,4 @@ if [ ! -s "$DATADIR/PG_VERSION" ]; then
 fi
 
 bashio::log.info "Starting PostgreSQL..."
-exec s6-setuidgid postgres /usr/lib/postgresql/15/bin/postgres -D "$DATADIR"
+exec s6-setuidgid postgres /usr/lib/postgresql/15/bin/postgres -D "$DATADIR" -c listen_addresses='127.0.0.1'
