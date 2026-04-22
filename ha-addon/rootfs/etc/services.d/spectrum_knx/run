@@ -7,22 +7,17 @@ until s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_isready -h 127.0.0.1 -
 done
 bashio::log.info "PostgreSQL is ready!"
 
+# DB Configuration
+export POSTGRES_HOST=127.0.0.1
+
 # Read KNX options from Add-on config if provided
-if bashio::config.has_value 'KNX_PROJECT_PATH'; then
-    export KNX_PROJECT_PATH=$(bashio::config 'KNX_PROJECT_PATH')
-fi
-if bashio::config.has_value 'KNX_PASSWORD'; then
-    export KNX_PASSWORD=$(bashio::config 'KNX_PASSWORD')
-fi
-if bashio::config.has_value 'KNX_GATEWAY_IP'; then
-    export KNX_GATEWAY_IP=$(bashio::config 'KNX_GATEWAY_IP')
-fi
-if bashio::config.has_value 'KNX_GATEWAY_PORT'; then
-    export KNX_GATEWAY_PORT=$(bashio::config 'KNX_GATEWAY_PORT')
-fi
-if bashio::config.has_value 'LOG_LEVEL'; then
-    export LOG_LEVEL=$(bashio::config 'LOG_LEVEL')
-else
+for var in KNX_PROJECT_PATH KNX_PASSWORD KNX_GATEWAY_IP KNX_GATEWAY_PORT KNX_CONNECTION_TYPE KNX_LOCAL_IP KNX_INDIVIDUAL_ADDRESS KNX_ROUTE_BACK KNX_MULTICAST_GROUP KNX_MULTICAST_PORT KNX_KNXKEYS_FILE KNX_KNXKEYS_PASSWORD KNX_SECURE_USER_ID KNX_SECURE_USER_PASSWORD KNX_SECURE_DEVICE_PASSWORD KNX_SECURE_BACKBONE_KEY KNX_SECURE_LATENCY_MS LOG_LEVEL; do
+    if bashio::config.has_value "$var"; then
+        export "$var"="$(bashio::config "$var")"
+    fi
+done
+
+if [ -z "$LOG_LEVEL" ]; then
     export LOG_LEVEL="INFO"
 fi
 

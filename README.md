@@ -29,7 +29,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 The easiest way to run Spectrum KNX is with Docker Compose. This automatically provisions the TimescaleDB database alongside the KNX Tracker daemon.
 
 1. Copy the example environment file: `cp .env_example .env`
-2. Set your `KNX_PASSWORD` and `KNX_GATEWAY_IP` in `.env`.
+2. Set your `KNX_PASSWORD`, `KNX_PROJECT_PATH` and `KNX_GATEWAY_IP` in `.env`.
 3. Run the stack:
 
    **Development (Live Code):**

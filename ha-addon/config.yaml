@@ -1,8 +1,9 @@
 name: "Spectrum KNX"
 description: "A professional KNX bus monitor and analyzer"
-version: "1.0.2"
+version: "1.0.3"
 slug: "spectrum_knx"
 image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"
+host_network: true
 init: false
 arch:
   - aarch64
@@ -16,12 +17,36 @@ panel_admin: true
 options:
   KNX_GATEWAY_IP: "AUTO"
   KNX_GATEWAY_PORT: 3671
+  KNX_CONNECTION_TYPE: "AUTOMATIC"
+  KNX_LOCAL_IP: ""
+  KNX_INDIVIDUAL_ADDRESS: ""
+  KNX_ROUTE_BACK: false
+  KNX_MULTICAST_GROUP: "224.0.23.12"
+  KNX_MULTICAST_PORT: 3671
+  KNX_KNXKEYS_FILE: ""
+  KNX_KNXKEYS_PASSWORD: ""
+  KNX_SECURE_USER_ID: 0
+  KNX_SECURE_USER_PASSWORD: ""
+  KNX_SECURE_DEVICE_PASSWORD: ""
+  KNX_SECURE_BACKBONE_KEY: ""
+  KNX_SECURE_LATENCY_MS: 0
   LOG_LEVEL: "INFO"
 schema:
   KNX_GATEWAY_IP: "str"
   KNX_GATEWAY_PORT: "port"
+  KNX_CONNECTION_TYPE: "match(AUTOMATIC|TUNNELING|TUNNELING_TCP|TUNNELING_TCP_SECURE|ROUTING|ROUTING_SECURE)"
+  KNX_LOCAL_IP: "str?"
+  KNX_INDIVIDUAL_ADDRESS: "str?"
+  KNX_ROUTE_BACK: "bool"
+  KNX_MULTICAST_GROUP: "str?"
+  KNX_MULTICAST_PORT: "port?"
+  KNX_KNXKEYS_FILE: "str?"
+  KNX_KNXKEYS_PASSWORD: "password?"
+  KNX_SECURE_USER_ID: "int?"
+  KNX_SECURE_USER_PASSWORD: "password?"
+  KNX_SECURE_DEVICE_PASSWORD: "password?"
+  KNX_SECURE_BACKBONE_KEY: "str?"
+  KNX_SECURE_LATENCY_MS: "int?"
   LOG_LEVEL: "match(DEBUG|INFO|WARNING|ERROR|CRITICAL)"
-ports:
-  "5432/tcp": null
 ports_description:
-  "5432/tcp": "PostgreSQL TimescaleDB (optional for external tools like Grafana)"
+  "5432/tcp": "PostgreSQL TimescaleDB (Internal Only)"

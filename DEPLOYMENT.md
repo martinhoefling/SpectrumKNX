@@ -85,18 +85,10 @@ All data is stored in the Add-on's persistent `/data` directory, which is manage
 
 > **Important:** Uninstalling the Add-on will delete all data. If you want to keep your telegram history, export it before uninstalling.
 
-### 2.6 Optional: Exposing PostgreSQL
+### 2.6 Database Access
+By default, the internal PostgreSQL database is restricted to `127.0.0.1` for security, as the Add-on runs on the host network. This ensures it is not exposed to your local network.
 
-By default, the internal PostgreSQL database is not exposed to the network. If you want to connect external tools (e.g., Grafana) to the database, you can expose port `5432`:
-
-1. Go to the **Network** tab of the Add-on configuration.
-2. Set a host port for `5432/tcp` (e.g., `5432`).
-3. Connect with:
-   - **Host:** Your Home Assistant IP
-   - **Port:** The port you configured
-   - **User:** `postgres`
-   - **Database:** `spectrum_knx`
-   - **Password:** _(none, uses trust authentication)_
+To connect external tools (e.g., Grafana) to the database, you must access it from the same host or use a SSH tunnel to port `5432`.
 
 ### 2.7 Supported Architectures
 
@@ -137,9 +129,43 @@ You can configure the application via environment variables. These can be set in
 | Variable | Description | Default |
 |---|---|---|
 | `KNX_PASSWORD` | Password for the ETS project file | N/A |
-| `KNX_GATEWAY_IP` | IP of the KNX IP Gateway | `AUTO` |
-| `KNX_GATEWAY_PORT`| Port of the KNX IP Gateway | `3671` |
 | `KNX_PROJECT_PATH`| Path to the `.knxproj` file | `/project/knx_project.knxproj` |
+| `KNX_CONNECTION_TYPE` | Type of connection (`AUTOMATIC`, `TUNNELING`, `TUNNELING_TCP`, `TUNNELING_TCP_SECURE`, `ROUTING`, `ROUTING_SECURE`) | `AUTOMATIC` |
+| `KNX_GATEWAY_IP` | IP of the KNX IP Gateway (or `AUTO` for scan) | `AUTO` |
+| `KNX_GATEWAY_PORT`| Port of the KNX IP Gateway | `3671` |
+| `KNX_LOCAL_IP` | Local IP or interface name to bind to | N/A |
+| `KNX_INDIVIDUAL_ADDRESS`| Individual address (e.g. `1.1.100`) | N/A |
+| `KNX_ROUTE_BACK` | Enable route back for NAT/Docker bridge | `false` |
+| `KNX_MULTICAST_GROUP`| Multicast group for routing | `224.0.23.12`|
+| `KNX_MULTICAST_PORT` | Multicast port for routing | `3671` |
+| `KNX_KNXKEYS_FILE` | Path to the `.knxkeys` file | N/A |
+| `KNX_KNXKEYS_PASSWORD`| Password for the `.knxkeys` file | N/A |
+| `KNX_SECURE_USER_ID` | User ID for Secure Tunneling | N/A |
+| `KNX_SECURE_USER_PASSWORD`| User Password for Secure Tunneling | N/A |
+| `KNX_SECURE_DEVICE_PASSWORD`| Device Password for Secure Tunneling | N/A |
+| `KNX_SECURE_BACKBONE_KEY`| Backbone Key (hex) for Secure Routing | N/A |
+| `KNX_SECURE_LATENCY_MS`| Latency in ms for Secure Routing | N/A |
+
+### Configuration Examples
+
+#### NAT / Docker Bridge Mode
+If your container is running in a bridge network and cannot receive responses from the gateway:
+```env
+KNX_ROUTE_BACK=true
+```
+
+#### KNX Multicast Routing
+For installations with IP routers:
+```env
+KNX_CONNECTION_TYPE=ROUTING
+```
+
+#### KNX Secure Tunneling (using knxkeys)
+```env
+KNX_CONNECTION_TYPE=TUNNELING_TCP_SECURE
+KNX_KNXKEYS_FILE=/project/house.knxkeys
+KNX_KNXKEYS_PASSWORD=my_secure_password
+```
 
 ### System Settings
 | Variable | Description | Default |
