@@ -3,11 +3,6 @@ import logging
 import os
 from datetime import UTC, datetime
 
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
 from sqlalchemy import insert
 from xknx import XKNX
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
@@ -87,32 +82,73 @@ async def _load_project_data() -> bool:
         logger.error(f"Error loading/parsing KNX project: {e}")
         return False
 
-async def watch_project_file():
+async def _reconnect_knx():
+    """Reconnect to KNX bus with rebuilt configuration (e.g. after knxkeys change)."""
+    global xknx_instance
+    if xknx_instance:
+        logger.info("Reconnecting to KNX bus with updated configuration...")
+        try:
+            await xknx_instance.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping previous connection: {e}")
+    
+    connection_config = _build_connection_config()
+    xknx_instance = XKNX(connection_config=connection_config)
+    
+    if global_knx_project:
+        dpt_dict = {
+            ga: data["dpt"]
+            for ga, data in global_knx_project["group_addresses"].items()
+            if data["dpt"] is not None
+        }
+        xknx_instance.group_address_dpt.set(dpt_dict)
+
+    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb)
+    try:
+        await xknx_instance.start()
+        logger.info("KNX Daemon reconnected to bus successfully.")
+    except Exception as e:
+        logger.error(f"Failed to reconnect to KNX bus: {e}")
+
+async def _watch_files():
+    """Watch project and knxkeys files for changes, triggering reload/reconnect."""
     ets_project_file = os.getenv("KNX_PROJECT_PATH")
     if not ets_project_file and not os.getenv("KNX_PASSWORD"):
         ets_project_file = "/project/knx_project.knxproj"
+    
+    knxkeys_file, _ = _resolve_knxkeys_path()
+    if not knxkeys_file:
+        knxkeys_file = DEFAULT_KNXKEYS_FILE  # Watch the default path even if it doesn't exist yet
+
+    proj_mtime = os.path.getmtime(ets_project_file) if ets_project_file and os.path.exists(ets_project_file) else 0
+    keys_mtime = os.path.getmtime(knxkeys_file) if os.path.exists(knxkeys_file) else 0
         
-    if not ets_project_file:
-        return
-        
-    last_mtime = 0
-    if os.path.exists(ets_project_file):
-        last_mtime = os.path.getmtime(ets_project_file)
-        
-    logger.info(f"Starting project file watcher for {ets_project_file} (interval: 60s)")
+    watched = []
+    if ets_project_file:
+        watched.append(ets_project_file)
+    watched.append(knxkeys_file)
+    logger.info(f"Starting file watcher for {watched} (interval: 60s)")
+    
     while True:
         await asyncio.sleep(60)
         try:
-            if os.path.exists(ets_project_file):
+            # Check project file
+            if ets_project_file and os.path.exists(ets_project_file):
                 current_mtime = os.path.getmtime(ets_project_file)
-                if current_mtime > last_mtime:
+                if current_mtime > proj_mtime:
                     logger.info(f"Detected change in {ets_project_file}, reloading project...")
                     await _load_project_data()
-                    last_mtime = current_mtime
+                    proj_mtime = current_mtime
+            
+            # Check knxkeys file
+            if os.path.exists(knxkeys_file):
+                current_mtime = os.path.getmtime(knxkeys_file)
+                if current_mtime > keys_mtime:
+                    logger.info(f"Detected change in {knxkeys_file}, reconnecting with new credentials...")
+                    await _reconnect_knx()
+                    keys_mtime = current_mtime
         except Exception as e:
-            logger.error(f"Error in project file watcher: {e}")
-
-
+            logger.error(f"Error in file watcher: {e}")
 
 
 async def process_telegram_async(telegram: XknxTelegram):
@@ -180,10 +216,26 @@ def telegram_received_cb(telegram: XknxTelegram):
     except Exception as e:
         logger.error(f"Failed to create task for telegram: {e}")
 
-def _build_secure_config() -> SecureConfig | None:
-    """Build SecureConfig from environment variables, avoiding conflicting options."""
+DEFAULT_KNXKEYS_FILE = "/project/knx_keys.knxkeys"
+DEFAULT_KNXKEYS_PASSWORD_FILE = "/project/knx_keys_password"
+
+def _resolve_knxkeys_path() -> tuple[str | None, str | None]:
+    """Resolve the knxkeys file path and password, checking env vars then defaults."""
     knxkeys_file = os.getenv("KNX_KNXKEYS_FILE")
     knxkeys_password = os.getenv("KNX_KNXKEYS_PASSWORD")
+    
+    if not knxkeys_file and os.path.exists(DEFAULT_KNXKEYS_FILE):
+        knxkeys_file = DEFAULT_KNXKEYS_FILE
+        logger.info(f"Auto-detected knxkeys file at {DEFAULT_KNXKEYS_FILE}")
+        if not knxkeys_password and os.path.exists(DEFAULT_KNXKEYS_PASSWORD_FILE):
+            with open(DEFAULT_KNXKEYS_PASSWORD_FILE, encoding="utf-8") as f:
+                knxkeys_password = f.read().strip()
+    
+    return knxkeys_file, knxkeys_password
+
+def _build_secure_config() -> SecureConfig | None:
+    """Build SecureConfig from environment variables, avoiding conflicting options."""
+    knxkeys_file, knxkeys_password = _resolve_knxkeys_path()
     
     user_id = os.getenv("KNX_SECURE_USER_ID")
     user_password = os.getenv("KNX_SECURE_USER_PASSWORD")
@@ -259,6 +311,58 @@ def _build_connection_config() -> ConnectionConfig:
         secure_config=secure_config
     )
 
+def get_server_config() -> dict:
+    """Return the effective server configuration for the status API, with passwords masked."""
+    def mask(val: str | None) -> str | None:
+        if not val:
+            return None
+        return "****" if len(val) <= 8 else val[:2] + "*" * (len(val) - 4) + val[-2:]
+
+    knxkeys_file, _ = _resolve_knxkeys_path()
+    ets_project_file = os.getenv("KNX_PROJECT_PATH")
+    if not ets_project_file and not os.getenv("KNX_PASSWORD"):
+        default_file = "/project/knx_project.knxproj"
+        if os.path.exists(default_file):
+            ets_project_file = default_file
+
+    connected = False
+    if xknx_instance is not None:
+        try:
+            connected = xknx_instance.connection_manager.connected.is_set()
+        except Exception:
+            connected = False
+
+    return {
+        "connection": {
+            "type": os.getenv("KNX_CONNECTION_TYPE", "AUTOMATIC"),
+            "gateway_ip": os.getenv("KNX_GATEWAY_IP", "AUTO"),
+            "gateway_port": int(os.getenv("KNX_GATEWAY_PORT", 3671)),
+            "local_ip": os.getenv("KNX_LOCAL_IP"),
+            "individual_address": os.getenv("KNX_INDIVIDUAL_ADDRESS"),
+            "route_back": os.getenv("KNX_ROUTE_BACK", "false").lower() == "true",
+            "multicast_group": os.getenv("KNX_MULTICAST_GROUP", "224.0.23.12"),
+            "multicast_port": int(os.getenv("KNX_MULTICAST_PORT", 3671)),
+        },
+        "security": {
+            "knxkeys_file": knxkeys_file,
+            "knxkeys_password": mask(os.getenv("KNX_KNXKEYS_PASSWORD")),
+            "user_id": os.getenv("KNX_SECURE_USER_ID"),
+            "user_password": mask(os.getenv("KNX_SECURE_USER_PASSWORD")),
+            "device_password": mask(os.getenv("KNX_SECURE_DEVICE_PASSWORD")),
+            "backbone_key": mask(os.getenv("KNX_SECURE_BACKBONE_KEY")),
+            "latency_ms": os.getenv("KNX_SECURE_LATENCY_MS"),
+        },
+        "files": {
+            "project_file": ets_project_file,
+            "project_loaded": global_knx_project is not None,
+            "knxkeys_file": knxkeys_file,
+            "knxkeys_found": knxkeys_file is not None and os.path.exists(knxkeys_file),
+        },
+        "status": {
+            "connected": connected,
+        },
+    }
+
 async def knx_startup():
     global xknx_instance, global_knx_project, project_name_map
     logger.info("Starting KNX Daemon...")
@@ -290,8 +394,8 @@ async def knx_startup():
     try:
         await xknx_instance.start()
         logger.info("KNX Daemon connected to bus and listening.")
-        # Start background project file watcher
-        asyncio.create_task(watch_project_file())
+        # Start background file watcher (project + knxkeys)
+        asyncio.create_task(_watch_files())
     except Exception as e:
         logger.error(f"Failed to connect to KNX bus: {e}")
 

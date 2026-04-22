@@ -1,15 +1,15 @@
 import asyncio
 import random
 from datetime import UTC, datetime, timedelta
+
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-from sqlalchemy import insert
+from sqlalchemy import insert  # noqa: E402
 
-from database import engine
-from models import telegrams_table
+from database import engine  # noqa: E402
+from models import telegrams_table  # noqa: E402
 
 
 async def seed_data():

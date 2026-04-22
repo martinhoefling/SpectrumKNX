@@ -73,7 +73,11 @@ The Add-on uses the built-in **Project Upload Wizard** for ETS project configura
 
 > **Note:** The uploaded project file is persisted in the Add-on's `/data` volume and will survive Add-on restarts and updates. To replace it later, go to **Settings** within the Spectrum KNX UI.
 
-### 2.5 Data Persistence
+### 2.5 KNX Secure Keys
+
+If your KNX installation uses KNX IP Secure, you can upload a `.knxkeys` file via the web UI. See [Section 5: KNX Secure Keys](#5-knx-secure-keys) for details on the auto-detection, upload, and hot-reload behavior.
+
+### 2.6 Data Persistence
 
 All data is stored in the Add-on's persistent `/data` directory, which is managed by the Home Assistant Supervisor:
 
@@ -82,15 +86,17 @@ All data is stored in the Add-on's persistent `/data` directory, which is manage
 | PostgreSQL / TimescaleDB | `/data/postgres/` | ✅ Survives restarts & updates |
 | Uploaded `.knxproj` file | `/data/project/` | ✅ Survives restarts & updates |
 | Uploaded project password | `/data/project/` | ✅ Survives restarts & updates |
+| Uploaded `.knxkeys` file | `/data/project/` | ✅ Survives restarts & updates |
+| Uploaded keys password | `/data/project/` | ✅ Survives restarts & updates |
 
 > **Important:** Uninstalling the Add-on will delete all data. If you want to keep your telegram history, export it before uninstalling.
 
-### 2.6 Database Access
+### 2.7 Database Access
 By default, the internal PostgreSQL database is restricted to `127.0.0.1` for security, as the Add-on runs on the host network. This ensures it is not exposed to your local network.
 
 To connect external tools (e.g., Grafana) to the database, you must access it from the same host or use a SSH tunnel to port `5432`.
 
-### 2.7 Supported Architectures
+### 2.8 Supported Architectures
 
 | Architecture | Supported |
 |---|---|
@@ -138,7 +144,7 @@ You can configure the application via environment variables. These can be set in
 | `KNX_ROUTE_BACK` | Enable route back for NAT/Docker bridge | `false` |
 | `KNX_MULTICAST_GROUP`| Multicast group for routing | `224.0.23.12`|
 | `KNX_MULTICAST_PORT` | Multicast port for routing | `3671` |
-| `KNX_KNXKEYS_FILE` | Path to the `.knxkeys` file | N/A |
+| `KNX_KNXKEYS_FILE` | Path to the `.knxkeys` file (auto-detected at `/project/knx_keys.knxkeys` if not set) | N/A |
 | `KNX_KNXKEYS_PASSWORD`| Password for the `.knxkeys` file | N/A |
 | `KNX_SECURE_USER_ID` | User ID for Secure Tunneling | N/A |
 | `KNX_SECURE_USER_PASSWORD`| User Password for Secure Tunneling | N/A |
@@ -172,3 +178,56 @@ KNX_KNXKEYS_PASSWORD=my_secure_password
 |---|---|---|
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, etc.) | `INFO` |
 | `APP_IMAGE` | Docker image to pull (Prod Stack only) | `ghcr.io/martinhoefling/spectrum-knx:latest` |
+
+---
+
+## 5. KNX Secure Keys
+
+Spectrum KNX supports **KNX IP Secure** (both Tunneling and Routing) via `.knxkeys` files exported from ETS.
+
+### 5.1 Auto-Detection
+
+When `KNX_KNXKEYS_FILE` is **not** set, the daemon automatically looks for a keyfile at the default path:
+
+```
+/project/knx_keys.knxkeys
+```
+
+The password is read from:
+
+```
+/project/knx_keys_password
+```
+
+This means you can simply place the files at those paths (or upload them via the UI) without any environment variable configuration.
+
+### 5.2 Upload via Web UI
+
+If the `KNX_KNXKEYS_FILE` environment variable is **not** set, the Spectrum KNX UI provides an upload wizard accessible from **Settings → KNX Security Keys**:
+
+1. Open the Spectrum KNX web interface.
+2. Navigate to **Settings** (via the dropdown menu).
+3. Click **Upload / Replace KNX Keys File (.knxkeys)**.
+4. Select the `.knxkeys` file exported from ETS and enter the password.
+5. Click **Upload & Apply**.
+
+The backend will immediately **reconnect** to the KNX bus using the new credentials. No restart is required.
+
+### 5.3 Hot-Reload
+
+The daemon watches the knxkeys file for changes every 60 seconds. If the file is replaced on disk (e.g., via a volume mount update or a new upload), the daemon will automatically:
+
+1. Detect the file modification
+2. Disconnect from the KNX bus
+3. Rebuild the secure configuration
+4. Reconnect with the new credentials
+
+### 5.4 Secure Configuration Priority
+
+If multiple security methods are configured simultaneously, the daemon uses the following priority:
+
+1. **`.knxkeys` file** — highest priority. If a keyfile is present (via env var or auto-detected), all other manual secure variables are ignored.
+2. **Backbone Key** (`KNX_SECURE_BACKBONE_KEY`) — used for Secure Routing if no keyfile is present.
+3. **Manual Tunneling Credentials** (`KNX_SECURE_USER_ID` + `KNX_SECURE_USER_PASSWORD`) — lowest priority.
+
+Conflicts are logged as warnings.

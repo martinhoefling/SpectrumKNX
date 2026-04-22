@@ -9,6 +9,7 @@ import { HistorySearch } from './components/HistorySearch';
 import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
 import { ProjectUploadWizard } from './components/ProjectUploadWizard';
+import { KeysUploadWizard } from './components/KeysUploadWizard';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
@@ -122,6 +123,10 @@ function App() {
     upload_required: boolean;
   } | null>(null);
   const [isUploadWizardOpen, setIsUploadWizardOpen] = useState(false);
+  const [isKeysWizardOpen, setIsKeysWizardOpen] = useState(false);
+  const [knxkeysStatus, setKnxkeysStatus] = useState<{ upload_feature_active: boolean; knxkeys_found: boolean } | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [serverConfig, setServerConfig] = useState<any>(null);
 
   // ── Settings & Persistence ──────────────────────────────────────────────────
   const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 25000));
@@ -213,6 +218,18 @@ function App() {
         }
       })
       .catch(err => console.error("Failed to check project status", err));
+
+    // Load knxkeys status
+    fetch(apiUrl('/api/knxkeys/status'))
+      .then(r => r.json())
+      .then(data => setKnxkeysStatus(data))
+      .catch(err => console.error("Failed to check knxkeys status", err));
+
+    // Load server config
+    fetch(apiUrl('/api/server/config'))
+      .then(r => r.json())
+      .then(data => setServerConfig(data))
+      .catch(err => console.error("Failed to load server config", err));
   }, []);
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
@@ -548,7 +565,89 @@ function App() {
                 </>
               )}
 
-              <div style={{ marginTop: '3rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {knxkeysStatus?.upload_feature_active && (
+                <>
+                  <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
+                    KNX Security Keys
+                  </h3>
+                  <button 
+                    className="glass-input" 
+                    onClick={() => setIsKeysWizardOpen(true)}
+                    style={{ width: '100%', padding: '0.75rem', textAlign: 'left', cursor: 'pointer', fontSize: '0.85rem' }}
+                  >
+                    Upload / Replace KNX Keys File (.knxkeys)
+                  </button>
+                </>
+              )}
+
+              {/* Server Configuration — always visible */}
+              <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Server Configuration
+                </h3>
+                {serverConfig ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    {/* Connection Status */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>KNX Connection:</span>
+                      <span style={{ 
+                        color: serverConfig.status?.connected ? 'var(--success)' : 'var(--error)', 
+                        fontWeight: 600 
+                      }}>
+                        {serverConfig.status?.connected ? '● Connected' : '● Disconnected'}
+                      </span>
+                    </div>
+
+                    {/* Connection Settings */}
+                    {Object.entries(serverConfig.connection || {}).map(([key, value]) => (
+                      value != null && (
+                        <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
+                          <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                            {String(value)}
+                          </span>
+                        </div>
+                      )
+                    ))}
+
+                    {/* Files */}
+                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'var(--text-dim)' }}>Project file:</span>
+                        <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                          {serverConfig.files?.project_loaded ? '● Loaded' : '○ Not loaded'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                        <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>
+                        <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                          {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Security */}
+                    {Object.entries(serverConfig.security || {}).some(([, v]) => v != null) && (
+                      <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                        {Object.entries(serverConfig.security || {}).map(([key, value]) => (
+                          value != null && (
+                            <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                              <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
+                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                                {String(value)}
+                              </span>
+                            </div>
+                          )
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Loading...</span>
+                )}
+              </div>
+
+              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   System Information
                 </h3>
@@ -646,6 +745,24 @@ function App() {
           onSuccess={() => {
             setIsUploadWizardOpen(false);
             window.location.reload();
+          }} 
+        />
+      )}
+
+      {isKeysWizardOpen && (
+        <KeysUploadWizard 
+          onClose={() => setIsKeysWizardOpen(false)}
+          onSuccess={() => {
+            setIsKeysWizardOpen(false);
+            // Refresh server config to show updated status
+            fetch(apiUrl('/api/server/config'))
+              .then(r => r.json())
+              .then(data => setServerConfig(data))
+              .catch(() => {});
+            fetch(apiUrl('/api/knxkeys/status'))
+              .then(r => r.json())
+              .then(data => setKnxkeysStatus(data))
+              .catch(() => {});
           }} 
         />
       )}

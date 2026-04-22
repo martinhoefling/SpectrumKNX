@@ -21,6 +21,7 @@ venv.bak/
 # Project Files
 *.knxproj
 *.knxkeys
+project/*
 
 # Node
 node_modules/

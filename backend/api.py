@@ -312,6 +312,63 @@ async def upload_project(
     return {"status": "ok", "message": "Project loaded successfully"}
 
 
+@router.get("/api/server/config")
+async def get_server_config():
+    """Returns the effective server configuration with passwords masked"""
+    return knx_daemon.get_server_config()
+
+
+@router.get("/api/knxkeys/status")
+async def get_knxkeys_status():
+    """Returns the status of the knxkeys upload feature"""
+    env_knxkeys = os.getenv("KNX_KNXKEYS_FILE")
+    
+    upload_feature_active = not env_knxkeys
+    knxkeys_found = False
+    
+    if env_knxkeys:
+        knxkeys_found = os.path.exists(env_knxkeys)
+    else:
+        knxkeys_found = os.path.exists(knx_daemon.DEFAULT_KNXKEYS_FILE)
+    
+    return {
+        "upload_feature_active": upload_feature_active,
+        "knxkeys_found": knxkeys_found,
+    }
+
+
+@router.post("/api/knxkeys/upload")
+async def upload_knxkeys(
+    file: UploadFile = File(...),
+    password: str = Form("")
+):
+    """Uploads a .knxkeys file and password, saving them to the default volume and reconnecting"""
+    env_knxkeys = os.getenv("KNX_KNXKEYS_FILE")
+    
+    if env_knxkeys:
+        raise HTTPException(status_code=400, detail="Upload feature is disabled because KNX_KNXKEYS_FILE environment variable is set.")
+    
+    if not file.filename or not file.filename.endswith(".knxkeys"):
+        raise HTTPException(status_code=400, detail="File must be a .knxkeys file")
+    
+    default_dir = "/project"
+    os.makedirs(default_dir, exist_ok=True)
+    
+    content = await file.read()
+    
+    with open(knx_daemon.DEFAULT_KNXKEYS_FILE, "wb") as f:
+        f.write(content)
+    
+    if password:
+        with open(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE, "w", encoding="utf-8") as f:
+            f.write(password)
+    
+    # Trigger reconnection with new credentials
+    await knx_daemon._reconnect_knx()
+    
+    return {"status": "ok", "message": "KNX keys file uploaded. Reconnecting to bus..."}
+
+
 @router.websocket("/ws/telegrams")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
