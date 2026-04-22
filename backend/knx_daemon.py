@@ -3,6 +3,11 @@ import logging
 import os
 from datetime import UTC, datetime
 
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 from sqlalchemy import insert
 from xknx import XKNX
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig

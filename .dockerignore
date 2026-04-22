@@ -28,6 +28,7 @@ dist/
 kubernetes/
 assets/
 project/
+backend/.env
 
 # Temporary Directories
 tmp/

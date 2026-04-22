@@ -1,6 +1,10 @@
 import asyncio
 import random
 from datetime import UTC, datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 from sqlalchemy import insert
 

@@ -20,6 +20,7 @@ venv.bak/
 
 # Project Files
 *.knxproj
+*.knxkeys
 
 # Node
 node_modules/
@@ -47,6 +48,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 .coverage
+backend/.env
 
 # Logs
 logs
