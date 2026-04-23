@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ${APP_IMAGE:-ghcr.io/martinhoefling/spectrum-knx:latest}
+    image: ${APP_IMAGE:-ghcr.io/martinhoefling/spectrumknx:latest}
     container_name: knx_backend
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-knxuser}

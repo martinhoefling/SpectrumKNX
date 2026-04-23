@@ -177,7 +177,7 @@ KNX_KNXKEYS_PASSWORD=my_secure_password
 | Variable | Description | Default |
 |---|---|---|
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, etc.) | `INFO` |
-| `APP_IMAGE` | Docker image to pull (Prod Stack only) | `ghcr.io/martinhoefling/spectrum-knx:latest` |
+| `APP_IMAGE` | Docker image to pull (Prod Stack only) | `ghcr.io/martinhoefling/spectrumknx:latest` |
 
 ---
 
