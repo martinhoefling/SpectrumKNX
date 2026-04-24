@@ -357,3 +357,27 @@ def test_upload_project_failure(monkeypatch, tmp_path):
     response = client.post("/api/project/upload", data={"password": "bad"}, files={"file": ("test.knxproj", b"dummy")})
     assert response.status_code == 400
     assert "Incorrect password" in response.json()["detail"]
+def test_upload_project_empty_password(monkeypatch, tmp_path):
+    monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+    
+    import os
+    original_makedirs = os.makedirs
+    def mock_makedirs(name, exist_ok=False):
+        if name == "/project":
+            return
+        original_makedirs(name, exist_ok=exist_ok)
+    monkeypatch.setattr(os, "makedirs", mock_makedirs)
+    
+    from unittest.mock import mock_open
+    m = mock_open()
+    monkeypatch.setattr("builtins.open", m)
+    
+    async def mock_load():
+        return True
+    monkeypatch.setattr(knx_daemon, "_load_project_data", mock_load)
+    
+    # Test with empty password
+    response = client.post("/api/project/upload", data={"password": ""}, files={"file": ("test.knxproj", b"dummy")})
+    assert response.status_code == 200
+    m.assert_any_call(os.path.join("/project", "knx_project_password"), "w", encoding="utf-8")
