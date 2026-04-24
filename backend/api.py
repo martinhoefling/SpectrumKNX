@@ -273,7 +273,7 @@ async def get_project_status():
 @router.post("/api/project/upload")
 async def upload_project(
     file: UploadFile = File(...),
-    password: str = Form(...)
+    password: str = Form("")
 ):
     """Uploads a KNX project file and password, saving them to the default volume"""
     env_proj = os.getenv("KNX_PROJECT_PATH")
