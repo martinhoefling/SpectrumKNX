@@ -40,7 +40,24 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
       const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.detail || 'Upload failed');
+        // Handle FastAPI validation errors which return 'detail' as an array
+        interface ValidationErrorDetail {
+          msg: string;
+          loc: (string | number)[];
+          type: string;
+          input?: unknown;
+        }
+        let errorMsg = 'Upload failed';
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errorMsg = data.detail;
+          } else if (Array.isArray(data.detail)) {
+            errorMsg = (data.detail as ValidationErrorDetail[]).map((d) => d.msg || JSON.stringify(d)).join(', ');
+          } else {
+            errorMsg = JSON.stringify(data.detail);
+          }
+        }
+        throw new Error(errorMsg);
       }
       
       onSuccess();
