@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
-
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
+from knx_telegram_store import StoredTelegram, TelegramQueryResult
 
 import knx_daemon
-from database import get_db
 from main import app
 
 client = TestClient(app)
@@ -66,52 +66,37 @@ def test_get_filter_options_with_project():
     assert data["dpts"][1]["main"] == 9
     assert data["dpts"][1]["sub"] is None
 
-# Mock Database Dependency
-
-
-async def override_get_db():
-    class MockResult:
-        def mappings(self):
-            class MockMappings:
-                def all(self):
-                    return [
-                        {
-                            "timestamp": datetime(2023, 1, 1),
-                            "source_address": "1.1.1", 
-                            "target_address": "1/2/3",
-                            "telegram_type": "GroupValueWrite",
-                            "dpt": "1.001",
-                            "dpt_main": 1,
-                            "dpt_sub": 1,
-                            "raw_data": b"\x01",
-                            "value_numeric": 1.0,
-                            "value_json": None
-                        }
-                    ]
-            return MockMappings()
-        def fetchall(self):
-            return [[datetime(2023, 1, 1)]]
-
-    class MockSession:
-        async def execute(self, query):
-            return MockResult()
-        
-        async def scalar(self, query):
-            return 1
-            
-    yield MockSession()
-
-app.dependency_overrides[get_db] = override_get_db
-
-def test_get_telegrams():
+# Mock Database Store instead of DB Dependency
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams(mock_query):
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[
+            StoredTelegram(
+                timestamp=datetime(2023, 1, 1),
+                source="1.1.1",
+                destination="1/2/3",
+                telegramtype="GroupValueWrite",
+                direction="Incoming",
+                dpt_main=1,
+                dpt_sub=1,
+                payload=None,
+                value=1.0,
+                raw_data=b"\x01",
+                source_name="Test Source",
+                destination_name="Test GA"
+            )
+        ],
+        total_count=1,
+        limit_reached=False
+    )
+    
     response = client.get("/api/telegrams?limit=10&source_address=1.1.1&target_address=1/2/3&telegram_type=GroupValueWrite")
     assert response.status_code == 200
     data = response.json()
-    # The API returns {"telegrams": [...], "metadata": {...}}
     assert "telegrams" in data
     assert len(data["telegrams"]) == 1
     assert data["telegrams"][0]["source_address"] == "1.1.1"
-    assert data["telegrams"][0]["raw_data"] == "01" 
+    assert data["telegrams"][0]["raw_data"] == "01"
 
 def test_get_filter_options_invalid_device_address():
     knx_daemon.global_knx_project = {
@@ -149,116 +134,90 @@ def test_get_filter_options_dpt_deduplication():
     assert data["dpts"][1]["main"] == 9
     assert data["dpts"][1]["sub"] is None
 
-def test_get_telegrams_extended_filters():
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_extended_filters(mock_query):
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[
+            StoredTelegram(
+                timestamp=datetime(2023, 1, 1),
+                source="1.1.1",
+                destination="1/2/3",
+                telegramtype="GroupValueWrite",
+                direction="Incoming",
+                dpt_main=1,
+                dpt_sub=1,
+                payload=None,
+                value=1.0,
+                raw_data=b"\x01"
+            )
+        ],
+        total_count=1,
+        limit_reached=False
+    )
     # Test with dpt_main, start_time, and end_time
     response = client.get("/api/telegrams?limit=10&dpt_main=1,9&start_time=2023-01-01T00:00:00Z&end_time=2023-12-31T23:59:59Z")
     assert response.status_code == 200
     data = response.json()
     assert "telegrams" in data
-    # Ensure our mock returns the 1 item
     assert len(data["telegrams"]) == 1
 
-def test_get_telegrams_delta_no_match():
-    # If delta search matches no core rows, it returns empty
-    async def override_db_no_match():
-        class MockResult:
-            def fetchall(self):
-                return []
-        class MockSession:
-            async def execute(self, query):
-                return MockResult()
-        yield MockSession()
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_delta_no_match(mock_query):
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[],
+        total_count=0,
+        limit_reached=False
+    )
+    response = client.get("/api/telegrams?delta_before_ms=100&source_address=9.9.9")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["telegrams"] == []
+    assert data["metadata"]["total_count"] == 0
 
-    app.dependency_overrides[get_db] = override_db_no_match
-    try:
-        response = client.get("/api/telegrams?delta_before_ms=100&source_address=9.9.9")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["telegrams"] == []
-        assert data["metadata"]["total_count"] == 0
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-def test_get_telegrams_delta_with_matches():
-    from datetime import datetime, timedelta
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_delta_with_matches(mock_query):
+    from datetime import timedelta
     base_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=UTC)
 
-    # We will mock the DB connection differently: instead of a single mock returning everything,
-    # we inspect the SQL query. The real API endpoint does two queries:
-    # 1. Fetching the matching timestamps
-    # 2. Context query with bounds min_ts - before and max_ts + after
-    async def override_db_matches():
-        class MockMappings:
-            def all(self):
-                return [
-                    {
-                        "timestamp": base_time - timedelta(milliseconds=50),
-                        "source_address": "1.1.2",
-                        "target_address": "1/2/4",
-                        "telegram_type": "GroupValueRead",
-                        "dpt": "1.001",
-                        "dpt_main": 1,
-                        "dpt_sub": 1,
-                        "raw_data": b"\x00",
-                        "value_numeric": 0.0,
-                        "value_json": None
-                    },
-                    {
-                        "timestamp": base_time,
-                        "source_address": "1.1.1",
-                        "target_address": "1/2/3",
-                        "telegram_type": "GroupValueWrite",
-                        "dpt": "1.001",
-                        "dpt_main": 1,
-                        "dpt_sub": 1,
-                        "raw_data": b"\x01",
-                        "value_numeric": 1.0,
-                        "value_json": None
-                    },
-                    {
-                        "timestamp": base_time + timedelta(milliseconds=150),
-                        "source_address": "1.1.3",
-                        "target_address": "1/2/5",
-                        "telegram_type": "GroupValueResponse",
-                        "dpt": "1.001",
-                        "dpt_main": 1,
-                        "dpt_sub": 1,
-                        "raw_data": b"\x01",
-                        "value_numeric": 1.0,
-                        "value_json": None
-                    }
-                ]
-        class MockResultContext:
-            def mappings(self):
-                return MockMappings()
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[
+            StoredTelegram(
+                timestamp=base_time - timedelta(milliseconds=50),
+                source="1.1.2",
+                destination="1/2/4",
+                telegramtype="GroupValueRead",
+                direction="Incoming",
+                dpt_main=1,
+                dpt_sub=1,
+                payload=None,
+                value=0.0,
+                raw_data=b"\x00"
+            ),
+            StoredTelegram(
+                timestamp=base_time,
+                source="1.1.1",
+                destination="1/2/3",
+                telegramtype="GroupValueWrite",
+                direction="Outgoing",
+                dpt_main=1,
+                dpt_sub=1,
+                payload=None,
+                value=1.0,
+                raw_data=b"\x01"
+            )
+        ],
+        total_count=2,
+        limit_reached=False
+    )
 
-        class MockResultTs:
-            def fetchall(self):
-                return [(base_time,)]
-
-        class MockSession:
-            async def execute(self, query):
-                query_str = str(query)
-                # Ensure we only return MockResultTs when it's just selecting the timestamp
-                if "SELECT telegrams.timestamp \nFROM telegrams" in query_str:
-                    return MockResultTs()
-                # Otherwise it's the context query
-                return MockResultContext()
-        yield MockSession()
-
-    app.dependency_overrides[get_db] = override_db_matches
-    try:
-        response = client.get("/api/telegrams?delta_before_ms=100&delta_after_ms=100&source_address=1.1.1")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["telegrams"]) == 2
-        assert data["metadata"]["total_count"] == 2
-        sources = [t["source_address"] for t in data["telegrams"]]
-        assert "1.1.1" in sources
-        assert "1.1.2" in sources
-        assert "1.1.3" not in sources
-    finally:
-        app.dependency_overrides.pop(get_db, None)
+    response = client.get("/api/telegrams?delta_before_ms=100&delta_after_ms=100&source_address=1.1.1")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["telegrams"]) == 2
+    assert data["metadata"]["total_count"] == 2
+    sources = [t["source_address"] for t in data["telegrams"]]
+    assert "1.1.1" in sources
+    assert "1.1.2" in sources
 
 
 def test_get_project_status_active(monkeypatch):

@@ -1,5 +1,6 @@
 import os
 
+from knx_telegram_store.backends.postgres import PostgresStore
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -19,6 +20,9 @@ DATABASE_URL = os.getenv(
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
+# Global Telegram Store
+store = PostgresStore(DATABASE_URL)
+
 AsyncSessionLocal = sessionmaker(
     bind=engine,
     class_=AsyncSession,
@@ -28,3 +32,6 @@ AsyncSessionLocal = sessionmaker(
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+async def get_store():
+    return store

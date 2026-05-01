@@ -3,14 +3,13 @@ import logging
 import os
 from datetime import UTC, datetime
 
-from sqlalchemy import insert
+from knx_telegram_store import StoredTelegram
 from xknx import XKNX
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
 from xknx.telegram.address import IndividualAddress
 
-from database import AsyncSessionLocal
-from models import telegrams_table
+from database import store
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
 from ws_manager import manager
 
@@ -161,50 +160,50 @@ async def process_telegram_async(telegram: XknxTelegram):
         
         value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = parse_telegram_payload(telegram, xknx_instance)
         
-        # Standardize source_addr for lookup if needed, but str(IndividualAddress) is usually consistent
+        # Standardize source_addr for lookup if needed
         source_name = project_name_map["ia"].get(source_addr)
         target_name = project_name_map["ga"].get(target_addr)
                  
-        async with AsyncSessionLocal() as session:
-            stmt = insert(telegrams_table).values(
-                timestamp=ts,
-                source_address=source_addr,
-                target_address=target_addr,
-                telegram_type=telegram_type_name,
-                dpt=dpt_str,
-                dpt_main=dpt_main,
-                dpt_sub=dpt_sub,
-                raw_data=raw_data,
-                value_numeric=value_numeric,
-                value_json=value_json
-            )
-            await session.execute(stmt)
-            await session.commit()
-            
-            dpt_display_name, _ = format_dpt_name(dpt_main, dpt_sub)
+        # Use the library store
+        await store.store(StoredTelegram(
+            timestamp=ts,
+            source=source_addr,
+            destination=target_addr,
+            telegramtype=telegram_type_name,
+            direction="Incoming",  # Default for daemon received telegrams
+            dpt_main=dpt_main,
+            dpt_sub=dpt_sub,
+            payload=value_json,
+            value=value_numeric,
+            raw_data=raw_data,
+            source_name=source_name or "",
+            destination_name=target_name or ""
+        ))
+        
+        dpt_display_name, _ = format_dpt_name(dpt_main, dpt_sub)
 
-            telegram_dict = {
-                "timestamp": ts,
-                "source_address": source_addr,
-                "source_name": source_name,
-                "target_address": target_addr,
-                "target_name": target_name,
-                "telegram_type": telegram_type_name,
-                "simplified_type": get_simplified_type(telegram_type_name),
-                "dpt": dpt_str,
-                "dpt_main": dpt_main,
-                "dpt_sub": dpt_sub,
-                "dpt_name": dpt_display_name,
-                "unit": unit,
-                "value_numeric": value_numeric,
-                "value_json": value_json,
-                "value_formatted": value_formatted,
-                "raw_data": raw_data.hex() if raw_data else None,
-                "raw_hex": raw_hex
-            }
-            await manager.broadcast(telegram_dict)
-            
-            logger.debug(f"DB Write: src={source_addr} ({source_name}) -> dst={target_addr} ({target_name}) | type={telegram_type_name} | dpt={dpt_str} | val={value_formatted} | raw={raw_hex}")
+        telegram_dict = {
+            "timestamp": ts,
+            "source_address": source_addr,
+            "source_name": source_name,
+            "target_address": target_addr,
+            "target_name": target_name,
+            "telegram_type": telegram_type_name,
+            "simplified_type": get_simplified_type(telegram_type_name),
+            "dpt": dpt_str,
+            "dpt_main": dpt_main,
+            "dpt_sub": dpt_sub,
+            "dpt_name": dpt_display_name,
+            "unit": unit,
+            "value_numeric": value_numeric,
+            "value_json": value_json,
+            "value_formatted": value_formatted,
+            "raw_data": raw_data.hex() if raw_data else None,
+            "raw_hex": raw_hex
+        }
+        await manager.broadcast(telegram_dict)
+        
+        logger.debug(f"DB Write: src={source_addr} ({source_name}) -> dst={target_addr} ({target_name}) | type={telegram_type_name} | dpt={dpt_str} | val={value_formatted} | raw={raw_hex}")
             
     except Exception as e:
         logger.error(f"Error processing telegram: {e}")
@@ -367,6 +366,9 @@ async def knx_startup():
     global xknx_instance, global_knx_project, project_name_map
     logger.info("Starting KNX Daemon...")
     
+    # Initialize the Telegram Store (including schema creation/renames)
+    await store.initialize()
+    
     connection_config = _build_connection_config()
     
     logger.info(
@@ -404,3 +406,4 @@ async def knx_shutdown():
     if xknx_instance:
         logger.info("Stopping KNX Daemon...")
         await xknx_instance.stop()
+    await store.close()

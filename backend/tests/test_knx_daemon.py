@@ -9,13 +9,11 @@ from knx_daemon import process_telegram_async, telegram_received_cb
 
 
 @pytest.mark.asyncio
-@patch("knx_daemon.AsyncSessionLocal")
+@patch("knx_daemon.store.store", new_callable=AsyncMock)
 @patch("knx_daemon.manager.broadcast", new_callable=AsyncMock)
 @patch("knx_daemon.parse_telegram_payload")
-async def test_process_telegram_async(mock_parse, mock_broadcast, mock_session_local):
+async def test_process_telegram_async(mock_parse, mock_broadcast, mock_store):
     # Setup mocks
-    mock_session = AsyncMock()
-    mock_session_local.return_value.__aenter__.return_value = mock_session
     
     # Mock parse_telegram_payload return value
     # value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex
@@ -42,8 +40,11 @@ async def test_process_telegram_async(mock_parse, mock_broadcast, mock_session_l
     await process_telegram_async(telegram)
     
     # Verify DB insertion
-    assert mock_session.execute.called
-    assert mock_session.commit.called
+    assert mock_store.called
+    stored_telegram = mock_store.call_args[0][0]
+    assert stored_telegram.source == "1.1.1"
+    assert stored_telegram.destination == "1/1/1"
+    assert stored_telegram.value == 1.0
     
     # Verify WebSocket broadcast
     assert mock_broadcast.called
