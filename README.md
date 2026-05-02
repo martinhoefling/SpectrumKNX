@@ -48,7 +48,7 @@ The easiest way to run Spectrum KNX is with Docker Compose. This automatically p
 See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
 
 ## 🛠 Tech Stack
-- **Backend:** Python 3.11+, FastAPI, `xknx`, WebSocket Streaming
+- **Backend:** Python 3.12+, FastAPI, `xknx`, WebSocket Streaming
 - **Database:** PostgreSQL + TimescaleDB
 - **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
 

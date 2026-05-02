@@ -1,6 +1,6 @@
 [tool.ruff]
 # Target Python version
-target-version = "py311"
+target-version = "py312"
 # Max line length for auto-format or other rules
 line-length = 120
 # Exclude common directories

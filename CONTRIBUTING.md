@@ -3,7 +3,7 @@
 Thank you for your interest in making Spectrum KNX better!
 
 ## Development Requirements
-- **Python 3.11+**
+- **Python 3.12+**
 - **Node.js 18+ & npm**
 - **Docker Compose** (for providing the local TimescaleDB instance)
 

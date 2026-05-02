@@ -13,7 +13,7 @@ The **KNX Telegram Analyzer** is an application designed to record, store, searc
 The system follows a standard modern client-server architecture with real-time streaming capabilities.
 
 ### Backend (Python/FastAPI)
-- **Language:** Python 3.11+
+- **Language:** Python 3.12+
 - **API Framework:** `FastAPI` logic for fast, modern, async REST endpoints.
 - **KNX Integration:** 
   - `xknx` connects asynchronously to the KNX IP router/interface to receive telegrams.
