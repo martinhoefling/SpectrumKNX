@@ -5,7 +5,7 @@ This document provides instructions for setting up the development environment, 
 ## Technology Stack
 
 ### Backend
-- **Language:** Python 3.11+
+- **Language:** Python 3.12+
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)
 - **KNX Integration:** [xknx](https://xknx.io/) for bus communication and [xknxproject](https://github.com/XKNX/xknxproject) for ETS project parsing.
 - **ORM:** [SQLAlchemy](https://www.sqlalchemy.org/) (Async)
@@ -29,7 +29,7 @@ This document provides instructions for setting up the development environment, 
 
 ### 1. Prerequisites
 - Docker and Docker Compose installed.
-- Python 3.11 installed (for local backend development).
+- Python 3.12 installed (for local backend development).
 - Node.js 24+ installed (for local frontend development).
 
 ### 2. Environment Configuration
@@ -47,7 +47,7 @@ Key variables:
 - `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8000`).
 
 ### 3. Database Setup
-The easiest way to run the database is via Docker Compose. This will automatically set up TimescaleDB and run the initialization scripts in `./db/init.sql`.
+The easiest way to run the database is via Docker Compose. This will start TimescaleDB. The backend automatically creates the schema on first startup via the `knx-telegram-store` library.
 
 ```bash
 docker-compose up -d db
@@ -106,6 +106,6 @@ This mode ignores local builds and mounts, using the official image instead.
 
 - `/backend`: FastAPI application, KNX daemon, and database models.
 - `/frontend`: React application and UI components.
-- `/db`: Database initialization scripts and hypertable configurations.
+- `/db`: (Removed) Schema is now managed by the `knx-telegram-store` library at runtime.
 - `/project`: Directory for storing ETS `.knxproj` files for parsing.
 - `docker-compose.yml`: Main orchestration file for services.

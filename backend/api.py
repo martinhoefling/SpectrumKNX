@@ -52,7 +52,7 @@ def _build_telegram_response(telegrams: list) -> list:
             "dpt_sub": t.dpt_sub,
             "value_numeric": t.value,
             "value_json": t.payload,
-            "raw_data": t.raw_data.hex() if t.raw_data else None,
+            "raw_data": t.raw_data if t.raw_data else None,
             "source_name": t.source_name,
             "target_name": t.destination_name,
         }

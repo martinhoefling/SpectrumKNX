@@ -175,7 +175,7 @@ async def process_telegram_async(telegram: XknxTelegram):
             dpt_sub=dpt_sub,
             payload=value_json,
             value=value_numeric,
-            raw_data=raw_data,
+            raw_data=raw_data.hex() if isinstance(raw_data, bytes) else raw_data,
             source_name=source_name or "",
             destination_name=target_name or ""
         ))
