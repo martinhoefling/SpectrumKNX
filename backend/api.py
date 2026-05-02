@@ -53,8 +53,8 @@ def _build_telegram_response(telegrams: list) -> list:
             "value_numeric": t.value,
             "value_json": t.payload,
             "raw_data": t.raw_data if t.raw_data else None,
-            "source_name": t.source_name,
-            "target_name": t.destination_name,
+            "source_name": t.source_name or knx_daemon.project_name_map["ia"].get(t.source),
+            "target_name": t.destination_name or knx_daemon.project_name_map["ga"].get(t.destination),
         }
 
         r["simplified_type"] = get_simplified_type(r["telegram_type"])

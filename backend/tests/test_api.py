@@ -81,7 +81,7 @@ def test_get_telegrams(mock_query):
                 dpt_sub=1,
                 payload=None,
                 value=1.0,
-                raw_data=b"\x01",
+                raw_data="01",
                 source_name="Test Source",
                 destination_name="Test GA"
             )
@@ -148,7 +148,7 @@ def test_get_telegrams_extended_filters(mock_query):
                 dpt_sub=1,
                 payload=None,
                 value=1.0,
-                raw_data=b"\x01"
+                raw_data="01"
             )
         ],
         total_count=1,
@@ -191,7 +191,7 @@ def test_get_telegrams_delta_with_matches(mock_query):
                 dpt_sub=1,
                 payload=None,
                 value=0.0,
-                raw_data=b"\x00"
+                raw_data="00"
             ),
             StoredTelegram(
                 timestamp=base_time,
@@ -203,7 +203,7 @@ def test_get_telegrams_delta_with_matches(mock_query):
                 dpt_sub=1,
                 payload=None,
                 value=1.0,
-                raw_data=b"\x01"
+                raw_data="01"
             )
         ],
         total_count=2,
