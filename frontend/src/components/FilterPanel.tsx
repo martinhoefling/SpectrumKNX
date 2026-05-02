@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Search, ChevronDown, ChevronRight, SlidersHorizontal, X, Clock } from 'lucide-react';
-import { 
-  type FilterOptions, 
-  type ActiveFilters, 
-  type FilterCounts, 
-  DEFAULT_FILTERS 
+import {
+  type FilterOptions,
+  type ActiveFilters,
+  type FilterCounts,
+  DEFAULT_FILTERS
 } from '../types/filters';
 
 // ─── FilterPanel component ────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
     onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
   >
-    <label 
+    <label
       onClick={(e) => { e.preventDefault(); onToggle(); }}
       style={{
       display: 'flex', alignItems: 'center', gap: '0.6rem',
@@ -116,7 +116,7 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
     </label>
 
     {onRemove && (
-      <button 
+      <button
         onClick={onRemove}
         title="Remove filter"
         style={{
@@ -216,9 +216,9 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
 
       {/* Active filters */}
       {activeCount > 0 && (
-        <div style={{ 
-          padding: '0.5rem 0.75rem', 
-          borderBottom: '1px solid var(--border-color)', 
+        <div style={{
+          padding: '0.5rem 0.75rem',
+          borderBottom: '1px solid var(--border-color)',
           background: 'rgba(255,255,255,0.02)',
           flexShrink: 0
         }}>
@@ -439,7 +439,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
 // Add styles for filter section
 const style = document.createElement('style');
 style.textContent = `
-  .filter-chip-removed { 
+  .filter-chip-removed {
     /* Placeholder to remove old styles if needed, but we'll just rewrite the whole block */
   }
 `;

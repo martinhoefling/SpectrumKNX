@@ -65,7 +65,7 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
 
     for (const [unit, rows] of grouped.entries()) {
       const isBinary = unit === 'binary';
-      
+
       // Get all unique timestamps for this bucket
       const tsSet = new Set<number>();
       rows.forEach(r => tsSet.add(r.ts));
@@ -73,11 +73,11 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
 
       // Find all unique targets within this bucket
       const targetsInBucket = Array.from(new Set(rows.map(r => r.target_address)));
-      
+
       const series: ChartSeries[] = targetsInBucket.map(addr => {
         // Find the friendly name
         const name = rows.find(r => r.target_address === addr)?.target_name || addr;
-        
+
         // Map timestamps to values
         let lastVal: number | null = null;
         const data = timestamps.map(ts => {

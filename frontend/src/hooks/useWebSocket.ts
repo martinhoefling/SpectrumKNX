@@ -55,12 +55,12 @@ export function useWebSocket(url: string, onTelegram?: (t: Telegram) => void) {
     socket.onclose = () => {
       console.log('WS Disconnected, retrying...');
       setIsConnected(false);
-      
+
       // Clean up previous timeout if it exists
       if (reconnectTimeoutRef.current) {
         window.clearTimeout(reconnectTimeoutRef.current);
       }
-      
+
       // Schedule reconnect using the ref to avoid TDZ issues
       reconnectTimeoutRef.current = window.setTimeout(() => {
         connectRef.current();

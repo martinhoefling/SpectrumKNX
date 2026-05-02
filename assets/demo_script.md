@@ -5,7 +5,7 @@ This script outlines the exact steps taken to produce the demo video and screens
 ## Preparation
 - Load `http://localhost:5173/`
 - Open Settings and change buffer limit to 80,000 telegrams
-- Load 7 days of data in the Group Monitor via History loader wait a few seconds until the load dialogue is gone to be ready for the live demo 
+- Load 7 days of data in the Group Monitor via History loader wait a few seconds until the load dialogue is gone to be ready for the live demo
 
 ## Recording Steps
 1. **Start Recording**: Start on the main dashboard, wait for live telegrams to show up. Take `01_live_telegrams.png`.

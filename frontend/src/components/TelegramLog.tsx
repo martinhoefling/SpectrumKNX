@@ -76,8 +76,8 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
   // Improved Auto-scroll logic
   useEffect(() => {
     if (
-      isAtBottom.current && 
-      sortConfig.key === 'timestamp' && 
+      isAtBottom.current &&
+      sortConfig.key === 'timestamp' &&
       sortConfig.direction === 'asc'
     ) {
       scrollAnchorRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -104,7 +104,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
       if (sortConfig.key === 'timestamp') {
         const timeA = new Date(aVal as string).getTime();
         const timeB = new Date(bVal as string).getTime();
-        return sortConfig.direction === 'asc' 
+        return sortConfig.direction === 'asc'
           ? timeA - timeB
           : timeB - timeA;
       }
@@ -124,7 +124,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
         const current = new Date(t.timestamp).getTime();
         const prev = new Date(items[idx - 1].timestamp).getTime();
         const diffMs = Math.abs(current - prev);
-        
+
         // Format as + SS.mmm or + MM:SS.mmm
         const date = new Date(diffMs);
         const mm = String(date.getUTCMinutes()).padStart(2, '0');
@@ -149,7 +149,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
           <Terminal size={20} className="accent-primary" />
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Group Monitor</h2>
         </div>
-        
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div className={isConnected ? 'active-dot' : 'inactive-dot'} />
@@ -162,7 +162,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
              <button className="icon-button" onClick={onClear} title="Clear log">
               <Trash2 size={18} />
             </button>
-            <button 
+            <button
               className="icon-button"
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
               style={{ color: isSettingsOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
@@ -192,7 +192,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
           </div>
         </div>
       )}
-      
+
       <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-panel)', zIndex: 10, backdropFilter: 'blur(8px)' }}>
@@ -216,13 +216,13 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
                   <div className="mono-addr" style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>{format(new Date(t.timestamp), 'HH:mm:ss.SS')}</div>
                   {visibleColumns.delta && t.deltaStr && <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.1rem' }}>{t.deltaStr}</div>}
                 </td>
-                
+
                 {/* Source Cell */}
                 <td style={{ padding: '0.75rem 1rem' }}>
                   <div className="mono-addr highlight">{t.source_address}</div>
                   {visibleColumns.sourceName && <div className="subtitle-name">{t.source_name || '-'}</div>}
                 </td>
-                
+
                 {/* Target Cell */}
                 <td style={{ padding: '0.75rem 1rem' }}>
                   <div className="mono-addr highlight-target">{t.target_address}</div>
@@ -275,14 +275,14 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
           </tbody>
         </table>
       </div>
-      
+
       <style>{`
         .active-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
         .inactive-dot { width: 8px; height: 8px; background: var(--error); border-radius: 50%; }
         .icon-button { background: transparent; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; padding: 0.35rem; color: var(--text-dim); }
         .icon-button:hover { color: var(--text-main) !important; transform: scale(1.1); background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
         .icon-button:hover svg { stroke: var(--error); }
-        
+
         .settings-dropdown {
           position: absolute;
           top: 3.5rem;
@@ -292,7 +292,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
           z-index: 100;
           animation: slide-up 0.2s ease-out;
         }
-        
+
         .setting-item {
           display: flex;
           align-items: center;
@@ -305,16 +305,16 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
           padding: 0.35rem 0;
           text-align: left;
         }
-        
+
         .checkbox { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--border-color); display: flex; align-items: center; justify-content: center; }
         .checkbox.checked { background: var(--accent-primary); border-color: var(--accent-primary); }
-        
+
         .sort-header { background: transparent; border: none; color: inherit; text-transform: inherit; letter-spacing: inherit; font-size: inherit; font-weight: inherit; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; padding: 0; }
         .mono-addr { font-family: 'JetBrains Mono', monospace; font-size: 0.8125rem; }
         .highlight { color: var(--text-dim); }
         .highlight-target { color: var(--accent-primary); font-weight: 500; }
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        
+
         .raw-badge {
           background: rgba(255, 255, 255, 0.05);
           padding: 0.15rem 0.4rem;
@@ -325,7 +325,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
           display: inline-block;
           border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        
+
         .log-row:hover { background: rgba(255, 255, 255, 0.015); }
         @keyframes slide-up { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>

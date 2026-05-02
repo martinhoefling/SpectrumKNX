@@ -27,5 +27,6 @@ class TestSecurity(unittest.TestCase):
         # Though os.path.abspath handles it, it's good to check
         self.assertFalse(is_safe_path(self.static_dir, "index.html\0.php"))
 
+
 if __name__ == "__main__":
     unittest.main()

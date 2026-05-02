@@ -14,14 +14,14 @@ ln -sfn /data/project /project
 if [ ! -s "$DATADIR/PG_VERSION" ]; then
     bashio::log.info "Initializing database..."
     s6-setuidgid postgres /usr/lib/postgresql/15/bin/initdb -D "$DATADIR"
-    
+
     # Add timescaledb to preload libraries
     echo "shared_preload_libraries = 'timescaledb'" >> "$DATADIR/postgresql.conf"
-    
+
     # Allow connections only from localhost
     echo "listen_addresses = '127.0.0.1'" >> "$DATADIR/postgresql.conf"
     echo "host all all 127.0.0.1/32 trust" >> "$DATADIR/pg_hba.conf"
-    
+
     # Start temporarily to create the database
     bashio::log.info "Creating database and extensions..."
     s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -w start

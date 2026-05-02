@@ -15,7 +15,7 @@ The system follows a standard modern client-server architecture with real-time s
 ### Backend (Python/FastAPI)
 - **Language:** Python 3.12+
 - **API Framework:** `FastAPI` logic for fast, modern, async REST endpoints.
-- **KNX Integration:** 
+- **KNX Integration:**
   - `xknx` connects asynchronously to the KNX IP router/interface to receive telegrams.
   - `xknxproject` parses ETS `.knxproj` files, allowing the app to resolve physical/group addresses into human-readable names and properly decode DPT (Data Point Type) payloads.
 - **Real-Time Streaming:** A WebSocket manager (`ws_manager.py`) broadcasts all received telegrams to connected UI clients instantly.
@@ -52,7 +52,7 @@ The realtime interface for observing bus activity as it happens.
 ### 2.2 History Search
 The interface for deep-diving into historical bus traces.
 - **Query Building:** Uses the same Filter Panel as the live view, but applies the parameters server-side via SQL `IN(...)` clauses.
-- **Time Loaders:** 
+- **Time Loaders:**
   - *Quick Range / Relative:* Unified loader (seconds, minutes, hours, days) counting backwards from the present.
   - *Absolute:* Custom HTML5 date/time pickers for exact start and end bounds.
 - **Safe Loading Limits:** Implements backend hard-limits (e.g., max 25k rows per fetch) with visual warnings if a search boundary hits the ceiling.
@@ -79,13 +79,13 @@ A unified side panel used across both Live and History views, dynamically popula
 A dedicated visualization mode built to render both `live` and `history` data sets visually against time.
 - **Data Source Selection:** The plotting engine takes the locally loaded/filtered dataset (either from the Live Monitor buffer or the History Search) as its input.
 - **Target Selection:** A side-panel uses the same component as the `FilterPanel` to allow selecting specific targets (Group Addresses). It displays count bubbles derived from the current dataset so the user knows if enough data frames are available for a meaningful plot.
-- **Dynamic Grouping by Unit:** Plots are dynamically generated and grouped by their physical unit (e.g., `°C`, `W`, `%`). 
+- **Dynamic Grouping by Unit:** Plots are dynamically generated and grouped by their physical unit (e.g., `°C`, `W`, `%`).
   - All targets with the same unit are combined into a single line chart with a shared Y-axis (or multiple Y-axes if appropriate).
   - The `binary` (boolean) type is treated as a special unit and grouped into a dedicated discrete state timeline plot (displaying ON/OFF state blocks), matching the visual style of Home Assistant.
-- **Synchronized Time Axis (X-Axis):** 
+- **Synchronized Time Axis (X-Axis):**
   - Supported plots are strictly time-series (X-axis is always time).
-- **Initial State Rendering (Future Enhancement):** 
-  - Since KNX is event-driven, the initial value of a group address might not be present within the currently loaded time window. 
+- **Initial State Rendering (Future Enhancement):**
+  - Since KNX is event-driven, the initial value of a group address might not be present within the currently loaded time window.
   - A backend feature will be implemented in the future to query the *last known value* of a set of group addresses at a specific timestamp (the start of the loaded window) to ensure continuous plots and binary timelines are never "unknown" at their starting edge.
   - Until this backend feature is ready, plots will pick up dynamically from the first recorded event in the window.
 

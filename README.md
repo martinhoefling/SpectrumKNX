@@ -1,4 +1,4 @@
-# Spectrum KNX 
+# Spectrum KNX
 
 <p align="center">
   <img src="frontend/public/logo.svg" alt="Spectrum KNX Logo" width="120" />
@@ -19,7 +19,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 ## 🚀 Features
 
 - **Live Group Monitor:** Monitor bus load, traffic rate, and instantaneous payloads in real-time.
-- **Historical Analysis:** Search millions of past telegrams instantly with powerful backend query engines. 
+- **Historical Analysis:** Search millions of past telegrams instantly with powerful backend query engines.
 - **Time-Delta Context:** Automatically capture the events "before and after" a filtered event to debug logic faults.
 - **Data Rendering:** Dynamically graph numerical readouts over time, grouped by physical unit types.
 - **Zero Loss:** Pause the live feed without dropping packets—everything queues silently in the background buffer until you resume.

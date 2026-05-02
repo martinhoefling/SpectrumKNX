@@ -30,7 +30,7 @@ class ConnectionManager:
                 if telegram.get(key) != val:
                     should_send = False
                     break
-            
+
             if not should_send:
                 continue
 

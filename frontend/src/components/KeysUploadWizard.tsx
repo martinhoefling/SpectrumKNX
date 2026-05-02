@@ -23,22 +23,22 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
       setError('File must be a .knxkeys file.');
       return;
     }
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('password', password);
-    
+
     try {
       const response = await fetch(apiUrl('/api/knxkeys/upload'), {
         method: 'POST',
         body: formData,
       });
-      
+
       const data = await response.json();
-      
+
       if (!response.ok) {
         // Handle FastAPI validation errors which return 'detail' as an array
         interface ValidationErrorDetail {
@@ -59,7 +59,7 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
         }
         throw new Error(errorMsg);
       }
-      
+
       onSuccess();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred during upload.');
@@ -70,12 +70,12 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
 
   return (
     <div style={{
-      position: 'absolute', inset: 0, 
+      position: 'absolute', inset: 0,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(10, 10, 15, 0.85)', backdropFilter: 'blur(12px)',
       zIndex: 1000, padding: '2rem'
     }}>
-      <div className="glass-card" style={{ 
+      <div className="glass-card" style={{
         width: '100%', maxWidth: 500, padding: '2.5rem',
         display: 'flex', flexDirection: 'column', gap: '1.5rem',
         position: 'relative', overflow: 'hidden'
@@ -86,8 +86,8 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
           background: 'radial-gradient(circle at center, rgba(34,197,94,0.12) 0%, transparent 60%)',
           pointerEvents: 'none', zIndex: 0
         }} />
-        
-        <button 
+
+        <button
           onClick={onClose}
           style={{
             position: 'absolute', top: '1rem', right: '1rem',
@@ -102,7 +102,7 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
           <ShieldCheck size={28} style={{ color: 'var(--success)' }} />
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>KNX Security Keys</h2>
         </div>
-        
+
         <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, zIndex: 1 }}>
           Upload your ETS-exported <code>.knxkeys</code> file to enable KNX Secure connections.
           The connection will be re-established automatically after upload.
@@ -121,7 +121,7 @@ export function KeysUploadWizard({ onSuccess, onClose }: KeysUploadWizardProps) 
         )}
 
         <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', zIndex: 1 }}>
-          
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Upload size={16} /> KNX Keys File

@@ -40,7 +40,7 @@ npm run dev
 ```
 
 > [!TIP]
-> **API Proxying:** The Vite dev server is configured (via `vite.config.ts`) to automatically proxy any requests made to `/api` and `/ws` over to `localhost:8000`. This means you can develop the frontend logic at port 5173 and it will transparently communicate with your local python daemon. 
+> **API Proxying:** The Vite dev server is configured (via `vite.config.ts`) to automatically proxy any requests made to `/api` and `/ws` over to `localhost:8000`. This means you can develop the frontend logic at port 5173 and it will transparently communicate with your local python daemon.
 
 ## Code Quality Standards
 - **Python Linter:** We use `Ruff`. Run `ruff check .` before committing.

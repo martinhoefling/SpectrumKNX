@@ -22,7 +22,7 @@ interface HistorySearchProps {
   onVisualizationTargetsChange: (targets: string[] | ((prev: string[]) => string[])) => void;
 }
 
-export const HistorySearch: React.FC<HistorySearchProps> = ({ 
+export const HistorySearch: React.FC<HistorySearchProps> = ({
   visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings,
   selectedVisualizationTargets, onVisualizationTargetsChange
 }) => {
@@ -52,7 +52,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   };
 
   const handleQuickVisualize = (targetAddress: string) => {
-    onVisualizationTargetsChange(prev => 
+    onVisualizationTargetsChange(prev =>
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
     setIsVisualizerOpen(true);
@@ -74,7 +74,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           ? timeA - timeB
           : timeB - timeA;
       }
-      
+
       const valA = (aVal as string | number);
       const valB = (bVal as string | number);
 
@@ -122,7 +122,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
             </span>
           )}
           {metadata?.limit_reached && (
-            <span 
+            <span
               style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
               onClick={onOpenSettings}
               title={`Limit reached (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
@@ -213,11 +213,11 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
         {/* Table/Chart area */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
           {isVisualizerOpen && telegrams.length > 0 ? (
-            <Visualizer 
-              telegrams={sortedTelegrams} 
+            <Visualizer
+              telegrams={sortedTelegrams}
               selectedTargets={selectedVisualizationTargets}
               onTargetsChange={onVisualizationTargetsChange}
-              onClose={() => setIsVisualizerOpen(false)} 
+              onClose={() => setIsVisualizerOpen(false)}
             />
           ) : telegrams.length === 0 ? (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>

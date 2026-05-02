@@ -52,7 +52,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
           series.forEach((_, sIdx) => {
             const yData = u.data[sIdx + 1];
             const yTop = top + sIdx * (rowHeight + rowGap) + rowGap;
-            
+
             for (let i = 0; i < timestamps.length; i++) {
               const val = yData[i];
               if (val === null) continue;
@@ -114,7 +114,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
         space: 50,
         stroke: '#94a3b8',
         grid: { stroke: 'rgba(255,255,255,0.05)' },
-        values: (_u, splits) => splits.map(v => 
+        values: (_u, splits) => splits.map(v =>
           new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
         )
       },

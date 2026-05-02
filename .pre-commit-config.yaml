@@ -1,0 +1,37 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-added-large-files
+
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.9
+    hooks:
+    -   id: ruff
+        files: ^backend/
+        args: [ --fix, --exit-non-zero-on-fix ]
+    -   id: ruff-format
+        files: ^backend/
+
+-   repo: local
+    hooks:
+    -   id: backend-tests
+        name: backend-tests
+        entry: python -m pytest backend/tests/
+        language: system
+        pass_filenames: false
+        always_run: true
+    -   id: frontend-lint
+        name: frontend-lint
+        entry: npm run --prefix frontend lint
+        language: system
+        pass_filenames: false
+    -   id: frontend-tests
+        name: frontend-tests
+        entry: npm run --prefix frontend test
+        language: system
+        pass_filenames: false
+        always_run: true

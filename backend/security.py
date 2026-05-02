@@ -6,7 +6,7 @@ def is_safe_path(base_dir: str, path: str) -> bool:
     Checks if the requested path is safe and stays within the base directory.
     This prevents path traversal attacks.
     """
-    if not path or '\0' in path:
+    if not path or "\0" in path:
         return False
 
     abs_base_dir = os.path.abspath(base_dir)

@@ -1,7 +1,7 @@
 services:
   # Development-specific overrides for the backend
   backend:
-    build: 
+    build:
       context: ./backend
     volumes:
       - ./project:/project

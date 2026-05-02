@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
     await knx_shutdown()
     await engine.dispose()
 
+
 app = FastAPI(title="Spectrum KNX API", lifespan=lifespan)
 
 app.add_middleware(
@@ -51,7 +52,7 @@ if os.path.exists(STATIC_DIR):
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # If the path looks like a file (has an extension), but wasn't caught by /assets, 
+        # If the path looks like a file (has an extension), but wasn't caught by /assets,
         # it might be a missing file. Otherwise, serve index.html for SPA routing.
         requested_path = os.path.join(STATIC_DIR, full_path)
         if full_path and os.path.isfile(requested_path):
@@ -60,6 +61,7 @@ if os.path.exists(STATIC_DIR):
 
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 else:
+
     @app.get("/")
     def read_root():
         return {"status": "ok", "app": "Spectrum KNX (Dev Mode)"}

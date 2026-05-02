@@ -83,7 +83,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
         space: 50,
         grid: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
         stroke: '#94a3b8',
-        values: (_u, splits) => splits.map(v => 
+        values: (_u, splits) => splits.map(v =>
           new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
         )
       },
@@ -91,7 +91,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
         space: 30,
         grid: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
         stroke: '#94a3b8',
-        values: isBinary 
+        values: isBinary
           ? (_u, splits) => splits.map(v => v === 1 ? 'ON' : v === 0 ? 'OFF' : '')
           : undefined
       }

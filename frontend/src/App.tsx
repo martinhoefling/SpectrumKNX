@@ -48,14 +48,14 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative' }}>
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         className="glass-input"
-        style={{ 
-          display: 'flex', alignItems: 'center', gap: '0.75rem', 
-          fontSize: '0.95rem', fontWeight: 600, padding: '0.5rem 1rem', 
-          borderRadius: '8px', border: '1px solid var(--border-color)', 
-          background: isOpen ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)', 
+        style={{
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
+          fontSize: '0.95rem', fontWeight: 600, padding: '0.5rem 1rem',
+          borderRadius: '8px', border: '1px solid var(--border-color)',
+          background: isOpen ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)',
           color: 'var(--text-main)', cursor: 'pointer', outline: 'none',
           minWidth: '220px', justifyContent: 'space-between',
           transition: 'all 0.2s ease'
@@ -69,12 +69,12 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
       </button>
 
       {isOpen && (
-        <div 
+        <div
           className="glass"
           style={{
             position: 'absolute', top: '100%', left: 0, marginTop: '0.5rem',
-            width: '100%', borderRadius: '8px', 
-            border: '1px solid var(--border-color)', 
+            width: '100%', borderRadius: '8px',
+            border: '1px solid var(--border-color)',
             padding: '0.5rem', zIndex: 100,
             display: 'flex', flexDirection: 'column', gap: '0.25rem',
             boxShadow: 'var(--shadow-lg)'
@@ -91,11 +91,11 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
                   setIsOpen(false);
                 }}
                 className={`nav-item ${isActive ? 'active' : ''}`}
-                style={{ 
-                   display: 'flex', alignItems: 'center', gap: '0.75rem', 
-                   padding: '0.75rem 1rem', borderRadius: '6px', border: 'none', 
-                   background: isActive ? 'rgba(99,102,241,0.1)' : 'transparent', 
-                   color: isActive ? 'var(--accent-primary)' : 'var(--text-main)', 
+                style={{
+                   display: 'flex', alignItems: 'center', gap: '0.75rem',
+                   padding: '0.75rem 1rem', borderRadius: '6px', border: 'none',
+                   background: isActive ? 'rgba(99,102,241,0.1)' : 'transparent',
+                   color: isActive ? 'var(--accent-primary)' : 'var(--text-main)',
                    cursor: 'pointer', fontWeight: 500, width: '100%', textAlign: 'left',
                    transition: 'all 0.2s ease', fontSize: '0.9rem'
                 }}
@@ -164,16 +164,16 @@ function App() {
   const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
     setActiveFilters((prevFilters) => {
       const updatedFilters = typeof newFilters === 'function' ? newFilters(prevFilters) : newFilters;
-      
+
       const addedTargets = updatedFilters.targets.filter(t => !prevFilters.targets.includes(t));
       const removedTargets = prevFilters.targets.filter(t => !updatedFilters.targets.includes(t));
-      
+
       const addedSources = updatedFilters.sources.filter(s => !prevFilters.sources.includes(s));
       const removedSources = prevFilters.sources.filter(s => !updatedFilters.sources.includes(s));
-      
+
       const added = [...addedTargets, ...addedSources];
       const removed = [...removedTargets, ...removedSources];
-      
+
       if (added.length > 0 || removed.length > 0) {
         setSelectedVisualizationTargets(prevSelected => {
           let next = [...prevSelected];
@@ -182,7 +182,7 @@ function App() {
           return next;
         });
       }
-      
+
       return updatedFilters;
     });
   }, []);
@@ -324,7 +324,7 @@ function App() {
   };
 
   const handleQuickVisualize = (targetAddress: string) => {
-    setSelectedVisualizationTargets(prev => 
+    setSelectedVisualizationTargets(prev =>
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
     setIsVisualizerOpen(true);
@@ -414,10 +414,10 @@ function App() {
 
   return (
     <div className="container dashboard-grid" style={{ padding: '1.5rem', gap: '1.5rem' }}>
-      
+
       {/* ── Main area (Full Width) ─── */}
       <main style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, borderRadius: '12px' }} className="glass">
-        
+
         {/* === GLOBAL HEADER === */}
         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
           {/* Left: App Section Dropdown */}
@@ -464,7 +464,7 @@ function App() {
                     WS: <span style={{ color: isConnected ? 'var(--success)' : 'var(--error)', fontWeight: 500 }}>{isConnected ? 'Active' : 'Offline'}</span>
                   </span>
                   {filteredLiveTelegrams.length >= loadLimit && (
-                    <span 
+                    <span
                       style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#fbbf24', cursor: 'pointer' }}
                       onClick={() => setIsSettingsOpen(true)}
                       title={`Buffer full (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
@@ -473,7 +473,7 @@ function App() {
                     </span>
                   )}
                 </div>
-                
+
                 <button
                   className="icon-button"
                   onClick={() => setIsFilterOpen(o => { const next = !o; if (next) setIsVisualizerOpen(false); return next; })}
@@ -555,8 +555,8 @@ function App() {
                   <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
                     Project File
                   </h3>
-                  <button 
-                    className="glass-input" 
+                  <button
+                    className="glass-input"
                     onClick={() => setIsUploadWizardOpen(true)}
                     style={{ width: '100%', padding: '0.75rem', textAlign: 'left', cursor: 'pointer', fontSize: '0.85rem' }}
                   >
@@ -570,8 +570,8 @@ function App() {
                   <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
                     KNX Security Keys
                   </h3>
-                  <button 
-                    className="glass-input" 
+                  <button
+                    className="glass-input"
                     onClick={() => setIsKeysWizardOpen(true)}
                     style={{ width: '100%', padding: '0.75rem', textAlign: 'left', cursor: 'pointer', fontSize: '0.85rem' }}
                   >
@@ -590,9 +590,9 @@ function App() {
                     {/* Connection Status */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ color: 'var(--text-dim)' }}>KNX Connection:</span>
-                      <span style={{ 
-                        color: serverConfig.status?.connected ? 'var(--success)' : 'var(--error)', 
-                        fontWeight: 600 
+                      <span style={{
+                        color: serverConfig.status?.connected ? 'var(--success)' : 'var(--error)',
+                        fontWeight: 600
                       }}>
                         {serverConfig.status?.connected ? '● Connected' : '● Disconnected'}
                       </span>
@@ -670,7 +670,7 @@ function App() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {/* Content row: filter panel + table */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-              
+
               {/* Filter panel (slide-in) */}
               <div style={{
                 width: isFilterOpen ? '260px' : '0px',
@@ -695,11 +695,11 @@ function App() {
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {isVisualizerOpen ? (
-                  <Visualizer 
-                    telegrams={filteredLiveTelegrams} 
+                  <Visualizer
+                    telegrams={filteredLiveTelegrams}
                     selectedTargets={selectedVisualizationTargets}
                     onTargetsChange={setSelectedVisualizationTargets}
-                    onClose={() => setIsVisualizerOpen(false)} 
+                    onClose={() => setIsVisualizerOpen(false)}
                   />
                 ) : (
                   <TelegramTable
@@ -739,18 +739,18 @@ function App() {
       )}
 
       {isUploadWizardOpen && (
-        <ProjectUploadWizard 
-          isClosable={!projectStatus?.upload_required} 
+        <ProjectUploadWizard
+          isClosable={!projectStatus?.upload_required}
           onClose={() => setIsUploadWizardOpen(false)}
           onSuccess={() => {
             setIsUploadWizardOpen(false);
             window.location.reload();
-          }} 
+          }}
         />
       )}
 
       {isKeysWizardOpen && (
-        <KeysUploadWizard 
+        <KeysUploadWizard
           onClose={() => setIsKeysWizardOpen(false)}
           onSuccess={() => {
             setIsKeysWizardOpen(false);
@@ -763,7 +763,7 @@ function App() {
               .then(r => r.json())
               .then(data => setKnxkeysStatus(data))
               .catch(() => {});
-          }} 
+          }}
         />
       )}
 

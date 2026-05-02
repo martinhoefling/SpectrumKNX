@@ -33,7 +33,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
       }
       map.get(t.target_address)!.count++;
     }
-    
+
     // Sort by count descending, then alphabetically
     return Array.from(map.values()).sort((a, b) => b.count - a.count || a.address.localeCompare(b.address));
   }, [telegrams]);
@@ -82,12 +82,12 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
           />
         </div>
       </div>
-      
+
       <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }}>
         <div style={{ color: 'var(--text-dim)', fontSize: '0.7rem', padding: '0 0.25rem 0.75rem', lineHeight: 1.5 }}>
           Select targets from the currently active {telegrams.length.toLocaleString()} telegrams to plot their metrics over time.
         </div>
-        
+
         {filteredTargets.map(t => (
           <OptionRow
             key={t.address}

@@ -14,7 +14,7 @@ interface VisualizerProps {
 }
 
 export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTargets, onTargetsChange, onClose }) => {
-  
+
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
 
@@ -30,7 +30,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        
+
         <VisualizerSidebar
           telegrams={telegrams}
           selectedTargets={selectedTargets}
@@ -49,7 +49,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
                 <p style={{ color: 'var(--text-dim)', fontSize: '0.8125rem', margin: '0.2rem 0 0' }}>Plotting {selectedTargets.length} targets across {buckets.length} metric group(s).</p>
               )}
             </div>
-            
+
             {buckets.length > 0 && (
               <button
                 className="icon-button"
@@ -61,7 +61,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
               </button>
             )}
           </div>
-          
+
           <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
             {buckets.map(b => (
               b.isBinary ? (
@@ -70,7 +70,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
                 <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
               )
             ))}
-            
+
             {buckets.length === 0 && selectedTargets.length > 0 && (
               <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '3rem' }}>
                 No plottable values (numeric or continuous) found for the selected targets.

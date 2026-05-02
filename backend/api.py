@@ -17,6 +17,7 @@ from ws_manager import manager
 
 router = APIRouter()
 
+
 def get_backend_version() -> str:
     """Returns the backend version from ENV or git"""
     version = os.getenv("APP_VERSION", "")
@@ -24,13 +25,12 @@ def get_backend_version() -> str:
         try:
             # Fallback to git if running locally
             version = subprocess.check_output(
-                ["git", "describe", "--tags", "--always"], 
-                stderr=subprocess.DEVNULL,
-                text=True
+                ["git", "describe", "--tags", "--always"], stderr=subprocess.DEVNULL, text=True
             ).strip()
         except Exception:
             version = "dev"
     return version
+
 
 @router.get("/api/version")
 async def get_version():
@@ -66,7 +66,7 @@ def _build_telegram_response(telegrams: list) -> list:
         r["value_formatted"] = format_value_nicely(
             r.get("value_numeric") if r.get("value_numeric") is not None else r.get("value_json"),
             r.get("dpt_main"),
-            r.get("dpt_sub")
+            r.get("dpt_sub"),
         )
 
         r["raw_hex"] = f"0x{r['raw_data']}" if r.get("raw_data") and len(r["raw_data"]) > 1 else r.get("raw_data")
@@ -94,7 +94,7 @@ async def get_telegrams(
     source_list = [s.strip() for s in source_address.split(",")] if source_address else []
     target_list = [s.strip() for s in target_address.split(",")] if target_address else []
     type_list = [s.strip() for s in telegram_type.split(",")] if telegram_type else []
-    
+
     # Map simplified types to technical names
     type_map_reverse = {"Write": "GroupValueWrite", "Read": "GroupValueRead", "Response": "GroupValueResponse"}
     type_list_db = [type_map_reverse.get(t, t) for t in type_list]
@@ -112,7 +112,7 @@ async def get_telegrams(
         delta_after_ms=delta_after_ms,
         limit=limit,
         offset=offset,
-        order_descending=True
+        order_descending=True,
     )
 
     result = await store.query(query)
@@ -195,57 +195,54 @@ async def get_project_status():
     """Returns the status of the project upload feature"""
     env_proj = os.getenv("KNX_PROJECT_PATH")
     env_pwd = os.getenv("KNX_PASSWORD")
-    
+
     upload_feature_active = not env_proj and not env_pwd
     project_loaded = knx_daemon.global_knx_project is not None
     upload_required = upload_feature_active and not project_loaded
-    
+
     return {
         "upload_feature_active": upload_feature_active,
         "project_loaded": project_loaded,
-        "upload_required": upload_required
+        "upload_required": upload_required,
     }
 
 
 @router.post("/api/project/upload")
-async def upload_project(
-    file: UploadFile = File(...),
-    password: str = Form("")
-):
+async def upload_project(file: UploadFile = File(...), password: str = Form("")):
     """Uploads a KNX project file and password, saving them to the default volume"""
     env_proj = os.getenv("KNX_PROJECT_PATH")
     env_pwd = os.getenv("KNX_PASSWORD")
-    
+
     if env_proj or env_pwd:
         raise HTTPException(status_code=400, detail="Upload feature is disabled because environment variables are set.")
-        
+
     if not file.filename or not file.filename.endswith(".knxproj"):
         raise HTTPException(status_code=400, detail="File must be a .knxproj file")
-        
+
     default_dir = "/project"
     default_file = os.path.join(default_dir, "knx_project.knxproj")
     default_pwd = os.path.join(default_dir, "knx_project_password")
-    
+
     os.makedirs(default_dir, exist_ok=True)
-    
+
     content = await file.read()
-    
+
     with open(default_file, "wb") as f:
         f.write(content)
-        
+
     with open(default_pwd, "w", encoding="utf-8") as f:
         f.write(password)
-        
+
     # Trigger reload
     success = await knx_daemon._load_project_data()
-    
+
     if not success:
         if os.path.exists(default_file):
             os.remove(default_file)
         if os.path.exists(default_pwd):
             os.remove(default_pwd)
         raise HTTPException(status_code=400, detail="Failed to load project. Incorrect password or invalid file.")
-        
+
     return {"status": "ok", "message": "Project loaded successfully"}
 
 
@@ -259,15 +256,15 @@ async def get_server_config():
 async def get_knxkeys_status():
     """Returns the status of the knxkeys upload feature"""
     env_knxkeys = os.getenv("KNX_KNXKEYS_FILE")
-    
+
     upload_feature_active = not env_knxkeys
     knxkeys_found = False
-    
+
     if env_knxkeys:
         knxkeys_found = os.path.exists(env_knxkeys)
     else:
         knxkeys_found = os.path.exists(knx_daemon.DEFAULT_KNXKEYS_FILE)
-    
+
     return {
         "upload_feature_active": upload_feature_active,
         "knxkeys_found": knxkeys_found,
@@ -275,34 +272,33 @@ async def get_knxkeys_status():
 
 
 @router.post("/api/knxkeys/upload")
-async def upload_knxkeys(
-    file: UploadFile = File(...),
-    password: str = Form("")
-):
+async def upload_knxkeys(file: UploadFile = File(...), password: str = Form("")):
     """Uploads a .knxkeys file and password, saving them to the default volume and reconnecting"""
     env_knxkeys = os.getenv("KNX_KNXKEYS_FILE")
-    
+
     if env_knxkeys:
-        raise HTTPException(status_code=400, detail="Upload feature is disabled because KNX_KNXKEYS_FILE environment variable is set.")
-    
+        raise HTTPException(
+            status_code=400, detail="Upload feature is disabled because KNX_KNXKEYS_FILE environment variable is set."
+        )
+
     if not file.filename or not file.filename.endswith(".knxkeys"):
         raise HTTPException(status_code=400, detail="File must be a .knxkeys file")
-    
+
     default_dir = "/project"
     os.makedirs(default_dir, exist_ok=True)
-    
+
     content = await file.read()
-    
+
     with open(knx_daemon.DEFAULT_KNXKEYS_FILE, "wb") as f:
         f.write(content)
-    
+
     if password:
         with open(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE, "w", encoding="utf-8") as f:
             f.write(password)
-    
+
     # Trigger reconnection with new credentials
     await knx_daemon._reconnect_knx()
-    
+
     return {"status": "ok", "message": "KNX keys file uploaded. Reconnecting to bus..."}
 
 
