@@ -16,8 +16,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/react-virtual": "^3.13.24",
-    "date-fns": "4.1.0",
+    "@tanstack/react-virtual": "^3.13.25",
+    "date-fns": "4.3.0",
     "lucide-react": "1.16.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -28,11 +28,11 @@
     "@eslint/js": "10.0.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@types/node": "25.8.0",
-    "@types/react": "19.2.14",
+    "@types/node": "25.9.1",
+    "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
-    "@vitest/ui": "^4.1.6",
+    "@vitest/ui": "^4.1.7",
     "eslint": "10.4.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.2",
@@ -40,8 +40,8 @@
     "jsdom": "^29.1.1",
     "prettier": "^3.1.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.59.3",
-    "vite": "8.0.13",
+    "typescript-eslint": "8.59.4",
+    "vite": "8.0.14",
     "vitest": "^4.1.5"
   }
 }
