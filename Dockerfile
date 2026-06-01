@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:24-alpine AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 ARG APP_VERSION=dev
 ENV VITE_APP_VERSION=$APP_VERSION
 WORKDIR /app/frontend
