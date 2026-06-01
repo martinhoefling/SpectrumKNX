@@ -452,7 +452,11 @@ function App() {
                     Rate: <span onClick={() => setRateMode(m => m === 's' ? 'm' : m === 'm' ? 'h' : 's')} style={{ color: 'var(--accent-primary)', fontWeight: 600, cursor: 'pointer' }}>{busRate.toFixed(1)}/{rateMode}</span>
                   </span>
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
-                    Buffer: <span style={{ color: 'var(--text-main)', fontWeight: 500 }}>{filteredLiveTelegrams.length}</span>
+                    Buffer: <span style={{ color: 'var(--text-main)', fontWeight: 500 }}>
+                      {activeFilterCount
+                        ? <>{filteredLiveTelegrams.length}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}> / {liveTelegrams.length}</span></>
+                        : liveTelegrams.length}
+                    </span>
                   </span>
                   {isPaused && (
                     <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24' }}>
