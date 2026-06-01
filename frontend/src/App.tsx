@@ -114,7 +114,7 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
 function App() {
   const [activeTab, setActiveTab] = useState<'live' | 'history'>('live');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
@@ -328,7 +328,6 @@ function App() {
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
     setIsVisualizerOpen(true);
-    setIsFilterOpen(false);
   };
 
   const sortedLiveTelegrams = useMemo(() => {
@@ -493,7 +492,7 @@ function App() {
 
                 <button
                   className="icon-button"
-                  onClick={() => setIsVisualizerOpen(v => { const next = !v; if (next) setIsFilterOpen(false); return next; })}
+                  onClick={() => setIsVisualizerOpen(v => !v)}
                   title="Visualize data"
                   style={{ color: isVisualizerOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
                 >
