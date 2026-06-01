@@ -8,6 +8,7 @@ interface MixedChartProps {
   bucket: ChartBucket;
   minTime: number | null;
   maxTime: number | null;
+  stepped: boolean;
 }
 
 // Generate simple distinct colors for series
@@ -24,7 +25,7 @@ const COLORS = [
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
+export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
 
@@ -105,7 +106,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
         stroke: COLORS[idx % COLORS.length],
         width: 2,
         spanGaps: true, // Interpolate gaps so lines don't break on missing data
-        paths: isBinary ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
+        paths: (isBinary || stepped) ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
         fill: isBinary ? COLORS[idx % COLORS.length] + '33' : undefined,
         points: { show: false }, // Hide explicit dots for performance/cleanliness
         value: (_u: uPlot, v: number | null) => {

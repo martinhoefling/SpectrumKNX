@@ -1,10 +1,11 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { VisualizerSidebar } from './VisualizerSidebar';
 import { useChartData } from '../hooks/useChartData';
 import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
 import { Download } from 'lucide-react';
+import { getCookie, setCookie } from '../utils/cookies';
 
 interface VisualizerProps {
   telegrams: Telegram[];
@@ -17,6 +18,15 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
+  const [stepped, setStepped] = useState(() => getCookie('chartStepped') !== 'false');
+
+  const toggleStepped = () => {
+    setStepped(s => {
+      const next = !s;
+      setCookie('chartStepped', String(next));
+      return next;
+    });
+  };
 
   const exportPng = () => {
     // A quick hack: uPlot naturally renders to canvas
@@ -51,14 +61,29 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
             </div>
 
             {buckets.length > 0 && (
-              <button
-                className="icon-button"
-                onClick={exportPng}
-                title="Print / PDF Export"
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.85rem', border: '1px solid var(--border-color)', borderRadius: '7px', fontSize: '0.8125rem' }}
-              >
-                <Download size={16} /> Export
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  onClick={toggleStepped}
+                  title={stepped ? 'Switch to linear interpolation' : 'Switch to stepped (hold-last-value)'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    padding: '0.4rem 0.85rem', border: '1px solid var(--border-color)',
+                    borderRadius: '7px', fontSize: '0.8125rem', cursor: 'pointer',
+                    background: stepped ? 'rgba(99,102,241,0.15)' : 'transparent',
+                    color: stepped ? 'var(--accent-primary)' : 'var(--text-dim)',
+                  }}
+                >
+                  {stepped ? 'Stepped' : 'Linear'}
+                </button>
+                <button
+                  className="icon-button"
+                  onClick={exportPng}
+                  title="Print / PDF Export"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.85rem', border: '1px solid var(--border-color)', borderRadius: '7px', fontSize: '0.8125rem' }}
+                >
+                  <Download size={16} /> Export
+                </button>
+              </div>
             )}
           </div>
 
@@ -67,7 +92,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
               b.isBinary ? (
                 <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
               ) : (
-                <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+                <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} stepped={stepped} />
               )
             ))}
 
