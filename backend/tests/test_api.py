@@ -290,36 +290,77 @@ def test_get_telegrams_delta_with_matches(mock_query):
     assert "1.1.2" in sources
 
 
-def test_get_project_status_active(monkeypatch):
+def test_get_project_status_no_project(monkeypatch):
     monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
     monkeypatch.delenv("KNX_PASSWORD", raising=False)
     knx_daemon.global_knx_project = None
 
-    response = client.get("/api/project/status")
+    with patch("api._project_upload_writable", return_value=True):
+        response = client.get("/api/project/status")
     assert response.status_code == 200
     data = response.json()
     assert data["upload_feature_active"] is True
+    assert data["upload_writable"] is True
     assert data["project_loaded"] is False
     assert data["upload_required"] is True
 
 
-def test_get_project_status_inactive(monkeypatch):
+def test_get_project_status_with_env_vars(monkeypatch):
     monkeypatch.setenv("KNX_PROJECT_PATH", "/some/path")
     monkeypatch.setenv("KNX_PASSWORD", "secret")
     knx_daemon.global_knx_project = None
 
-    response = client.get("/api/project/status")
+    with patch("api._project_upload_writable", return_value=True):
+        response = client.get("/api/project/status")
     assert response.status_code == 200
     data = response.json()
-    assert data["upload_feature_active"] is False
-    assert data["upload_required"] is False
+    # Upload is always active now
+    assert data["upload_feature_active"] is True
+    assert data["upload_required"] is True
 
 
-def test_upload_project_disabled(monkeypatch):
-    monkeypatch.setenv("KNX_PROJECT_PATH", "/some/path")
+def test_get_project_status_not_writable(monkeypatch):
+    monkeypatch.delenv("KNX_PROJECT_PATH", raising=False)
+    knx_daemon.global_knx_project = None
+
+    with patch("api._project_upload_writable", return_value=False):
+        response = client.get("/api/project/status")
+    assert response.status_code == 200
+    assert response.json()["upload_writable"] is False
+
+
+def test_upload_project_permission_error(monkeypatch, tmp_path):
+    proj_file = tmp_path / "readonly.knxproj"
+    proj_file.write_bytes(b"existing")
+    proj_file.chmod(0o444)
+    monkeypatch.setenv("KNX_PROJECT_PATH", str(proj_file))
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+
     response = client.post("/api/project/upload", data={"password": "test"}, files={"file": ("test.knxproj", b"dummy")})
-    assert response.status_code == 400
-    assert "disabled" in response.json()["detail"]
+    assert response.status_code == 403
+    assert "Cannot write project file" in response.json()["detail"]
+
+
+def test_upload_project_with_env_path(monkeypatch, tmp_path):
+    """When KNX_PROJECT_PATH is set, upload writes to that path."""
+    proj_file = tmp_path / "my.knxproj"
+    monkeypatch.setenv("KNX_PROJECT_PATH", str(proj_file))
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+
+    async def mock_load():
+        knx_daemon.global_knx_project = {"fake": "project"}
+        return True
+
+    monkeypatch.setattr(knx_daemon, "_load_project_data", mock_load)
+
+    response = client.post(
+        "/api/project/upload", data={"password": "test_pass"}, files={"file": ("test.knxproj", b"dummy_content")}
+    )
+    assert response.status_code == 200
+    assert proj_file.read_bytes() == b"dummy_content"
+    # Password sidecar written next to the project file
+    pwd_file = tmp_path / "my_password"
+    assert pwd_file.read_text() == "test_pass"
 
 
 def test_upload_project_invalid_file(monkeypatch):

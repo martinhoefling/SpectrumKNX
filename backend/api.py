@@ -193,18 +193,45 @@ async def get_project():
     }
 
 
-@router.get("/api/project/status")
-async def get_project_status():
-    """Returns the status of the project upload feature"""
+def _project_upload_path() -> tuple[str, str | None]:
+    """Returns (project_file_path, password_file_path_or_None) for uploads.
+
+    When KNX_PROJECT_PATH is set we write directly to that path and store the
+    password next to it. Otherwise we fall back to the default /project volume.
+    The password file is None when KNX_PASSWORD is set via env (caller should
+    not overwrite it).
+    """
     env_proj = os.getenv("KNX_PROJECT_PATH")
     env_pwd = os.getenv("KNX_PASSWORD")
 
-    upload_feature_active = not env_proj and not env_pwd
+    if env_proj:
+        proj_file = env_proj
+        # Only write a password sidecar when no env password is configured
+        pwd_file = os.path.splitext(env_proj)[0] + "_password" if not env_pwd else None
+    else:
+        proj_file = os.path.join("/project", "knx_project.knxproj")
+        pwd_file = os.path.join("/project", "knx_project_password")
+
+    return proj_file, pwd_file
+
+
+def _project_upload_writable() -> bool:
+    """Returns True if the upload destination is writable."""
+    proj_file, _ = _project_upload_path()
+    target = proj_file if os.path.exists(proj_file) else os.path.dirname(proj_file)
+    return os.access(target, os.W_OK)
+
+
+@router.get("/api/project/status")
+async def get_project_status():
+    """Returns the status of the project upload feature"""
     project_loaded = knx_daemon.global_knx_project is not None
-    upload_required = upload_feature_active and not project_loaded
+    upload_writable = _project_upload_writable()
+    upload_required = not project_loaded
 
     return {
-        "upload_feature_active": upload_feature_active,
+        "upload_feature_active": True,
+        "upload_writable": upload_writable,
         "project_loaded": project_loaded,
         "upload_required": upload_required,
     }
@@ -212,38 +239,33 @@ async def get_project_status():
 
 @router.post("/api/project/upload")
 async def upload_project(file: UploadFile = File(...), password: str = Form("")):
-    """Uploads a KNX project file and password, saving them to the default volume"""
-    env_proj = os.getenv("KNX_PROJECT_PATH")
-    env_pwd = os.getenv("KNX_PASSWORD")
-
-    if env_proj or env_pwd:
-        raise HTTPException(status_code=400, detail="Upload feature is disabled because environment variables are set.")
-
+    """Uploads a KNX project file and password, saving them to the configured path"""
     if not file.filename or not file.filename.endswith(".knxproj"):
         raise HTTPException(status_code=400, detail="File must be a .knxproj file")
 
-    default_dir = "/project"
-    default_file = os.path.join(default_dir, "knx_project.knxproj")
-    default_pwd = os.path.join(default_dir, "knx_project_password")
+    proj_file, pwd_file = _project_upload_path()
 
-    os.makedirs(default_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(proj_file), exist_ok=True)
 
     content = await file.read()
 
-    with open(default_file, "wb") as f:
-        f.write(content)
-
-    with open(default_pwd, "w", encoding="utf-8") as f:
-        f.write(password)
+    try:
+        with open(proj_file, "wb") as f:
+            f.write(content)
+        if pwd_file:
+            with open(pwd_file, "w", encoding="utf-8") as f:
+                f.write(password)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=f"Cannot write project file: {e}") from e
 
     # Trigger reload
     success = await knx_daemon._load_project_data()
 
     if not success:
-        if os.path.exists(default_file):
-            os.remove(default_file)
-        if os.path.exists(default_pwd):
-            os.remove(default_pwd)
+        if os.path.exists(proj_file) and not os.getenv("KNX_PROJECT_PATH"):
+            os.remove(proj_file)
+        if pwd_file and os.path.exists(pwd_file):
+            os.remove(pwd_file)
         raise HTTPException(status_code=400, detail="Failed to load project. Incorrect password or invalid file.")
 
     return {"status": "ok", "message": "Project loaded successfully"}

@@ -119,6 +119,7 @@ function App() {
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
+    upload_writable: boolean;
     project_loaded: boolean;
     upload_required: boolean;
   } | null>(null);
@@ -553,11 +554,15 @@ function App() {
                 />
               </div>
 
-              {projectStatus?.upload_feature_active && (
-                <>
-                  <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
-                    Project File
-                  </h3>
+              <>
+                <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
+                  Project File
+                </h3>
+                {projectStatus?.upload_writable === false ? (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                    Project file is not writable. Mount the project directory as a writable volume to enable browser upload.
+                  </div>
+                ) : (
                   <button
                     className="glass-input"
                     onClick={() => setIsUploadWizardOpen(true)}
@@ -565,8 +570,8 @@ function App() {
                   >
                     Upload / Replace ETS Project File
                   </button>
-                </>
-              )}
+                )}
+              </>
 
               {knxkeysStatus?.upload_feature_active && (
                 <>
