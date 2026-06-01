@@ -240,6 +240,23 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               />
             );
           })}
+          {activeFilters.sources.length > 0 && activeFilters.targets.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.2rem 0.25rem' }}>
+              {(['AND', 'OR'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => update({ sourceTargetRelation: m })}
+                  style={{
+                    padding: '0.1rem 0.45rem', borderRadius: '4px', fontSize: '0.65rem',
+                    fontWeight: 600, cursor: 'pointer', border: '1px solid',
+                    borderColor: activeFilters.sourceTargetRelation === m ? 'var(--accent-primary)' : 'var(--border-color)',
+                    background: activeFilters.sourceTargetRelation === m ? 'rgba(99,102,241,0.15)' : 'transparent',
+                    color: activeFilters.sourceTargetRelation === m ? 'var(--accent-primary)' : 'var(--text-dim)',
+                  }}
+                >{m}</button>
+              ))}
+            </div>
+          )}
           {activeFilters.targets.map(t => {
             const name = options.targets.find(opt => opt.address === t)?.name;
             return (
