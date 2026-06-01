@@ -6,6 +6,7 @@ import {
   type FilterCounts,
   DEFAULT_FILTERS
 } from '../types/filters';
+import { compareKnxAddress } from '../utils/knxAddress';
 
 // ─── FilterPanel component ────────────────────────────────────────────────────
 
@@ -145,14 +146,16 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   const q = search.toLowerCase();
 
   const filteredSources = useMemo(() =>
-    options.sources.filter(s =>
-      !q || s.address?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q)
-    ), [options.sources, q]);
+    options.sources
+      .filter(s => !q || s.address?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q))
+      .sort((a, b) => compareKnxAddress(a.address ?? '', b.address ?? '')),
+    [options.sources, q]);
 
   const filteredTargets = useMemo(() =>
-    options.targets.filter(s =>
-      !q || s.address?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q)
-    ), [options.targets, q]);
+    options.targets
+      .filter(s => !q || s.address?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q))
+      .sort((a, b) => compareKnxAddress(a.address ?? '', b.address ?? '')),
+    [options.targets, q]);
 
   const filteredTypes = useMemo(() =>
     options.types.filter(t => !q || t.toLowerCase().includes(q)), [options.types, q]);
