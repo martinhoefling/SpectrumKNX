@@ -120,8 +120,8 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
   const handleLoadRelative = useCallback((seconds: number) => {
     const start = new Date(Date.now() - seconds * 1000).toISOString();
     const base = apiUrl(`/api/telegrams?limit=${limit}&start_time=${encodeURIComponent(start)}`);
-    doFetch(applyFilterParams(base, filters));
-  }, [limit, filters, doFetch]);
+    doFetch(base);
+  }, [limit, doFetch]);
 
   const handleLoadCustomRelative = useCallback(() => {
     if (!relValue || relValue <= 0) { setError('Enter a positive value.'); return; }
@@ -133,7 +133,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     let url = apiUrl(`/api/telegrams?limit=${limit}`);
     if (startTime) url += `&start_time=${encodeURIComponent(startTime + ':00Z')}`;
     if (endTime) url += `&end_time=${encodeURIComponent(endTime + ':00Z')}`;
-    doFetch(applyFilterParams(url, filters));
+    doFetch(url);
   }, [limit, startTime, endTime, filters, doFetch]);
 
   return (
