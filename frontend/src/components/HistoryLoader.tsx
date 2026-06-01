@@ -56,19 +56,57 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
 
-  const doFetch = useCallback(async (url: string) => {
+  const doFetch = useCallback(async (baseUrl: string) => {
     setIsLoading(true);
     setError(null);
     setStatus('loading');
     setResultMeta(null);
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      const meta: Metadata = data.metadata || { total_count: 0, limit_reached: false };
+      const isOrMode = filters?.sourceTargetRelation === 'OR'
+        && (filters.sources.length > 0)
+        && (filters.targets.length > 0);
+
+      let telegrams: Telegram[];
+      let meta: Metadata;
+
+      if (isOrMode) {
+        // OR mode: two queries — one filtered by sources only, one by targets only.
+        // Results are merged and deduplicated by timestamp. The knx-telegram-store
+        // library only supports AND across source/destination filters, so we
+        // handle the OR logic here rather than in the library.
+        const srcFilters = { ...filters, targets: [], sourceTargetRelation: 'AND' as const };
+        const tgtFilters = { ...filters, sources: [], sourceTargetRelation: 'AND' as const };
+        const [srcRes, tgtRes] = await Promise.all([
+          fetch(applyFilterParams(baseUrl, srcFilters)),
+          fetch(applyFilterParams(baseUrl, tgtFilters)),
+        ]);
+        if (!srcRes.ok || !tgtRes.ok) throw new Error(`Server error: ${srcRes.ok ? tgtRes.status : srcRes.status}`);
+        const [srcData, tgtData] = await Promise.all([srcRes.json(), tgtRes.json()]);
+
+        const seen = new Set<string>();
+        const merged: Telegram[] = [];
+        for (const t of [...(srcData.telegrams || []), ...(tgtData.telegrams || [])]) {
+          if (!seen.has(t.timestamp)) {
+            seen.add(t.timestamp);
+            merged.push(t);
+          }
+        }
+        // Re-sort descending (both halves arrive sorted but interleaved)
+        merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        const limitReached = (srcData.metadata?.limit_reached || tgtData.metadata?.limit_reached) ?? false;
+        meta = { total_count: merged.length, limit_reached: limitReached };
+        telegrams = merged;
+      } else {
+        const res = await fetch(applyFilterParams(baseUrl, filters));
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        const data = await res.json();
+        meta = data.metadata || { total_count: 0, limit_reached: false };
+        telegrams = data.telegrams || [];
+      }
+
       setResultMeta(meta);
       setStatus('success');
-      onLoad(data.telegrams || [], meta);
+      onLoad(telegrams, meta);
       setTimeout(onClose, 1500);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';

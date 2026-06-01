@@ -26,6 +26,22 @@ export interface ActiveFilters {
   deltaBeforeMs: number;
   /** ms after a matching telegram to also include (0 = disabled) */
   deltaAfterMs: number;
+  /**
+   * Controls how Source and Target filters combine when both are active.
+   *
+   * AND (default): a telegram must match a selected source AND a selected target.
+   *   Use when diagnosing traffic between specific devices and group addresses.
+   *
+   * OR: a telegram matches if it matches any selected source OR any selected target.
+   *   Use when you want to see everything from a device alongside everything sent
+   *   to a particular group address, regardless of which side triggered it.
+   *
+   * Within each category (multiple sources, multiple targets) the logic is always OR.
+   * OR mode requires two backend queries for history (one per side) whose results are
+   * merged client-side, because the knx-telegram-store library does not support
+   * cross-category OR natively.
+   */
+  sourceTargetRelation: 'AND' | 'OR';
 }
 
 export const DEFAULT_FILTERS: ActiveFilters = {
@@ -35,6 +51,7 @@ export const DEFAULT_FILTERS: ActiveFilters = {
   dpts: [],
   deltaBeforeMs: 0,
   deltaAfterMs: 0,
+  sourceTargetRelation: 'AND',
 };
 
 export function hasActiveFilters(f: ActiveFilters): boolean {
