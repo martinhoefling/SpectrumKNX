@@ -14,9 +14,18 @@ updates:
     schedule:
       interval: "weekly"
     groups:
+      pydantic:
+        patterns:
+          - "pydantic"
+          - "pydantic_core"
+          - "pydantic-core"
       dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "pydantic"
+          - "pydantic_core"
+          - "pydantic-core"
 
   - package-ecosystem: "docker"
     directory: "/"
