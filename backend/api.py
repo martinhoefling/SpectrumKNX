@@ -3,11 +3,11 @@ import subprocess
 from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from knx_telegram_store import TelegramQuery
 from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
 from database import store
-from knx_telegram_store import TelegramQuery
 from parsers import (
     format_dpt_name,
     format_value_nicely,
@@ -63,11 +63,14 @@ def _build_telegram_response(telegrams: list) -> list:
         r["dpt_name"] = d_name
         r["unit"] = unit
 
-        r["value_formatted"] = format_value_nicely(
-            r.get("value_numeric") if r.get("value_numeric") is not None else r.get("value_json"),
-            r.get("dpt_main"),
-            r.get("dpt_sub"),
-        )
+        display_value = r.get("value_numeric")
+        if display_value is None:
+            vj = r.get("value_json")
+            # Unwrap legacy {"value": x} storage format
+            if isinstance(vj, dict) and list(vj.keys()) == ["value"]:
+                vj = vj["value"]
+            display_value = vj
+        r["value_formatted"] = format_value_nicely(display_value, r.get("dpt_main"), r.get("dpt_sub"))
 
         r["raw_hex"] = f"0x{r['raw_data']}" if r.get("raw_data") and len(r["raw_data"]) > 1 else r.get("raw_data")
 

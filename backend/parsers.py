@@ -120,7 +120,7 @@ def parse_telegram_payload(telegram, xknx=None):
         elif isinstance(val, bool):
             value_numeric = 1.0 if val else 0.0
         else:
-            value_json = {"value": val}
+            value_json = val
 
     # 3. Use raw string if decoding failed but payload exists
     if value_numeric is None and value_json is None and payload_val is not None:
@@ -130,9 +130,9 @@ def parse_telegram_payload(telegram, xknx=None):
         elif isinstance(v, bool):
             value_numeric = 1.0 if v else 0.0
         elif isinstance(v, tuple | list):
-            value_json = {"value": list(v)}
+            value_json = list(v)
         else:
-            value_json = {"value": str(v)}
+            value_json = str(v)
 
     raw_hex = raw_data.hex() if raw_data else None
     if raw_hex and len(raw_hex) > 1:

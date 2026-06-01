@@ -150,9 +150,9 @@ def test_parse_telegram_payload_with_dpt_array():
         parse_telegram_payload(MockTelegram())
     )
 
-    # 0xfc = 252
+    # 0xfc = 252 — stored as plain list, not wrapped
     assert raw_data == b"\xfc"
-    assert value_json == {"value": [252]}
+    assert value_json == [252]
     assert value_numeric is None
     assert dpt_main is None
 
@@ -181,6 +181,80 @@ def test_parse_telegram_payload_with_dpt_binary():
     assert value_numeric == 1.0
     assert value_json is None
     assert dpt_main is None
+
+
+def test_parse_telegram_payload_string_value_not_wrapped():
+    """String values decoded from DPT should be stored directly, not wrapped in {"value": ...}."""
+
+    class MockTranscoder:
+        dpt_main_number = 16
+        dpt_sub_number = 1
+        value_type = "string"
+        __name__ = "DPTString"
+
+    class MockDecoded:
+        transcoder = MockTranscoder()
+        value = "hello world"
+
+    class MockPayload:
+        value = None
+
+    class MockTelegram:
+        payload = MockPayload()
+        decoded_data = MockDecoded()
+        destination_address = "1/1/1"
+
+    value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
+        parse_telegram_payload(MockTelegram())
+    )
+
+    assert value_numeric is None
+    assert value_json == "hello world"
+    assert value_formatted == "hello world"
+
+
+def test_parse_telegram_payload_fallback_string_not_wrapped():
+    """Fallback string extraction (no decoded_data) should also store directly."""
+
+    class MockInnerPayload:
+        value = "raw string"
+
+    class MockPayload:
+        value = MockInnerPayload()
+
+    class MockTelegram:
+        payload = MockPayload()
+        decoded_data = None
+        destination_address = "1/1/2"
+
+    value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
+        parse_telegram_payload(MockTelegram())
+    )
+
+    assert value_numeric is None
+    assert value_json == "raw string"
+
+
+def test_parse_telegram_payload_fallback_list_not_wrapped():
+    """Fallback list values should be stored as plain list, not wrapped."""
+
+    class MockDPTArray:
+        value = (0x01, 0x02)
+
+    class MockPayload:
+        value = MockDPTArray()
+
+    class MockTelegram:
+        payload = MockPayload()
+        decoded_data = None
+        destination_address = "1/1/3"
+
+    value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
+        parse_telegram_payload(MockTelegram())
+    )
+
+    assert value_json == [1, 2]
+    assert value_numeric is None
 
 
 def test_format_dpt_name():

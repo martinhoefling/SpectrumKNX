@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from knx_telegram_store import StoredTelegram, TelegramQueryResult
 
 import knx_daemon
-from knx_telegram_store import StoredTelegram, TelegramQueryResult
 from main import app
 
 client = TestClient(app)
@@ -106,6 +106,63 @@ def test_get_telegrams(mock_query):
     assert len(data["telegrams"]) == 1
     assert data["telegrams"][0]["source_address"] == "1.1.1"
     assert data["telegrams"][0]["raw_data"] == "01"
+
+
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_string_value_formatted(mock_query):
+    """Strings stored as plain payload (new format) should display without JSON wrapping."""
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[
+            StoredTelegram(
+                timestamp=datetime(2023, 1, 1),
+                source="1.1.1",
+                destination="1/2/3",
+                telegramtype="GroupValueWrite",
+                direction="Incoming",
+                dpt_main=16,
+                dpt_sub=1,
+                payload="hello world",
+                value=None,
+                raw_data=None,
+            )
+        ],
+        total_count=1,
+        limit_reached=False,
+    )
+
+    response = client.get("/api/telegrams?limit=10")
+    assert response.status_code == 200
+    t = response.json()["telegrams"][0]
+    assert t["value_formatted"] == "hello world"
+
+
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_legacy_wrapped_string_unwrapped(mock_query):
+    """Strings stored in legacy {'value': x} format should be unwrapped for display."""
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[
+            StoredTelegram(
+                timestamp=datetime(2023, 1, 1),
+                source="1.1.1",
+                destination="1/2/3",
+                telegramtype="GroupValueWrite",
+                direction="Incoming",
+                dpt_main=16,
+                dpt_sub=1,
+                payload={"value": "hello world"},
+                value=None,
+                raw_data=None,
+            )
+        ],
+        total_count=1,
+        limit_reached=False,
+    )
+
+    response = client.get("/api/telegrams?limit=10")
+    assert response.status_code == 200
+    t = response.json()["telegrams"][0]
+    assert t["value_formatted"] == "hello world"
+    assert t["value_formatted"] != "{'value': 'hello world'}"
 
 
 def test_get_filter_options_invalid_device_address():
