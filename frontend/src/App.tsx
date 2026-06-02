@@ -677,7 +677,7 @@ function App() {
 
               {/* Filter panel (slide-in) */}
               <div style={{
-                width: isFilterOpen ? '260px' : '0px',
+                width: isFilterOpen ? 'clamp(260px, 18vw, 340px)' : '0px',
                 overflow: 'hidden',
                 transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
                 flexShrink: 0,
@@ -685,7 +685,7 @@ function App() {
                 display: 'flex',
                 flexDirection: 'column'
               }}>
-                <div style={{ width: 260, flex: 1, overflow: 'hidden' }}>
+                <div style={{ width: 'clamp(260px, 18vw, 340px)', flex: 1, overflow: 'hidden' }}>
                   <FilterPanel
                     options={filterOptions}
                     activeFilters={activeFilters}

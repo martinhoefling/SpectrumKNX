@@ -95,8 +95,9 @@ code, pre {
 
 /* Layout Utilities */
 .container {
-  max-width: 1400px;
-  margin: 0 auto;
+  /* No max-width — the app fills the full viewport width.
+     The filter pane scales via clamp() and the table takes the remaining space. */
+  width: 100%;
   padding: 2rem;
 }
 

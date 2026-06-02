@@ -249,12 +249,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {/* Filter panel (slide-in) */}
         <div style={{
-          width: isFilterOpen ? '240px' : '0px',
+          width: isFilterOpen ? 'clamp(260px, 18vw, 340px)' : '0px',
           overflow: 'hidden',
           transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
           flexShrink: 0,
         }}>
-          <div style={{ width: 240, height: '100%' }}>
+          <div style={{ width: 'clamp(260px, 18vw, 340px)', height: '100%' }}>
             <FilterPanel
               options={filterOptions}
               activeFilters={activeFilters}

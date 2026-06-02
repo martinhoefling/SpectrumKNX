@@ -90,15 +90,19 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
 
       {/* Label */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: '0.8125rem', color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace",
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{label}</div>
-        {sublabel && (
-          <div style={{
-            fontSize: '0.65rem', color: 'var(--text-dim)',
+        <div
+          title={label}
+          style={{
+            fontSize: '0.8125rem', color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace",
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{sublabel}</div>
+          }}>{label}</div>
+        {sublabel && (
+          <div
+            title={sublabel}
+            style={{
+              fontSize: '0.65rem', color: 'var(--text-dim)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{sublabel}</div>
         )}
       </div>
 
