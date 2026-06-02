@@ -172,11 +172,41 @@ async def get_filter_options():
     targets.sort(key=lambda x: x["address"])
     dpt_list = sorted(dpts.values(), key=lambda x: (x["main"], x.get("sub") or 0))
 
+    # Build group name maps from project topology
+    # ga_group_names: {"0": "Zentral", "0/1": "Wetter", ...}
+    # pa_line_names:  {"1": "Area 1", "1.0": "Line EG", ...}
+    ga_group_names: dict[str, str] = {}
+    pa_line_names: dict[str, str] = {}
+
+    if knx_daemon.global_knx_project:
+        def _collect_group_ranges(ranges: dict, depth: int = 0) -> None:
+            for key, data in ranges.items():
+                name = data.get("name", "")
+                if name:
+                    ga_group_names[str(key)] = name
+                nested = data.get("group_ranges", {})
+                if nested:
+                    _collect_group_ranges(nested, depth + 1)
+
+        _collect_group_ranges(knx_daemon.global_knx_project.get("group_ranges", {}))
+
+        for area_key, area_data in knx_daemon.global_knx_project.get("topology", {}).items():
+            area_name = area_data.get("name", "")
+            if area_name:
+                pa_line_names[str(area_key)] = area_name
+            for line_key, line_data in area_data.get("lines", {}).items():
+                line_name = line_data.get("name", "")
+                line_addr = f"{area_key}.{line_key}"
+                if line_name:
+                    pa_line_names[line_addr] = line_name
+
     return {
         "sources": sources,
         "targets": targets,
         "types": ["Write", "Read", "Response"],
         "dpts": dpt_list,
+        "ga_group_names": ga_group_names,
+        "pa_line_names": pa_line_names,
     }
 
 

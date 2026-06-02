@@ -15,6 +15,10 @@ export interface FilterOptions {
   targets: FilterOption[];
   types: string[];
   dpts: FilterOption[];
+  /** GA group names keyed by address prefix: {"0": "Zentral", "0/1": "Wetter"} */
+  ga_group_names: Record<string, string>;
+  /** PA area/line names keyed by address prefix: {"1": "Area 1", "1.0": "Line EG"} */
+  pa_line_names: Record<string, string>;
 }
 
 export interface ActiveFilters {

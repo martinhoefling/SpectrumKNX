@@ -21,7 +21,7 @@ import {
 
 declare const __APP_VERSION__: string;
 
-const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [] };
+const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [], ga_group_names: {}, pa_line_names: {} };
 
 const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: string, isSettingsOpen: boolean, onChange: (id: string) => void }) => {
   const [isOpen, setIsOpen] = useState(false);

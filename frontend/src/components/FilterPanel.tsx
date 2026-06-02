@@ -7,6 +7,7 @@ import {
   DEFAULT_FILTERS
 } from '../types/filters';
 import { compareKnxAddress } from '../utils/knxAddress';
+import { KnxAddressTree } from './KnxAddressTree';
 
 // ─── FilterPanel component ────────────────────────────────────────────────────
 
@@ -338,16 +339,16 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         {/* Source */}
         {filteredSources.length > 0 && (
           <Section title="Source" defaultOpen>
-            {filteredSources.map(s => (
-              <OptionRow
-                key={s.address}
-                label={s.address!}
-                sublabel={s.name || undefined}
-                checked={activeFilters.sources.includes(s.address!)}
-                count={mode === 'live' ? (counts?.sources[s.address!] ?? 0) : undefined}
-                onToggle={() => update({ sources: toggle(activeFilters.sources, s.address!) })}
-              />
-            ))}
+            <KnxAddressTree
+              entries={filteredSources}
+              selected={activeFilters.sources}
+              groupNames={options.pa_line_names ?? {}}
+              separator="."
+              onToggle={addresses => update({ sources: addresses })}
+              counts={counts?.sources}
+              mode={mode}
+              searchQuery={q}
+            />
           </Section>
         )}
 
@@ -379,16 +380,16 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         {/* Target */}
         {filteredTargets.length > 0 && (
           <Section title="Target" defaultOpen>
-            {filteredTargets.map(s => (
-              <OptionRow
-                key={s.address}
-                label={s.address!}
-                sublabel={s.name || undefined}
-                checked={activeFilters.targets.includes(s.address!)}
-                count={mode === 'live' ? (counts?.targets[s.address!] ?? 0) : undefined}
-                onToggle={() => update({ targets: toggle(activeFilters.targets, s.address!) })}
-              />
-            ))}
+            <KnxAddressTree
+              entries={filteredTargets}
+              selected={activeFilters.targets}
+              groupNames={options.ga_group_names ?? {}}
+              separator="/"
+              onToggle={addresses => update({ targets: addresses })}
+              counts={counts?.targets}
+              mode={mode}
+              searchQuery={q}
+            />
           </Section>
         )}
 
