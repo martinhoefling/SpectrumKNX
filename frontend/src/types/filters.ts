@@ -54,6 +54,33 @@ export const DEFAULT_FILTERS: ActiveFilters = {
   sourceTargetRelation: 'AND',
 };
 
+/** Minimal telegram shape needed for in-memory filtering. */
+export interface FilterableTelegram {
+  source_address: string;
+  target_address: string;
+  simplified_type?: string | null;
+  dpt_main?: number | null;
+}
+
+/**
+ * Returns true if the telegram passes the active filters.
+ * Used for both live in-memory filtering and history client-side filtering.
+ */
+export function matchesTelegram(t: FilterableTelegram, f: ActiveFilters): boolean {
+  const srcMatch = f.sources.includes(t.source_address);
+  const tgtMatch = f.targets.includes(t.target_address);
+  const srcOk = f.sources.length === 0 || srcMatch;
+  const tgtOk = f.targets.length === 0 || tgtMatch;
+  const typeOk = f.types.length === 0 || f.types.includes(t.simplified_type ?? '');
+  const dptOk = f.dpts.length === 0 || (t.dpt_main != null && f.dpts.includes(t.dpt_main));
+
+  const srcTgtOk = f.sources.length > 0 && f.targets.length > 0
+    ? (f.sourceTargetRelation === 'OR' ? (srcMatch || tgtMatch) : (srcOk && tgtOk))
+    : (srcOk && tgtOk);
+
+  return srcTgtOk && typeOk && dptOk;
+}
+
 export function hasActiveFilters(f: ActiveFilters): boolean {
   return (
     f.sources.length > 0 ||

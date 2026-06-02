@@ -1,15 +1,23 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
 import type { Telegram } from '../hooks/useWebSocket';
-import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart } from 'lucide-react';
+import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
 import { HistoryLoader } from './HistoryLoader';
 import { Visualizer } from './Visualizer';
 import { FilterPanel } from './FilterPanel';
 import {
   hasActiveFilters,
+  matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
 } from '../types/filters';
+
+export type LoaderTimeRange = {
+  relValue: number;
+  relUnit: 'seconds' | 'minutes' | 'hours' | 'days';
+  startTime: string;
+  endTime: string;
+};
 
 interface HistorySearchProps {
   visibleColumns: { [key: string]: boolean };
@@ -32,7 +40,14 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
-  // activeFilters and onFiltersChange come from App.tsx (shared with live view)
+
+  // Persisted time range — survives HistoryLoader open/close cycles
+  const [timeRange, setTimeRange] = useState<LoaderTimeRange>({
+    relValue: 1, relUnit: 'hours', startTime: '', endTime: '',
+  });
+
+  // Snapshot of filters at the time of the last load — used to detect stale results
+  const filtersAtLoadRef = useRef<ActiveFilters | null>(null);
 
   const handleSort = (key: SortKey) => {
     setSortConfig(prev => ({
@@ -99,7 +114,34 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       return next.length > loadLimit ? next.slice(0, loadLimit) : next;
     });
     setMetadata(meta || null);
+    // Snapshot the filters at load time so we can detect when they diverge
+    filtersAtLoadRef.current = activeFilters;
   };
+
+  // In-memory filter pass — mirrors live view filtering so changing filters
+  // immediately applies to already-loaded data without a re-fetch.
+  const filteredSortedTelegrams = useMemo(() => {
+    if (!hasActiveFilters(activeFilters)) return sortedTelegrams;
+    return sortedTelegrams.filter(t => matchesTelegram(t, activeFilters));
+  }, [sortedTelegrams, activeFilters]);
+
+  // True when current filters are less restrictive than what was used to fetch,
+  // meaning some telegrams may be missing from the loaded set.
+  const filtersLessRestrictive = useMemo(() => {
+    const atLoad = filtersAtLoadRef.current;
+    if (!atLoad || telegrams.length === 0) return false;
+    // A category became less restrictive if it had selections at load time
+    // but now has fewer (or none) — data for the removed entries was never fetched.
+    const wasFiltered = (arr: (string | number)[]) => arr.length > 0;
+    const nowHasFewer = (now: (string | number)[], then: (string | number)[]) =>
+      then.some(v => !now.includes(v as never));
+    return (
+      (wasFiltered(atLoad.sources) && nowHasFewer(activeFilters.sources, atLoad.sources)) ||
+      (wasFiltered(atLoad.targets) && nowHasFewer(activeFilters.targets, atLoad.targets)) ||
+      (wasFiltered(atLoad.types)   && nowHasFewer(activeFilters.types,   atLoad.types))   ||
+      (wasFiltered(atLoad.dpts)    && nowHasFewer(activeFilters.dpts,    atLoad.dpts as number[]))
+    );
+  }, [activeFilters, telegrams.length]);
 
   const activeFilterCount = hasActiveFilters(activeFilters)
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
@@ -118,7 +160,19 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               fontSize: '0.75rem', color: 'var(--text-dim)', background: 'rgba(255,255,255,0.05)',
               padding: '0.2rem 0.6rem', borderRadius: '999px', border: '1px solid var(--border-color)',
             }}>
-              {telegrams.length.toLocaleString()} telegrams
+              {hasActiveFilters(activeFilters)
+                ? <>{filteredSortedTelegrams.length.toLocaleString()}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}> / {telegrams.length.toLocaleString()}</span></>
+                : telegrams.length.toLocaleString()
+              } telegrams
+            </span>
+          )}
+          {filtersLessRestrictive && (
+            <span
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              onClick={() => setIsLoaderOpen(true)}
+              title="Filters were broadened after the last load — some matching telegrams may not be in the loaded set. Click to reload."
+            >
+              <RefreshCw size={13} /> Reload for full results
             </span>
           )}
           {metadata?.limit_reached && (
@@ -245,7 +299,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
             </div>
           ) : (
             <TelegramTable
-              telegrams={sortedTelegrams}
+              telegrams={filteredSortedTelegrams}
               visibleColumns={visibleColumns}
               sortConfig={sortConfig}
               onSort={handleSort}
@@ -263,6 +317,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           onLoad={handleLoad}
           limit={loadLimit}
           filters={activeFilters}
+          timeRange={timeRange}
+          onTimeRangeChange={setTimeRange}
         />
       )}
     </div>

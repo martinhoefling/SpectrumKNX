@@ -13,6 +13,7 @@ import { KeysUploadWizard } from './components/KeysUploadWizard';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
+  matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
   type FilterCounts,
@@ -361,23 +362,9 @@ function App() {
       f.dpts.length === 0;
 
     // Step 1: mark each row as matching / not-matching
-    const matches = sortedLiveTelegrams.map(t => {
-      if (noFilter) return true;
-      const srcMatch = f.sources.includes(t.source_address);
-      const tgtMatch = f.targets.includes(t.target_address);
-      const srcOk = f.sources.length === 0 || srcMatch;
-      const tgtOk = f.targets.length === 0 || tgtMatch;
-      const typeOk = f.types.length === 0 || f.types.includes(t.simplified_type ?? '');
-      const dptOk = f.dpts.length === 0 || (t.dpt_main != null && f.dpts.includes(t.dpt_main));
-
-      // When both sides are active, sourceTargetRelation controls AND vs OR.
-      // When only one side is active the relation is irrelevant — standard pass-through.
-      const srcTgtOk = f.sources.length > 0 && f.targets.length > 0
-        ? (f.sourceTargetRelation === 'OR' ? (srcMatch || tgtMatch) : (srcOk && tgtOk))
-        : (srcOk && tgtOk);
-
-      return srcTgtOk && typeOk && dptOk;
-    });
+    const matches = sortedLiveTelegrams.map(t =>
+      noFilter ? true : matchesTelegram(t, f)
+    );
 
     const hasDelta = f.deltaBeforeMs > 0 || f.deltaAfterMs > 0;
 

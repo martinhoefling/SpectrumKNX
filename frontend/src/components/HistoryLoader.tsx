@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { X, Clock, Database, AlertCircle, CheckCircle2, Calendar, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { ActiveFilters } from '../types/filters';
+import type { LoaderTimeRange } from './HistorySearch';
 import { apiUrl } from '../utils/basePath';
 
 interface Metadata {
@@ -17,6 +18,9 @@ interface HistoryLoaderProps {
   mode?: 'monitor' | 'search';
   /** Active filter state — appended as query params for backend-side filtering (History Search) */
   filters?: ActiveFilters;
+  /** Persisted time range values — retained across open/close cycles */
+  timeRange?: LoaderTimeRange;
+  onTimeRangeChange?: (r: LoaderTimeRange) => void;
 }
 
 type Unit = 'seconds' | 'minutes' | 'hours' | 'days';
@@ -42,19 +46,24 @@ function applyFilterParams(url: string, filters?: ActiveFilters): string {
   return url + (url.includes('?') ? '&' : '?') + params.join('&');
 }
 
-export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, limit, mode = 'search', filters }) => {
+export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, limit, mode = 'search', filters, timeRange, onTimeRangeChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
   const [resultMeta, setResultMeta] = useState<Metadata | null>(null);
 
-  // Custom relative
-  const [relValue, setRelValue] = useState<number>(1);
-  const [relUnit, setRelUnit] = useState<Unit>('hours');
+  // Custom relative — initialised from persisted timeRange if provided
+  const [relValue, setRelValue] = useState<number>(timeRange?.relValue ?? 1);
+  const [relUnit, setRelUnit] = useState<Unit>(timeRange?.relUnit ?? 'hours');
 
   // Custom absolute (history search only)
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
+  const [startTime, setStartTime] = useState(timeRange?.startTime ?? '');
+  const [endTime, setEndTime] = useState(timeRange?.endTime ?? '');
+
+  // Persist state changes back to parent whenever values change
+  const persistTimeRange = (patch: Partial<LoaderTimeRange>) => {
+    onTimeRangeChange?.({ relValue, relUnit, startTime, endTime, ...patch });
+  };
 
   const doFetch = useCallback(async (baseUrl: string) => {
     setIsLoading(true);
@@ -201,13 +210,13 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
             type="number"
             min={1}
             value={relValue}
-            onChange={e => setRelValue(Number(e.target.value))}
+            onChange={e => { const v = Number(e.target.value); setRelValue(v); persistTimeRange({ relValue: v }); }}
             className="glass-input"
             style={{ width: '90px', flexShrink: 0 }}
           />
           <select
             value={relUnit}
-            onChange={e => setRelUnit(e.target.value as Unit)}
+            onChange={e => { const v = e.target.value as Unit; setRelUnit(v); persistTimeRange({ relUnit: v }); }}
             className="glass-input"
             style={{ flex: 1 }}
           >
@@ -237,11 +246,11 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>From</label>
-                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={startTime} onChange={e => setStartTime(e.target.value)} />
+                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={startTime} onChange={e => { setStartTime(e.target.value); persistTimeRange({ startTime: e.target.value }); }} />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>To</label>
-                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={endTime} onChange={e => setEndTime(e.target.value)} />
+                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={endTime} onChange={e => { setEndTime(e.target.value); persistTimeRange({ endTime: e.target.value }); }} />
               </div>
             </div>
             <button
