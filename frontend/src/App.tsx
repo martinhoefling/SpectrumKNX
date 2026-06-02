@@ -198,6 +198,8 @@ function App() {
         targets: data.targets || [],
         types: data.types || ['Write', 'Read', 'Response'],
         dpts: data.dpts || [],
+        ga_group_names: data.ga_group_names || {},
+        pa_line_names: data.pa_line_names || {},
       }))
       .catch(() => {
         // Fallback: populate only the static types
