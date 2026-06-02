@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
 import type { Telegram } from '../hooks/useWebSocket';
 import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
@@ -47,7 +47,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   });
 
   // Snapshot of filters at the time of the last load — used to detect stale results
-  const filtersAtLoadRef = useRef<ActiveFilters | null>(null);
+  const [filtersAtLoad, setFiltersAtLoad] = useState<ActiveFilters | null>(null);
 
   const handleSort = (key: SortKey) => {
     setSortConfig(prev => ({
@@ -115,7 +115,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     });
     setMetadata(meta || null);
     // Snapshot the filters at load time so we can detect when they diverge
-    filtersAtLoadRef.current = activeFilters;
+    setFiltersAtLoad(activeFilters);
   };
 
   // In-memory filter pass — mirrors live view filtering so changing filters
@@ -128,7 +128,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   // True when current filters are less restrictive than what was used to fetch,
   // meaning some telegrams may be missing from the loaded set.
   const filtersLessRestrictive = useMemo(() => {
-    const atLoad = filtersAtLoadRef.current;
+    const atLoad = filtersAtLoad;
     if (!atLoad || telegrams.length === 0) return false;
     // A category became less restrictive if it had selections at load time
     // but now has fewer (or none) — data for the removed entries was never fetched.
@@ -141,7 +141,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       (wasFiltered(atLoad.types)   && nowHasFewer(activeFilters.types,   atLoad.types))   ||
       (wasFiltered(atLoad.dpts)    && nowHasFewer(activeFilters.dpts,    atLoad.dpts as number[]))
     );
-  }, [activeFilters, telegrams.length]);
+  }, [activeFilters, filtersAtLoad, telegrams.length]);
 
   const activeFilterCount = hasActiveFilters(activeFilters)
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
