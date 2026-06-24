@@ -65,6 +65,13 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     onTimeRangeChange?.({ relValue, relUnit, startTime, endTime, ...patch });
   };
 
+  // Some browsers allow typing more than 4 digits into the year segment of a
+  // datetime-local input. Clamp to 4 digits to prevent e.g. "202600-01-01T00:00".
+  const clampYear = (value: string) => {
+    const match = value.match(/^(\d{5,})(-.+)$/);
+    return match ? match[1].slice(0, 4) + match[2] : value;
+  };
+
   const doFetch = useCallback(async (baseUrl: string) => {
     setIsLoading(true);
     setError(null);
@@ -246,11 +253,11 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>From</label>
-                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={startTime} onChange={e => { setStartTime(e.target.value); persistTimeRange({ startTime: e.target.value }); }} />
+                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={startTime} onChange={e => { const v = clampYear(e.target.value); setStartTime(v); persistTimeRange({ startTime: v }); }} />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>To</label>
-                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={endTime} onChange={e => { setEndTime(e.target.value); persistTimeRange({ endTime: e.target.value }); }} />
+                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={endTime} onChange={e => { const v = clampYear(e.target.value); setEndTime(v); persistTimeRange({ endTime: v }); }} />
               </div>
             </div>
             <button
