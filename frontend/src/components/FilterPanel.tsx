@@ -184,7 +184,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
 
   return (
     <div style={{
-      height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column',
+      height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column',
       borderRight: '1px solid var(--border-color)',
     }}>
       {/* Header */}
@@ -228,7 +228,9 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           padding: '0.5rem 0.75rem',
           borderBottom: '1px solid var(--border-color)',
           background: 'rgba(255,255,255,0.02)',
-          flexShrink: 0
+          flexShrink: 0,
+          overflowY: 'auto',
+          maxHeight: '40%',
         }}>
           <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem', paddingLeft: '0.25rem' }}>Active Filters</div>
           {activeFilters.sources.map(s => {
