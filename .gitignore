@@ -30,6 +30,7 @@ dist-ssr/
 *.local
 
 # Python
+.python-version
 __pycache__/
 *.py[cod]
 *$py.class
