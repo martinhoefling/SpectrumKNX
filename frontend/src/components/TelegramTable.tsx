@@ -38,6 +38,14 @@ const getDPTColor = (dpt_main: number | null) => {
   return 'var(--dpt-unknown, #6b7280)';
 };
 
+const getDPTLabel = (dpt_main: number | null) => {
+  if (dpt_main === 1) return 'DPT 1.x – Binary / Switch';
+  if (dpt_main === 5) return 'DPT 5.x – 8-bit unsigned';
+  if (dpt_main === 9) return 'DPT 9.x – 2-byte float';
+  if (dpt_main != null) return `DPT ${dpt_main}.x`;
+  return 'Unknown DPT';
+};
+
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize
 }) => {
@@ -232,7 +240,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                       </button>
                     </div>
                     {visibleColumns.sourceName && (
-                      <div className="subtitle-name" style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div className="subtitle-name" title={t.source_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {t.source_name || '-'}
                       </div>
                     )}
@@ -254,7 +262,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                       </button>
                     </div>
                     {visibleColumns.targetName && (
-                      <div className="subtitle-name" style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div className="subtitle-name" title={t.target_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {t.target_name || '-'}
                       </div>
                     )}
@@ -285,8 +293,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
                       {t.dpt_name && t.dpt_main != null ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-                          <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
+                          <div title={getDPTLabel(t.dpt_main)} style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
+                          <span title={t.dpt_name ?? undefined} style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
                           <button
                             className={`quick-filter-btn ${activeFilters.dpts.includes(t.dpt_main) ? 'active' : ''}`}
                             onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', t.dpt_main); }}
