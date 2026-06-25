@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import type { FilterOption } from '../types/filters';
 
 interface KnxAddressTreeProps {
@@ -13,6 +13,7 @@ interface KnxAddressTreeProps {
   counts?: Record<string, number>;
   mode: 'live' | 'history';
   searchQuery: string;
+  onLastSeen?: (address: string) => void;
 }
 
 type CheckState = 'checked' | 'partial' | 'unchecked';
@@ -58,44 +59,66 @@ interface LeafRowProps {
   count?: number;
   mode: 'live' | 'history';
   onToggle: () => void;
+  onLastSeen?: () => void;
 }
 
-const LeafRow: React.FC<LeafRowProps> = ({ address, name, checked, count, mode, onToggle }) => (
-  <div
-    onClick={onToggle}
-    style={{
-      display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.3rem 0.25rem',
-      borderRadius: '5px', cursor: 'pointer', userSelect: 'none',
-      transition: 'background 0.15s',
-    }}
-    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-  >
-    <TriCheckbox state={checked ? 'checked' : 'unchecked'} onClick={onToggle} />
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div title={address} style={{
-        fontSize: '0.8125rem', color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace",
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{address}</div>
-      {name && (
-        <div title={name} style={{
-          fontSize: '0.65rem', color: 'var(--text-dim)',
+const LeafRow: React.FC<LeafRowProps> = ({ address, name, checked, count, mode, onToggle, onLastSeen }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.3rem 0.25rem',
+        borderRadius: '5px', cursor: 'pointer', userSelect: 'none',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'; setHovered(true); }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; setHovered(false); }}
+    >
+      <TriCheckbox state={checked ? 'checked' : 'unchecked'} onClick={onToggle} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div title={address} style={{
+          fontSize: '0.8125rem', color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace",
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{name}</div>
+        }}>{address}</div>
+        {name && (
+          <div title={name} style={{
+            fontSize: '0.65rem', color: 'var(--text-dim)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{name}</div>
+        )}
+      </div>
+      {onLastSeen && (
+        <button
+          onClick={e => { e.stopPropagation(); onLastSeen(); }}
+          title="Show last seen values"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'var(--text-dim)', padding: '0.15rem', borderRadius: '3px',
+            display: 'flex', alignItems: 'center',
+            opacity: hovered ? 0.8 : 0,
+            transition: 'opacity 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => { e.stopPropagation(); (e.currentTarget as HTMLElement).style.opacity = '1'; (e.currentTarget as HTMLElement).style.color = 'var(--accent-primary)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = hovered ? '0.8' : '0'; (e.currentTarget as HTMLElement).style.color = 'var(--text-dim)'; }}
+        >
+          <Clock size={12} />
+        </button>
+      )}
+      {mode === 'live' && count !== undefined && (
+        <span style={{
+          fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
+          padding: '0.1rem 0.4rem', borderRadius: '999px',
+          background: count > 0 ? 'rgba(99,102,241,0.15)' : 'var(--bg-tag)',
+          color: count > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
+          border: count > 0 ? '1px solid rgba(99,102,241,0.3)' : '1px solid var(--border-color)',
+          flexShrink: 0,
+        }}>{count}</span>
       )}
     </div>
-    {mode === 'live' && count !== undefined && (
-      <span style={{
-        fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
-        padding: '0.1rem 0.4rem', borderRadius: '999px',
-        background: count > 0 ? 'rgba(99,102,241,0.15)' : 'var(--bg-tag)',
-        color: count > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
-        border: count > 0 ? '1px solid rgba(99,102,241,0.3)' : '1px solid var(--border-color)',
-        flexShrink: 0,
-      }}>{count}</span>
-    )}
-  </div>
-);
+  );
+};
 
 interface GroupNodeProps {
   label: string;
@@ -145,7 +168,7 @@ const GroupNode: React.FC<GroupNodeProps> = ({ label, sublabel, leafAddresses, s
 };
 
 export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
-  entries, selected, groupNames, separator, onToggle, counts, mode, searchQuery,
+  entries, selected, groupNames, separator, onToggle, counts, mode, searchQuery, onLastSeen,
 }) => {
   const q = searchQuery.toLowerCase();
 
@@ -205,6 +228,7 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
                 <LeafRow key={e.address} address={e.address!} name={e.name ?? ''} checked={selected.includes(e.address!)}
                   count={counts?.[e.address!]} mode={mode}
                   onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
+                  onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
                 />
               ))}
             </GroupNode>

@@ -18,6 +18,7 @@ interface FilterPanelProps {
   /** Live-only: count of telegrams that would match each option in isolation */
   counts?: FilterCounts;
   mode: 'live' | 'history';
+  onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
 }
 
 interface SectionProps {
@@ -145,6 +146,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   onFiltersChange,
   counts,
   mode,
+  onQuickLastSeen,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -350,6 +352,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               counts={counts?.sources}
               mode={mode}
               searchQuery={q}
+              onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'pa') : undefined}
             />
           </Section>
         )}
@@ -391,6 +394,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               counts={counts?.targets}
               mode={mode}
               searchQuery={q}
+              onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'ga') : undefined}
             />
           </Section>
         )}

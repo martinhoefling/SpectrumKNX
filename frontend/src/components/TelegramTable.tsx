@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, X } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
 import type { ActiveFilters } from '../types/filters';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
@@ -20,6 +20,7 @@ interface TelegramTableProps {
   activeFilters: ActiveFilters;
   onQuickFilter: (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => void;
   onQuickVisualize: (targetAddress: string) => void;
+  onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
 }
 
 const getTypeColor = (type?: string | null) => {
@@ -47,7 +48,7 @@ const getDPTLabel = (dpt_main: number | null) => {
 };
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
-  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize
+  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -238,6 +239,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                         <Filter className="filter-icon" size={12} />
                         <X className="cancel-icon" size={12} />
                       </button>
+                      {onQuickLastSeen && (
+                        <button
+                          className="quick-last-seen-btn"
+                          onClick={(e) => { e.stopPropagation(); onQuickLastSeen(t.source_address, 'pa'); }}
+                          title="Show last seen values for this device"
+                        >
+                          <Clock size={12} />
+                        </button>
+                      )}
                     </div>
                     {visibleColumns.sourceName && (
                       <div className="subtitle-name" title={t.source_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -260,6 +270,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                         <Filter className="filter-icon" size={12} />
                         <X className="cancel-icon" size={12} />
                       </button>
+                      {onQuickLastSeen && (
+                        <button
+                          className="quick-last-seen-btn"
+                          onClick={(e) => { e.stopPropagation(); onQuickLastSeen(t.target_address, 'ga'); }}
+                          title="Show last seen values for this GA"
+                        >
+                          <Clock size={12} />
+                        </button>
+                      )}
                     </div>
                     {visibleColumns.targetName && (
                       <div className="subtitle-name" title={t.target_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -343,7 +362,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 // Add styles for quick filter buttons
 const style = document.createElement('style');
 style.textContent = `
-  .quick-filter-btn, .quick-visualize-btn {
+  .quick-filter-btn, .quick-visualize-btn, .quick-last-seen-btn {
     background: transparent;
     border: none;
     cursor: pointer;
@@ -377,19 +396,24 @@ style.textContent = `
   }
 
   .log-row:hover .quick-filter-btn:not(.active),
-  .log-row:hover .quick-visualize-btn {
+  .log-row:hover .quick-visualize-btn,
+  .log-row:hover .quick-last-seen-btn {
     opacity: 0.6;
   }
 
-  .quick-filter-btn:hover, .quick-visualize-btn:hover {
+  .quick-filter-btn:hover, .quick-visualize-btn:hover, .quick-last-seen-btn:hover {
     opacity: 1 !important;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--bg-hover);
     color: var(--accent-primary);
     transform: scale(1.1);
   }
 
   .quick-visualize-btn:hover {
     color: #10b981;
+  }
+
+  .quick-last-seen-btn:hover {
+    color: var(--accent-primary);
   }
 `;
 document.head.appendChild(style);

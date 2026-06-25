@@ -11,6 +11,7 @@ import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
 import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import { KeysUploadWizard } from './components/KeysUploadWizard';
+import { LastSeenOverlay } from './components/LastSeenOverlay';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
@@ -119,6 +120,9 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
+  const [isLastSeenOpen, setIsLastSeenOpen] = useState(false);
+  const [lastSeenAddress, setLastSeenAddress] = useState('');
+  const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>('ga');
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -334,7 +338,15 @@ function App() {
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
     setIsVisualizerOpen(true);
+    setIsLastSeenOpen(false);
   };
+
+  const handleQuickLastSeen = useCallback((address: string, mode: 'ga' | 'pa') => {
+    setLastSeenAddress(address);
+    setLastSeenMode(mode);
+    setIsLastSeenOpen(true);
+    setIsVisualizerOpen(false);
+  }, []);
 
   const sortedLiveTelegrams = useMemo(() => {
     const items = [...liveTelegrams];
@@ -727,6 +739,7 @@ function App() {
                     activeFilters={activeFilters}
                     onFiltersChange={handleFiltersChange}
                     counts={filterCounts}
+                    onQuickLastSeen={handleQuickLastSeen}
                     mode="live"
                   />
                 </div>
@@ -741,6 +754,13 @@ function App() {
                     onTargetsChange={setSelectedVisualizationTargets}
                     onClose={() => setIsVisualizerOpen(false)}
                   />
+                ) : isLastSeenOpen ? (
+                  <LastSeenOverlay
+                    filterOptions={filterOptions}
+                    initialAddress={lastSeenAddress}
+                    initialMode={lastSeenMode}
+                    onClose={() => setIsLastSeenOpen(false)}
+                  />
                 ) : (
                   <TelegramTable
                     telegrams={filteredLiveTelegrams}
@@ -750,6 +770,7 @@ function App() {
                     activeFilters={activeFilters}
                     onQuickFilter={handleQuickFilter}
                     onQuickVisualize={handleQuickVisualize}
+                    onQuickLastSeen={handleQuickLastSeen}
                   />
                 )}
               </div>
