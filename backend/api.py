@@ -4,10 +4,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from knx_telegram_store import TelegramQuery
+from sqlalchemy import text
 from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
-from database import store
+from database import engine, store
 from parsers import (
     format_dpt_name,
     format_value_nicely,
@@ -208,6 +209,51 @@ async def get_filter_options():
         "ga_group_names": ga_group_names,
         "pa_line_names": pa_line_names,
     }
+
+
+@router.get("/api/statistics")
+async def get_statistics():
+    """Returns telegram counts grouped by group address and physical address."""
+    sql = text("""
+        SELECT s_lk.value AS source_address, d_lk.value AS destination, COUNT(*) AS cnt
+        FROM telegrams t
+        JOIN string_lookup s_lk ON t.source_id = s_lk.id
+        JOIN string_lookup d_lk ON t.destination_id = d_lk.id
+        GROUP BY s_lk.value, d_lk.value
+    """)
+
+    async with engine.connect() as conn:
+        result = await conn.execute(sql)
+        rows = result.fetchall()
+
+    ga_counts: dict[str, int] = {}
+    pa_counts: dict[str, int] = {}
+    for source, destination, cnt in rows:
+        ga_counts[destination] = ga_counts.get(destination, 0) + cnt
+        pa_counts[source] = pa_counts.get(source, 0) + cnt
+
+    ga_name_map: dict[str, str] = {}
+    pa_name_map: dict[str, str] = {}
+    if knx_daemon.global_knx_project:
+        for addr, data in knx_daemon.global_knx_project.get("group_addresses", {}).items():
+            ga_name_map[addr] = data.get("name", "")
+        for addr, data in knx_daemon.global_knx_project.get("devices", {}).items():
+            try:
+                ia_str = str(IndividualAddress(addr))
+            except Exception:
+                ia_str = str(addr)
+            pa_name_map[ia_str] = data.get("name", "")
+
+    by_ga = sorted(
+        [{"address": addr, "name": ga_name_map.get(addr, ""), "count": cnt} for addr, cnt in ga_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+    by_pa = sorted(
+        [{"address": addr, "name": pa_name_map.get(addr, ""), "count": cnt} for addr, cnt in pa_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
+    return {"total": sum(ga_counts.values()), "by_ga": by_ga, "by_pa": by_pa}
 
 
 @router.get("/api/project")
