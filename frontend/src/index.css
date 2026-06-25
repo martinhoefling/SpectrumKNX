@@ -1,17 +1,28 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
+  /* === Dark theme defaults === */
   --bg-dark: #0a0a0c;
   --bg-panel: rgba(22, 22, 26, 0.7);
   --bg-card: rgba(30, 30, 35, 0.4);
+  --bg-subtle: rgba(255, 255, 255, 0.025);
+  --bg-tag: rgba(255, 255, 255, 0.05);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-inset: rgba(0, 0, 0, 0.2);
   --accent-primary: #6366f1;
   --accent-secondary: #a855f7;
   --text-main: #f8fafc;
   --text-dim: #94a3b8;
   --border-color: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-hover: rgba(255, 255, 255, 0.2);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
   --glass-blur: blur(12px);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+  --gradient-1: rgba(99, 102, 241, 0.15);
+  --gradient-2: rgba(168, 85, 247, 0.1);
   --error: #ef4444;
   --success: #22c55e;
   --warning: #f59e0b;
@@ -22,6 +33,74 @@
   --dpt-5: #a855f7;  /* Scaling/Percent */
   --dpt-9: #22c55e;  /* Temperature/Floats */
   --dpt-unknown: #64748b;
+}
+
+/* === System preference: light === */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg-dark: #f0f2fa;
+    --bg-panel: rgba(255, 255, 255, 0.8);
+    --bg-card: rgba(240, 242, 250, 0.7);
+    --bg-subtle: rgba(0, 0, 0, 0.025);
+    --bg-tag: rgba(0, 0, 0, 0.06);
+    --bg-hover: rgba(0, 0, 0, 0.07);
+    --bg-inset: rgba(0, 0, 0, 0.04);
+    --accent-primary: #4f46e5;
+    --accent-secondary: #9333ea;
+    --text-main: #0f172a;
+    --text-dim: #64748b;
+    --border-color: rgba(0, 0, 0, 0.1);
+    --border-subtle: rgba(0, 0, 0, 0.07);
+    --border-hover: rgba(0, 0, 0, 0.2);
+    --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+    --gradient-1: rgba(99, 102, 241, 0.07);
+    --gradient-2: rgba(168, 85, 247, 0.05);
+  }
+}
+
+/* === Explicit dark override === */
+[data-theme="dark"] {
+  --bg-dark: #0a0a0c;
+  --bg-panel: rgba(22, 22, 26, 0.7);
+  --bg-card: rgba(30, 30, 35, 0.4);
+  --bg-subtle: rgba(255, 255, 255, 0.025);
+  --bg-tag: rgba(255, 255, 255, 0.05);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-inset: rgba(0, 0, 0, 0.2);
+  --accent-primary: #6366f1;
+  --accent-secondary: #a855f7;
+  --text-main: #f8fafc;
+  --text-dim: #94a3b8;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-hover: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+  --gradient-1: rgba(99, 102, 241, 0.15);
+  --gradient-2: rgba(168, 85, 247, 0.1);
+}
+
+/* === Explicit light override === */
+[data-theme="light"] {
+  --bg-dark: #f0f2fa;
+  --bg-panel: rgba(255, 255, 255, 0.8);
+  --bg-card: rgba(240, 242, 250, 0.7);
+  --bg-subtle: rgba(0, 0, 0, 0.025);
+  --bg-tag: rgba(0, 0, 0, 0.06);
+  --bg-hover: rgba(0, 0, 0, 0.07);
+  --bg-inset: rgba(0, 0, 0, 0.04);
+  --accent-primary: #4f46e5;
+  --accent-secondary: #9333ea;
+  --text-main: #0f172a;
+  --text-dim: #64748b;
+  --border-color: rgba(0, 0, 0, 0.1);
+  --border-subtle: rgba(0, 0, 0, 0.07);
+  --border-hover: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+  --gradient-1: rgba(99, 102, 241, 0.07);
+  --gradient-2: rgba(168, 85, 247, 0.05);
 }
 
 * {
@@ -35,8 +114,8 @@ body {
   background-color: var(--bg-dark);
   color: var(--text-main);
   background-image:
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.1) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, var(--gradient-1) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, var(--gradient-2) 0px, transparent 50%);
   min-height: 100vh;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -65,7 +144,7 @@ code, pre {
 }
 
 .glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--border-hover);
   transform: translateY(-2px);
 }
 
@@ -107,7 +186,7 @@ code, pre {
   overflow: hidden;
 }
 
-/* Custom uPlot styles for dark mode transparency */
+/* Custom uPlot styles */
 .uplot {
   background: transparent !important;
   border-radius: 8px;
@@ -132,10 +211,10 @@ code, pre {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--scrollbar-thumb);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scrollbar-thumb-hover);
 }

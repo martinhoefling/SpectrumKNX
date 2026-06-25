@@ -53,7 +53,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
   };
 
   return (
-    <div style={{ width: 260, borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.1)' }}>
+    <div style={{ width: 260, borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'var(--bg-inset)' }}>
       <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <span style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <LineChart size={16} style={{ color: 'var(--accent-primary)' }} /> Targets
@@ -66,7 +66,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
       <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem',
-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
+          background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
           borderRadius: '7px', padding: '0.45rem 0.65rem'
         }}>
           <Search size={13} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />

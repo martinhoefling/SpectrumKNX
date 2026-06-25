@@ -157,7 +157,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {telegrams.length > 0 && (
             <span style={{
-              fontSize: '0.75rem', color: 'var(--text-dim)', background: 'rgba(255,255,255,0.05)',
+              fontSize: '0.75rem', color: 'var(--text-dim)', background: 'var(--bg-tag)',
               padding: '0.2rem 0.6rem', borderRadius: '999px', border: '1px solid var(--border-color)',
             }}>
               {hasActiveFilters(activeFilters)

@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, ChevronDown, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, ChevronDown, AlertTriangle, Sun, Moon, Monitor } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
+import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
 import { HistorySearch } from './components/HistorySearch';
@@ -56,7 +57,7 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
           display: 'flex', alignItems: 'center', gap: '0.75rem',
           fontSize: '0.95rem', fontWeight: 600, padding: '0.5rem 1rem',
           borderRadius: '8px', border: '1px solid var(--border-color)',
-          background: isOpen ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)',
+          background: isOpen ? 'var(--bg-hover)' : 'var(--bg-tag)',
           color: 'var(--text-main)', cursor: 'pointer', outline: 'none',
           minWidth: '220px', justifyContent: 'space-between',
           transition: 'all 0.2s ease'
@@ -113,6 +114,7 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
 };
 
 function App() {
+  const [theme, setTheme] = useTheme();
   const [activeTab, setActiveTab] = useState<'live' | 'history'>('live');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
@@ -446,7 +448,7 @@ function App() {
             {activeTab === 'live' && !isSettingsOpen && (
               <>
                 {/* Embedded Stats */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginRight: '1rem', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginRight: '1rem', background: 'var(--bg-subtle)', padding: '0.4rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     Rate: <span onClick={() => setRateMode(m => m === 's' ? 'm' : m === 'm' ? 'h' : 's')} style={{ color: 'var(--accent-primary)', fontWeight: 600, cursor: 'pointer' }}>{busRate.toFixed(1)}/{rateMode}</span>
                   </span>
@@ -524,12 +526,44 @@ function App() {
             <div className="glass-card" style={{ padding: '1.5rem', maxWidth: 600, margin: '0 auto' }}>
                <h2 style={{ marginBottom: '1.5rem', fontSize: '1.1rem' }}>Application Settings</h2>
 
+              <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
+                Appearance
+              </h3>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}>
+                {([
+                  { id: 'system', label: 'System', Icon: Monitor },
+                  { id: 'light',  label: 'Light',  Icon: Sun },
+                  { id: 'dark',   label: 'Dark',   Icon: Moon },
+                ] as const).map(({ id, label, Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setTheme(id)}
+                    style={{
+                      flex: 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+                      padding: '0.5rem',
+                      borderRadius: 6,
+                      border: `1px solid ${theme === id ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                      background: theme === id ? 'rgba(99,102,241,0.15)' : 'var(--bg-subtle)',
+                      color: theme === id ? 'var(--accent-primary)' : 'var(--text-dim)',
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                      fontWeight: theme === id ? 600 : 400,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Icon size={14} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
                <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
                 Table Columns
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '2rem' }}>
                 {Object.keys(visibleColumns).map(col => (
-                  <button key={col} className="setting-item" onClick={() => toggleColumn(col)} style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                  <button key={col} className="setting-item" onClick={() => toggleColumn(col)} style={{ padding: '0.5rem', background: 'var(--bg-subtle)', borderRadius: 6 }}>
                     <div className={`checkbox ${visibleColumns[col] ? 'checked' : ''}`} style={{ width: 14, height: 14, border: '1px solid var(--border-color)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {visibleColumns[col] && <div style={{ width: 8, height: 8, background: 'white', borderRadius: 2 }} />}
                     </div>
@@ -609,7 +643,7 @@ function App() {
                       value != null && (
                         <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
-                          <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                          <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
                             {String(value)}
                           </span>
                         </div>
@@ -617,7 +651,7 @@ function App() {
                     ))}
 
                     {/* Files */}
-                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ color: 'var(--text-dim)' }}>Project file:</span>
                         <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
@@ -634,12 +668,12 @@ function App() {
 
                     {/* Security */}
                     {Object.entries(serverConfig.security || {}).some(([, v]) => v != null) && (
-                      <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
                         {Object.entries(serverConfig.security || {}).map(([key, value]) => (
                           value != null && (
                             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
                               <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
-                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
                                 {String(value)}
                               </span>
                             </div>
@@ -659,13 +693,13 @@ function App() {
                 </h3>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
                   <span style={{ color: 'var(--text-dim)' }}>Frontend Version:</span>
-                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
                     {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'unknown'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
                   <span style={{ color: 'var(--text-dim)' }}>Backend Version:</span>
-                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
                     {backendVersion}
                   </span>
                 </div>
@@ -775,7 +809,7 @@ function App() {
 
       <style>{`
         .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-weight: 500; transition: all 0.2s ease; width: 100%; text-align: left; }
-        .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); }
+        .nav-item:hover { background: var(--bg-hover); color: var(--text-main); }
         .nav-item.active { background: rgba(99,102,241,0.1); color: var(--accent-primary); }
         .icon-button { background: transparent; border: none; cursor: pointer; color: var(--text-dim); transition: all 0.2s; }
         .icon-button:hover { color: var(--text-main); transform: scale(1.1); }
@@ -786,7 +820,7 @@ function App() {
         .highlight { color: var(--text-dim); }
         .highlight-target { color: var(--accent-primary); font-weight: 500; }
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .raw-badge { background: rgba(255,255,255,0.05); padding: 0.15rem 0.4rem; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); display: inline-block; border: 1px solid rgba(255,255,255,0.05); }
+        .raw-badge { background: var(--bg-tag); padding: 0.15rem 0.4rem; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); display: inline-block; border: 1px solid var(--border-subtle); }
       `}</style>
     </div>
   );

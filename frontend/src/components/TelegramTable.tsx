@@ -206,7 +206,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     gridTemplateColumns: gridTemplate,
                     borderBottom: '1px solid var(--border-color)',
                     fontSize: '0.8125rem',
-                    background: virtualRow.index % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent',
+                    background: virtualRow.index % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
                     alignItems: 'start',
                     minHeight: '60px' // Ensure a minimum touch/visual target
                   }}
@@ -325,7 +325,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                       </button>
                     </div>
                     {visibleColumns.data && t.raw_hex && (
-                      <div className="raw-badge" style={{ marginTop: '0.4rem', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.65rem', color: 'var(--text-dim)', display: 'inline-block', fontFamily: 'var(--font-mono)' }}>
+                      <div className="raw-badge" style={{ marginTop: '0.4rem', background: 'var(--bg-tag)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.65rem', color: 'var(--text-dim)', display: 'inline-block', fontFamily: 'var(--font-mono)' }}>
                         {t.raw_hex}
                       </div>
                     )}

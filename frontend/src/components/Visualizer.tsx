@@ -49,7 +49,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
         />
 
         {/* Chart Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-subtle)' }}>
           <div style={{ padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)' }}>
             <div>
               <h3 style={{ fontSize: '1rem', margin: 0 }}>Visualization</h3>

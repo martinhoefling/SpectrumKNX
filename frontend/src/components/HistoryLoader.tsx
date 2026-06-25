@@ -182,13 +182,13 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
               <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>{t}</span>
             ))}
             {filters.dpts.map(d => (
-              <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>
+              <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>
             ))}
             {filters.deltaBeforeMs > 0 && (
-              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>−{filters.deltaBeforeMs}ms before</span>
+              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>−{filters.deltaBeforeMs}ms before</span>
             )}
             {filters.deltaAfterMs > 0 && (
-              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>+{filters.deltaAfterMs}ms after</span>
+              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>+{filters.deltaAfterMs}ms after</span>
             )}
           </div>
         )}
@@ -298,10 +298,10 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 1000; animation: fade-in 0.15s ease-out; }
         .modal-content { width: 480px; max-height: 90vh; overflow-y: auto; padding: 2rem; border-radius: 14px; animation: scale-in 0.2s cubic-bezier(0.16,1,0.3,1); }
         .section-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.65rem; }
-        .quick-load-btn { display: flex; align-items: center; justify-content: center; padding: 0.65rem 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 0.8125rem; cursor: pointer; transition: all 0.2s; }
+        .quick-load-btn { display: flex; align-items: center; justify-content: center; padding: 0.65rem 0.5rem; background: var(--bg-subtle); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 0.8125rem; cursor: pointer; transition: all 0.2s; }
         .quick-load-btn:hover:not(:disabled) { background: rgba(99,102,241,0.1); border-color: var(--accent-primary); color: var(--accent-primary); }
         .quick-load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .glass-input { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem 0.75rem; color: var(--text-main); font-family: inherit; font-size: 0.8125rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
+        .glass-input { background: var(--bg-tag); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem 0.75rem; color: var(--text-main); font-family: inherit; font-size: 0.8125rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
         .glass-input:focus { border-color: var(--accent-primary); }
         .glass-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
         .search-submit-btn { display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 0.8rem; background: rgba(99,102,241,0.12); border: 1px solid var(--accent-primary); border-radius: 8px; color: var(--accent-primary); font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.2s; }

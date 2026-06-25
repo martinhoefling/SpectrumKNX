@@ -62,7 +62,7 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
     borderRadius: '6px', transition: 'background 0.15s',
     paddingRight: '0.25rem'
   }}
-    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
   >
     <label
@@ -112,7 +112,7 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
         <span style={{
           fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
           padding: '0.1rem 0.4rem', borderRadius: '999px',
-          background: count > 0 ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+          background: count > 0 ? 'rgba(99,102,241,0.15)' : 'var(--bg-tag)',
           color: count > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
           border: count > 0 ? '1px solid rgba(99,102,241,0.3)' : '1px solid var(--border-color)',
         }}>
@@ -227,7 +227,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         <div style={{
           padding: '0.5rem 0.75rem',
           borderBottom: '1px solid var(--border-color)',
-          background: 'rgba(255,255,255,0.02)',
+          background: 'var(--bg-subtle)',
           flexShrink: 0,
           overflowY: 'auto',
           maxHeight: '40%',
@@ -308,7 +308,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
       <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem',
-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
+          background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
           borderRadius: '7px', padding: '0.45rem 0.65rem',
           transition: 'border-color 0.2s',
         }}>
@@ -445,7 +445,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 placeholder="0 = off"
                 onChange={e => update({ deltaBeforeMs: Math.max(0, Number(e.target.value)) })}
                 style={{
-                  flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
+                  flex: 1, background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
                   borderRadius: '6px', padding: '0.45rem 0.6rem', color: 'var(--text-main)',
                   fontSize: '0.8125rem', fontFamily: 'inherit', outline: 'none',
                 }}
@@ -465,7 +465,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 placeholder="0 = off"
                 onChange={e => update({ deltaAfterMs: Math.max(0, Number(e.target.value)) })}
                 style={{
-                  flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
+                  flex: 1, background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
                   borderRadius: '6px', padding: '0.45rem 0.6rem', color: 'var(--text-main)',
                   fontSize: '0.8125rem', fontFamily: 'inherit', outline: 'none',
                 }}

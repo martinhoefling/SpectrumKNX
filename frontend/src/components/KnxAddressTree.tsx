@@ -68,7 +68,7 @@ const LeafRow: React.FC<LeafRowProps> = ({ address, name, checked, count, mode, 
       borderRadius: '5px', cursor: 'pointer', userSelect: 'none',
       transition: 'background 0.15s',
     }}
-    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
   >
     <TriCheckbox state={checked ? 'checked' : 'unchecked'} onClick={onToggle} />
@@ -88,7 +88,7 @@ const LeafRow: React.FC<LeafRowProps> = ({ address, name, checked, count, mode, 
       <span style={{
         fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
         padding: '0.1rem 0.4rem', borderRadius: '999px',
-        background: count > 0 ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+        background: count > 0 ? 'rgba(99,102,241,0.15)' : 'var(--bg-tag)',
         color: count > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
         border: count > 0 ? '1px solid rgba(99,102,241,0.3)' : '1px solid var(--border-color)',
         flexShrink: 0,
@@ -119,7 +119,7 @@ const GroupNode: React.FC<GroupNodeProps> = ({ label, sublabel, leafAddresses, s
           padding: '0.3rem 0.25rem', borderRadius: '5px', cursor: 'pointer',
           userSelect: 'none',
         }}
-        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
         <TriCheckbox state={state} onClick={onToggleAll} />
