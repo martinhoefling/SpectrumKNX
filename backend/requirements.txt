@@ -1,12 +1,12 @@
 annotated-doc==0.0.4
 annotated-types==0.7.0
-anyio==4.14.0
+anyio==4.14.1
 asyncpg==0.31.0
 cffi==2.0.0
-click==8.4.1
+click==8.4.2
 cryptography==49.0.0
-fastapi==0.137.2
-greenlet==3.5.2
+fastapi==0.138.1
+greenlet==3.5.3
 h11==0.16.0
 idna==3.18
 ifaddr==0.2.0
@@ -33,7 +33,7 @@ websockets==16.0
 xknx==3.16.0
 xknxproject==3.9.0
 httpx==0.28.1
-ruff==0.15.18
+ruff==0.15.20
 pytest-asyncio==1.4.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
