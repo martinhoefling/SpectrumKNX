@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, ChevronDown, AlertTriangle, Sun, Moon, Monitor } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, ChevronDown, AlertTriangle, Sun, Moon, Monitor } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
@@ -13,6 +13,7 @@ import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import { KeysUploadWizard } from './components/KeysUploadWizard';
 import { LastSeenOverlay } from './components/LastSeenOverlay';
 import { StatisticsOverlay } from './components/StatisticsOverlay';
+import { BuildingOverlay } from './components/BuildingOverlay';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
@@ -125,6 +126,7 @@ function App() {
   const [lastSeenAddress, setLastSeenAddress] = useState('');
   const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>('ga');
   const [isStatisticsOpen, setIsStatisticsOpen] = useState(false);
+  const [isBuildingOpen, setIsBuildingOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -342,6 +344,7 @@ function App() {
     setIsVisualizerOpen(true);
     setIsLastSeenOpen(false);
     setIsStatisticsOpen(false);
+    setIsBuildingOpen(false);
   };
 
   const handleQuickLastSeen = useCallback((address: string, mode: 'ga' | 'pa') => {
@@ -350,7 +353,17 @@ function App() {
     setIsLastSeenOpen(true);
     setIsVisualizerOpen(false);
     setIsStatisticsOpen(false);
+    setIsBuildingOpen(false);
   }, []);
+
+  // Add all of a KO's connected group addresses to the target filter (union).
+  const handleFilterGAs = useCallback((addresses: string[]) => {
+    handleFiltersChange(prev => ({
+      ...prev,
+      targets: [...new Set([...prev.targets, ...addresses])],
+    }));
+    setIsFilterOpen(true);
+  }, [handleFiltersChange]);
 
   const sortedLiveTelegrams = useMemo(() => {
     const items = [...liveTelegrams];
@@ -513,7 +526,7 @@ function App() {
 
                 <button
                   className="icon-button"
-                  onClick={() => setIsVisualizerOpen(v => !v)}
+                  onClick={() => { setIsVisualizerOpen(v => !v); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsBuildingOpen(false); }}
                   title="Visualize data"
                   style={{ color: isVisualizerOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
                 >
@@ -521,11 +534,19 @@ function App() {
                 </button>
                 <button
                   className="icon-button"
-                  onClick={() => { setIsStatisticsOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); }}
+                  onClick={() => { setIsStatisticsOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsBuildingOpen(false); }}
                   title="Traffic statistics"
                   style={{ color: isStatisticsOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
                 >
                   <BarChart2 size={18} />
+                </button>
+                <button
+                  className="icon-button"
+                  onClick={() => { setIsBuildingOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsStatisticsOpen(false); }}
+                  title="Building structure"
+                  style={{ color: isBuildingOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                >
+                  <Building2 size={18} />
                 </button>
                 <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
 
@@ -777,6 +798,13 @@ function App() {
                   <StatisticsOverlay
                     filterOptions={filterOptions}
                     onClose={() => setIsStatisticsOpen(false)}
+                  />
+                ) : isBuildingOpen ? (
+                  <BuildingOverlay
+                    onClose={() => setIsBuildingOpen(false)}
+                    onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
+                    onFilterGAs={handleFilterGAs}
+                    onLastSeen={handleQuickLastSeen}
                   />
                 ) : (
                   <TelegramTable

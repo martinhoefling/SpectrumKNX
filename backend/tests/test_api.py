@@ -32,6 +32,90 @@ def test_api_project_with_project():
     assert "1/1/1" in response.json()["group_addresses"]
 
 
+def test_get_building_no_project():
+    knx_daemon.global_knx_project = None
+    response = client.get("/api/building")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "no_project_loaded"
+    assert data["tree"] == []
+    assert data["unassigned_devices"] == []
+
+
+def test_get_building_with_project():
+    knx_daemon.global_knx_project = {
+        "locations": {
+            "B-1": {
+                "type": "Building",
+                "name": "Home",
+                "devices": [],
+                "spaces": {
+                    "F-1": {
+                        "type": "Floor",
+                        "name": "Ground Floor",
+                        "devices": ["1.1.1"],
+                        "spaces": {},
+                    }
+                },
+            }
+        },
+        "devices": {
+            "1.1.1": {
+                "name": "Switch Actuator",
+                "individual_address": "1.1.1",
+                "manufacturer_name": "ACME",
+                "hardware_name": "SA/4",
+                "communication_object_ids": ["O-1", "O-2", "O-3"],
+                "channels": {
+                    "CH-1": {"name": "Channel A", "communication_object_ids": ["O-1"]},
+                },
+            },
+            # Device not placed in any location → unassigned bucket.
+            "1.1.9": {
+                "name": "Orphan",
+                "individual_address": "1.1.9",
+                "communication_object_ids": [],
+                "channels": {},
+            },
+        },
+        "communication_objects": {
+            "O-1": {"number": 1, "name": "Switch", "text": "On/Off", "group_address_links": ["1/2/3"]},
+            # No GA links → must be omitted.
+            "O-2": {"number": 2, "name": "Unused", "text": "", "group_address_links": []},
+            # Linked but not in any channel → unassigned KO list.
+            "O-3": {"number": 3, "name": "Status", "text": "State", "group_address_links": ["1/2/4"]},
+        },
+        "group_addresses": {
+            "1/2/3": {"name": "Light On/Off"},
+            "1/2/4": {"name": "Light Status"},
+        },
+    }
+    response = client.get("/api/building")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+
+    building = data["tree"][0]
+    assert building["type"] == "Building"
+    floor = building["spaces"][0]
+    assert floor["name"] == "Ground Floor"
+
+    device = floor["devices"][0]
+    assert device["address"] == "1.1.1"
+    assert device["manufacturer"] == "ACME"
+
+    # O-1 is channelled, O-3 is unassigned, O-2 (no links) is dropped.
+    assert len(device["channels"]) == 1
+    assert device["channels"][0]["name"] == "Channel A"
+    assert device["channels"][0]["kos"][0]["number"] == 1
+    assert device["channels"][0]["kos"][0]["group_addresses"][0] == {"address": "1/2/3", "name": "Light On/Off"}
+    assert len(device["kos"]) == 1
+    assert device["kos"][0]["number"] == 3
+
+    # The orphan device is reported separately.
+    assert [d["address"] for d in data["unassigned_devices"]] == ["1.1.9"]
+
+
 def test_get_filter_options_no_project():
     knx_daemon.global_knx_project = None
     response = client.get("/api/filter-options")

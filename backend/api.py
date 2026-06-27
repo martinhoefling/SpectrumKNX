@@ -180,6 +180,7 @@ async def get_filter_options():
     pa_line_names: dict[str, str] = {}
 
     if knx_daemon.global_knx_project:
+
         def _collect_group_ranges(ranges: dict, depth: int = 0) -> None:
             for key, data in ranges.items():
                 name = data.get("name", "")
@@ -246,11 +247,13 @@ async def get_statistics():
 
     by_ga = sorted(
         [{"address": addr, "name": ga_name_map.get(addr, ""), "count": cnt} for addr, cnt in ga_counts.items()],
-        key=lambda x: x["count"], reverse=True,
+        key=lambda x: x["count"],
+        reverse=True,
     )
     by_pa = sorted(
         [{"address": addr, "name": pa_name_map.get(addr, ""), "count": cnt} for addr, cnt in pa_counts.items()],
-        key=lambda x: x["count"], reverse=True,
+        key=lambda x: x["count"],
+        reverse=True,
     )
 
     return {"total": sum(ga_counts.values()), "by_ga": by_ga, "by_pa": by_pa}
@@ -267,6 +270,120 @@ async def get_project():
         "group_addresses": knx_daemon.global_knx_project.get("group_addresses", {}),
         "devices": knx_daemon.global_knx_project.get("devices", {}),
     }
+
+
+def _build_ko(co: dict, gas: dict) -> dict:
+    """Serialize a communication object (KO) with its connected group addresses."""
+    group_addresses = [
+        {"address": ga, "name": gas.get(ga, {}).get("name", "")} for ga in co.get("group_address_links") or []
+    ]
+    return {
+        "number": co.get("number"),
+        "name": co.get("name", ""),
+        "text": co.get("text", ""),
+        "function_text": co.get("function_text", ""),
+        "dpts": co.get("dpts") or [],
+        "flags": co.get("flags") or {},
+        "group_addresses": group_addresses,
+    }
+
+
+def _build_device(addr: str, device: dict, cos: dict, gas: dict) -> dict:
+    """Serialize a device with its KOs grouped by channel (connected KOs only)."""
+    channels = device.get("channels") or {}
+    # Map each communication object id to the channel that owns it.
+    channel_of: dict[str, str] = {}
+    for ch_id, ch in channels.items():
+        for cid in ch.get("communication_object_ids") or []:
+            channel_of[cid] = ch_id
+
+    chan_groups: list[dict] = []
+    chan_index: dict[str, dict] = {}
+    unassigned: list[dict] = []
+
+    for cid in device.get("communication_object_ids") or []:
+        co = cos.get(cid)
+        # Only surface KOs that are linked to at least one group address — these
+        # are the ones that can be filtered on and have last-seen values.
+        if not co or not co.get("group_address_links"):
+            continue
+        ko = _build_ko(co, gas)
+        ch_id = channel_of.get(cid)
+        if ch_id is not None:
+            grp = chan_index.get(ch_id)
+            if grp is None:
+                grp = {"id": ch_id, "name": channels[ch_id].get("name", ""), "kos": []}
+                chan_index[ch_id] = grp
+                chan_groups.append(grp)
+            grp["kos"].append(ko)
+        else:
+            unassigned.append(ko)
+
+    try:
+        ia = str(IndividualAddress(addr))
+    except Exception:
+        ia = str(addr)
+
+    return {
+        "address": ia,
+        "name": device.get("name", ""),
+        "manufacturer": device.get("manufacturer_name", ""),
+        "hardware": device.get("hardware_name", ""),
+        "channels": chan_groups,
+        "kos": unassigned,
+    }
+
+
+def _build_space(space: dict, devices: dict, cos: dict, gas: dict) -> dict:
+    """Recursively serialize a building space with nested spaces and devices."""
+    child_spaces = [_build_space(sub, devices, cos, gas) for sub in (space.get("spaces") or {}).values()]
+    device_nodes = [
+        _build_device(dev_addr, devices[dev_addr], cos, gas)
+        for dev_addr in space.get("devices") or []
+        if dev_addr in devices
+    ]
+    return {
+        "kind": "space",
+        "type": space.get("type", ""),
+        "name": space.get("name", ""),
+        "spaces": child_spaces,
+        "devices": device_nodes,
+    }
+
+
+@router.get("/api/building")
+async def get_building():
+    """Returns the building structure tree (locations → devices → channels → KOs).
+
+    Mirrors the building view of the ETS project: spaces are nested, each device
+    carries its connected communication objects grouped by channel, and each KO
+    lists the group addresses it is linked to.
+    """
+    if not knx_daemon.global_knx_project:
+        return {"status": "no_project_loaded", "tree": [], "unassigned_devices": []}
+
+    proj = knx_daemon.global_knx_project
+    devices = proj.get("devices", {})
+    cos = proj.get("communication_objects", {})
+    gas = proj.get("group_addresses", {})
+    locations = proj.get("locations", {})
+
+    tree = [_build_space(space, devices, cos, gas) for space in locations.values()]
+
+    placed: set[str] = set()
+
+    def _collect_placed(space: dict) -> None:
+        for dev_addr in space.get("devices") or []:
+            placed.add(dev_addr)
+        for sub in (space.get("spaces") or {}).values():
+            _collect_placed(sub)
+
+    for space in locations.values():
+        _collect_placed(space)
+
+    unassigned_devices = [_build_device(addr, dev, cos, gas) for addr, dev in devices.items() if addr not in placed]
+
+    return {"status": "ok", "tree": tree, "unassigned_devices": unassigned_devices}
 
 
 def _project_upload_path() -> tuple[str, str | None]:
