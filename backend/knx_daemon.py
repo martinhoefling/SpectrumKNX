@@ -391,6 +391,8 @@ async def knx_startup():
             logger.error(f"Database connection details: {conn_check.detail}")
         raise RuntimeError(f"Database connection check failed: {conn_check.message}")
 
+    logger.info("Database connection check succeeded.")
+
     # Initialize the Telegram Store (including schema creation/renames)
     await store.initialize()
     store.start()
