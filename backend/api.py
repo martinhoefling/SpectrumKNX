@@ -3,12 +3,12 @@ import subprocess
 from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from knx_telegram_store import TelegramQuery
 from sqlalchemy import text
 from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
 from database import engine, store
+from knx_telegram_store import TelegramQuery
 from parsers import (
     format_dpt_name,
     format_value_nicely,

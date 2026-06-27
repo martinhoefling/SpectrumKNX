@@ -75,7 +75,10 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     }
   }, [selectedAddress, mode, limit]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);

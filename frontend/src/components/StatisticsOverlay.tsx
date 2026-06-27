@@ -48,7 +48,7 @@ const StatTable: React.FC<StatTableProps> = ({ entries, total, sortKey, sortDir,
   );
   const maxCount = entries[0]?.count ?? 1;
 
-  const SortArrow = ({ k }: { k: SortKey }) =>
+  const renderSortArrow = (k: SortKey) =>
     sortKey === k ? <span style={{ color: 'var(--accent-primary)', marginLeft: 2 }}>{sortDir === 'desc' ? '↓' : '↑'}</span> : null;
 
   return (
@@ -58,14 +58,14 @@ const StatTable: React.FC<StatTableProps> = ({ entries, total, sortKey, sortDir,
           <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
             <th style={{ padding: '0.5rem 0.75rem', textAlign: 'left', color: 'var(--text-dim)', fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}
               onClick={() => onSort('address')}>
-              Address <SortArrow k="address" />
+              Address {renderSortArrow('address')}
             </th>
             <th style={{ padding: '0.5rem 0.75rem', textAlign: 'left', color: 'var(--text-dim)', fontWeight: 600 }}>
               Name
             </th>
             <th style={{ padding: '0.5rem 0.75rem', textAlign: 'right', color: 'var(--text-dim)', fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}
               onClick={() => onSort('count')}>
-              Count <SortArrow k="count" />
+              Count {renderSortArrow('count')}
             </th>
             <th style={{ padding: '0.5rem 0.75rem', color: 'var(--text-dim)', fontWeight: 600, width: '30%' }}>Share</th>
           </tr>
@@ -238,6 +238,7 @@ export const StatisticsOverlay: React.FC<StatisticsOverlayProps> = ({ filterOpti
   const [sortKey, setSortKey] = useState<SortKey>('count');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [searchQuery, setSearchQuery] = useState('');
+  const [timeAgo, setTimeAgo] = useState<string | null>(null);
 
   const fetchStats = useCallback(() => {
     setIsLoading(true);
@@ -251,7 +252,24 @@ export const StatisticsOverlay: React.FC<StatisticsOverlayProps> = ({ filterOpti
       .finally(() => setIsLoading(false));
   }, []);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
+    if (!lastFetchedAt) return;
+    const update = () => {
+      const diffSecs = Math.round((Date.now() - lastFetchedAt.getTime()) / 1000);
+      setTimeAgo(`${diffSecs}s ago`);
+    };
+    const timeout = setTimeout(update, 0);
+    const interval = setInterval(update, 1000);
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
+  }, [lastFetchedAt]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -286,10 +304,6 @@ export const StatisticsOverlay: React.FC<StatisticsOverlayProps> = ({ filterOpti
     { id: 'pa', label: 'Physical Addresses' },
     { id: 'hierarchy', label: 'GA Hierarchy' },
   ];
-
-  const timeAgo = lastFetchedAt
-    ? `${Math.round((Date.now() - lastFetchedAt.getTime()) / 1000)}s ago`
-    : null;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

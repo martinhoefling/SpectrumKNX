@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from knx_telegram_store import StoredTelegram, TelegramQueryResult
 
 import knx_daemon
+from knx_telegram_store import StoredTelegram, TelegramQueryResult
 from main import app
 
 client = TestClient(app)

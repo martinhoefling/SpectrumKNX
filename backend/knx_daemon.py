@@ -4,13 +4,13 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from knx_telegram_store import StoredTelegram
 from xknx import XKNX
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
 from xknx.telegram.address import IndividualAddress
 
 from database import store
+from knx_telegram_store import StoredTelegram
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
 from ws_manager import manager
 
