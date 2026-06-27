@@ -1,9 +1,10 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
 import type { ActiveFilters } from '../types/filters';
+import { getCookie, setCookie } from '../utils/cookies';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
 
@@ -22,6 +23,31 @@ interface TelegramTableProps {
   onQuickVisualize: (targetAddress: string) => void;
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
 }
+
+type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
+
+interface ColumnDef {
+  id: ColId;
+  label: string;
+  sortKey?: SortKey;
+  defaultWidth: number;
+  minWidth: number;
+  /** key in visibleColumns that toggles this column (undefined = always visible) */
+  visibleKey?: string;
+}
+
+// Ordered column definitions — drives both header and body so they cannot drift.
+const COLUMNS: ColumnDef[] = [
+  { id: 'time', label: 'TIME', sortKey: 'timestamp', defaultWidth: 120, minWidth: 90 },
+  { id: 'delta', label: 'Δt', defaultWidth: 100, minWidth: 60, visibleKey: 'delta' },
+  { id: 'source', label: 'SOURCE', sortKey: 'source_address', defaultWidth: 190, minWidth: 90 },
+  { id: 'target', label: 'TARGET', sortKey: 'target_address', defaultWidth: 230, minWidth: 90 },
+  { id: 'type', label: 'TYPE', sortKey: 'simplified_type', defaultWidth: 95, minWidth: 70, visibleKey: 'type' },
+  { id: 'dpt', label: 'DPT', sortKey: 'dpt_name', defaultWidth: 150, minWidth: 80, visibleKey: 'dpt' },
+  { id: 'value', label: 'VALUE', sortKey: 'value_numeric', defaultWidth: 220, minWidth: 120 },
+];
+
+const COLUMN_WIDTHS_COOKIE = 'columnWidths';
 
 const getTypeColor = (type?: string | null) => {
   switch (type) {
@@ -47,13 +73,70 @@ const getDPTLabel = (dpt_main: number | null) => {
   return 'Unknown DPT';
 };
 
+type TelegramRow = Telegram & { deltaStr: string | null };
+
+const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
+
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
+  // ── Column widths (persisted to a cookie, shared across live & history views) ──
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    const defaults: Record<string, number> = {};
+    for (const c of COLUMNS) defaults[c.id] = c.defaultWidth;
+    try {
+      const saved = getCookie(COLUMN_WIDTHS_COOKIE);
+      if (saved) return { ...defaults, ...JSON.parse(saved) };
+    } catch {
+      // Ignore malformed cookie
+    }
+    return defaults;
+  });
+
+  const widthFor = useCallback(
+    (id: ColId) => columnWidths[id] ?? COLUMNS.find(c => c.id === id)!.defaultWidth,
+    [columnWidths],
+  );
+
+  const persistWidths = useCallback((widths: Record<string, number>) => {
+    setCookie(COLUMN_WIDTHS_COOKIE, JSON.stringify(widths));
+  }, []);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent, col: ColumnDef) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = widthFor(col.id);
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(col.minWidth, Math.round(startWidth + (ev.clientX - startX)));
+      setColumnWidths(prev => ({ ...prev, [col.id]: next }));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      setColumnWidths(prev => { persistWidths(prev); return prev; });
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [widthFor, persistWidths]);
+
+  // Double-click a handle to reset that column to its default width.
+  const handleResetWidth = useCallback((col: ColumnDef) => {
+    setColumnWidths(prev => {
+      const next = { ...prev, [col.id]: col.defaultWidth };
+      persistWidths(next);
+      return next;
+    });
+  }, [persistWidths]);
+
   // Compute time deltas between consecutive rows (by visual order)
-  const telegramRows = useMemo(() => {
+  const telegramRows = useMemo<TelegramRow[]>(() => {
     return telegrams.map((t, idx) => {
       let deltaStr: string | null = null;
       if (idx > 0) {
@@ -102,17 +185,188 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     lastFirstIdRef.current = firstId;
   }, [telegrams, virtualizer]);
 
-  // Unified grid layout configuration - shared between header and rows
-  const gridTemplate = [
-    '125px', // Time
-    '190px', // Source
-    '230px', // Target
-    visibleColumns.type ? '95px' : null,
-    visibleColumns.dpt ? '150px' : null,
-    'minmax(220px, 1fr)', // Value
-  ].filter(Boolean).join(' ');
+  // Visible columns in order, and the matching CSS grid template.
+  // The delta column is only meaningful when sorting by time, so hide it otherwise.
+  const visibleCols = useMemo(
+    () => COLUMNS.filter(c => {
+      if (c.id === 'delta') return visibleColumns.delta && sortConfig.key === 'timestamp';
+      return !c.visibleKey || visibleColumns[c.visibleKey];
+    }),
+    [visibleColumns, sortConfig.key],
+  );
 
-  const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
+  const gridTemplate = useMemo(
+    () => visibleCols
+      .map((c, i) => {
+        const w = widthFor(c.id);
+        // Final column absorbs remaining horizontal space.
+        return i === visibleCols.length - 1 ? `minmax(${w}px, 1fr)` : `${w}px`;
+      })
+      .join(' '),
+    [visibleCols, widthFor],
+  );
+
+  const renderSortArrow = (key: SortKey) =>
+    sortConfig.key === key && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />);
+
+  // ── Per-cell body content (keyed switch keeps body aligned with header order) ──
+  const renderCell = (id: ColId, t: TelegramRow): React.ReactNode => {
+    switch (id) {
+      case 'time':
+        return (
+          <div style={{ padding: cellPadding }}>
+            <div className="mono-addr" style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+              {format(new Date(t.timestamp), 'HH:mm:ss.SS')}
+            </div>
+            <div className="subtitle-name" style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.15rem', fontVariantNumeric: 'tabular-nums' }}>
+              {format(new Date(t.timestamp), 'yyyy-MM-dd')}
+            </div>
+          </div>
+        );
+
+      case 'delta':
+        return (
+          <div style={{ padding: cellPadding }}>
+            {t.deltaStr && (
+              <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+                {t.deltaStr}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'source':
+        return (
+          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+              <div className="mono-addr highlight" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                {t.source_address}
+              </div>
+              <button
+                className={`quick-filter-btn ${activeFilters.sources.includes(t.source_address) ? 'active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); onQuickFilter('sources', t.source_address); }}
+                title="Toggle source filter"
+              >
+                <Filter className="filter-icon" size={12} />
+                <X className="cancel-icon" size={12} />
+              </button>
+              {onQuickLastSeen && (
+                <button
+                  className="quick-last-seen-btn"
+                  onClick={(e) => { e.stopPropagation(); onQuickLastSeen(t.source_address, 'pa'); }}
+                  title="Show last seen values for this device"
+                >
+                  <Clock size={12} />
+                </button>
+              )}
+            </div>
+            {visibleColumns.sourceName && (
+              <div className="subtitle-name" title={t.source_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {t.source_name || '-'}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'target':
+        return (
+          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+              <div className="mono-addr highlight-target" style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
+                {t.target_address}
+              </div>
+              <button
+                className={`quick-filter-btn ${activeFilters.targets.includes(t.target_address) ? 'active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); onQuickFilter('targets', t.target_address); }}
+                title="Toggle target filter"
+              >
+                <Filter className="filter-icon" size={12} />
+                <X className="cancel-icon" size={12} />
+              </button>
+              {onQuickLastSeen && (
+                <button
+                  className="quick-last-seen-btn"
+                  onClick={(e) => { e.stopPropagation(); onQuickLastSeen(t.target_address, 'ga'); }}
+                  title="Show last seen values for this GA"
+                >
+                  <Clock size={12} />
+                </button>
+              )}
+            </div>
+            {visibleColumns.targetName && (
+              <div className="subtitle-name" title={t.target_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {t.target_name || '-'}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'type':
+        return (
+          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+              <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                {t.simplified_type || t.telegram_type}
+              </div>
+              <button
+                className={`quick-filter-btn ${activeFilters.types.includes(t.simplified_type || t.telegram_type) ? 'active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); onQuickFilter('types', t.simplified_type || t.telegram_type); }}
+                title="Toggle type filter"
+              >
+                <Filter className="filter-icon" size={12} />
+                <X className="cancel-icon" size={12} />
+              </button>
+            </div>
+            <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
+          </div>
+        );
+
+      case 'dpt':
+        return (
+          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+            {t.dpt_name && t.dpt_main != null ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                <div title={getDPTLabel(t.dpt_main)} style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
+                <span title={t.dpt_name ?? undefined} style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
+                <button
+                  className={`quick-filter-btn ${activeFilters.dpts.includes(t.dpt_main) ? 'active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', t.dpt_main); }}
+                  title="Toggle DPT filter"
+                >
+                  <Filter className="filter-icon" size={12} />
+                  <X className="cancel-icon" size={12} />
+                </button>
+              </div>
+            ) : '-'}
+          </div>
+        );
+
+      case 'value':
+        return (
+          <div style={{ padding: cellPadding }} className="filterable-cell">
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.9375rem', wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: 1.2 }}>
+                {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '-')}
+              </span>
+              {t.unit && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500 }}>{t.unit}</span>}
+
+              <button
+                className="quick-visualize-btn"
+                onClick={(e) => { e.stopPropagation(); onQuickVisualize(t.target_address); }}
+                title="Visualize this target"
+              >
+                <LineChart size={14} />
+              </button>
+            </div>
+            {visibleColumns.data && t.raw_hex && (
+              <div className="raw-badge" style={{ marginTop: '0.4rem', background: 'var(--bg-tag)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.65rem', color: 'var(--text-dim)', display: 'inline-block', fontFamily: 'var(--font-mono)' }}>
+                {t.raw_hex}
+              </div>
+            )}
+          </div>
+        );
+    }
+  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -135,40 +389,25 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           paddingRight: '8px'
         }}
       >
-        <div style={{ padding: cellPadding }}>
-          <button className="sort-header" onClick={() => onSort('timestamp')}>
-            TIME {sortConfig.key === 'timestamp' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-          </button>
-        </div>
-        <div style={{ padding: cellPadding }}>
-          <button className="sort-header" onClick={() => onSort('source_address')}>
-            SOURCE {sortConfig.key === 'source_address' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-          </button>
-        </div>
-        <div style={{ padding: cellPadding }}>
-          <button className="sort-header" onClick={() => onSort('target_address')}>
-            TARGET {sortConfig.key === 'target_address' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-          </button>
-        </div>
-        {visibleColumns.type && (
-          <div style={{ padding: cellPadding }}>
-            <button className="sort-header" onClick={() => onSort('simplified_type')}>
-              TYPE {sortConfig.key === 'simplified_type' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-            </button>
+        {visibleCols.map((c, i) => (
+          <div key={c.id} style={{ padding: cellPadding, position: 'relative' }}>
+            {c.sortKey ? (
+              <button className="sort-header" onClick={() => onSort(c.sortKey!)}>
+                {c.label} {renderSortArrow(c.sortKey)}
+              </button>
+            ) : (
+              <span>{c.label}</span>
+            )}
+            {i < visibleCols.length - 1 && (
+              <div
+                className="col-resize-handle"
+                onMouseDown={(e) => handleResizeStart(e, c)}
+                onDoubleClick={() => handleResetWidth(c)}
+                title="Drag to resize · double-click to reset"
+              />
+            )}
           </div>
-        )}
-        {visibleColumns.dpt && (
-          <div style={{ padding: cellPadding }}>
-            <button className="sort-header" onClick={() => onSort('dpt_name')}>
-              DPT {sortConfig.key === 'dpt_name' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-            </button>
-          </div>
-        )}
-        <div style={{ padding: cellPadding }}>
-          <button className="sort-header" onClick={() => onSort('value_numeric')}>
-            VALUE {sortConfig.key === 'value_numeric' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-          </button>
-        </div>
+        ))}
       </div>
 
       {/* Virtualized Body */}
@@ -213,142 +452,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   }}
                   className="log-row"
                 >
-                  {/* Time + Delta subtitle */}
-                  <div style={{ padding: cellPadding }}>
-                    <div className="mono-addr" style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
-                      {format(new Date(t.timestamp), 'HH:mm:ss.SS')}
-                    </div>
-                    {visibleColumns.delta && t.deltaStr && (
-                      <div className="subtitle-name" style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.15rem' }}>
-                        {t.deltaStr}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Source + Name subtitle */}
-                  <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-                      <div className="mono-addr highlight" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
-                        {t.source_address}
-                      </div>
-                      <button
-                        className={`quick-filter-btn ${activeFilters.sources.includes(t.source_address) ? 'active' : ''}`}
-                        onClick={(e) => { e.stopPropagation(); onQuickFilter('sources', t.source_address); }}
-                        title="Toggle source filter"
-                      >
-                        <Filter className="filter-icon" size={12} />
-                        <X className="cancel-icon" size={12} />
-                      </button>
-                      {onQuickLastSeen && (
-                        <button
-                          className="quick-last-seen-btn"
-                          onClick={(e) => { e.stopPropagation(); onQuickLastSeen(t.source_address, 'pa'); }}
-                          title="Show last seen values for this device"
-                        >
-                          <Clock size={12} />
-                        </button>
-                      )}
-                    </div>
-                    {visibleColumns.sourceName && (
-                      <div className="subtitle-name" title={t.source_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.source_name || '-'}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Target + Name subtitle */}
-                  <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-                      <div className="mono-addr highlight-target" style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
-                        {t.target_address}
-                      </div>
-                      <button
-                        className={`quick-filter-btn ${activeFilters.targets.includes(t.target_address) ? 'active' : ''}`}
-                        onClick={(e) => { e.stopPropagation(); onQuickFilter('targets', t.target_address); }}
-                        title="Toggle target filter"
-                      >
-                        <Filter className="filter-icon" size={12} />
-                        <X className="cancel-icon" size={12} />
-                      </button>
-                      {onQuickLastSeen && (
-                        <button
-                          className="quick-last-seen-btn"
-                          onClick={(e) => { e.stopPropagation(); onQuickLastSeen(t.target_address, 'ga'); }}
-                          title="Show last seen values for this GA"
-                        >
-                          <Clock size={12} />
-                        </button>
-                      )}
-                    </div>
-                    {visibleColumns.targetName && (
-                      <div className="subtitle-name" title={t.target_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.target_name || '-'}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Type */}
-                  {visibleColumns.type && (
-                    <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-                        <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
-                          {t.simplified_type || t.telegram_type}
-                        </div>
-                        <button
-                          className={`quick-filter-btn ${activeFilters.types.includes(t.simplified_type || t.telegram_type) ? 'active' : ''}`}
-                          onClick={(e) => { e.stopPropagation(); onQuickFilter('types', t.simplified_type || t.telegram_type); }}
-                          title="Toggle type filter"
-                        >
-                          <Filter className="filter-icon" size={12} />
-                          <X className="cancel-icon" size={12} />
-                        </button>
-                      </div>
-                      <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
-                    </div>
-                  )}
-
-                  {/* DPT */}
-                  {visibleColumns.dpt && (
-                    <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
-                      {t.dpt_name && t.dpt_main != null ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-                          <div title={getDPTLabel(t.dpt_main)} style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
-                          <span title={t.dpt_name ?? undefined} style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
-                          <button
-                            className={`quick-filter-btn ${activeFilters.dpts.includes(t.dpt_main) ? 'active' : ''}`}
-                            onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', t.dpt_main); }}
-                            title="Toggle DPT filter"
-                          >
-                            <Filter className="filter-icon" size={12} />
-                            <X className="cancel-icon" size={12} />
-                          </button>
-                        </div>
-                      ) : '-'}
-                    </div>
-                  )}
-
-                  {/* Value + Raw hex subtitle */}
-                  <div style={{ padding: cellPadding }} className="filterable-cell">
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.9375rem', wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: 1.2 }}>
-                        {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '-')}
-                      </span>
-                      {t.unit && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500 }}>{t.unit}</span>}
-
-                      <button
-                        className="quick-visualize-btn"
-                        onClick={(e) => { e.stopPropagation(); onQuickVisualize(t.target_address); }}
-                        title="Visualize this target"
-                      >
-                        <LineChart size={14} />
-                      </button>
-                    </div>
-                    {visibleColumns.data && t.raw_hex && (
-                      <div className="raw-badge" style={{ marginTop: '0.4rem', background: 'var(--bg-tag)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.65rem', color: 'var(--text-dim)', display: 'inline-block', fontFamily: 'var(--font-mono)' }}>
-                        {t.raw_hex}
-                      </div>
-                    )}
-                  </div>
+                  {visibleCols.map(c => (
+                    <React.Fragment key={c.id}>{renderCell(c.id, t)}</React.Fragment>
+                  ))}
                 </div>
               );
             })}
@@ -359,7 +465,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   );
 };
 
-// Add styles for quick filter buttons
+// Add styles for quick filter buttons and resize handles
 const style = document.createElement('style');
 style.textContent = `
   .quick-filter-btn, .quick-visualize-btn, .quick-last-seen-btn {
@@ -414,6 +520,33 @@ style.textContent = `
 
   .quick-last-seen-btn:hover {
     color: var(--accent-primary);
+  }
+
+  .col-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 2;
+    user-select: none;
+  }
+
+  .col-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 20%;
+    right: 3px;
+    width: 2px;
+    height: 60%;
+    background: transparent;
+    border-radius: 1px;
+    transition: background 0.15s;
+  }
+
+  .col-resize-handle:hover::after {
+    background: var(--accent-primary);
   }
 `;
 document.head.appendChild(style);

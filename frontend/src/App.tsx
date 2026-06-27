@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
+import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, ChevronDown, AlertTriangle, Sun, Moon, Monitor } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { useTheme } from './hooks/useTheme';
@@ -317,12 +318,16 @@ function App() {
   };
 
   // ── Sorting ─────────────────────────────────────────────────────────────────
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigCookie);
   const handleSort = (key: SortKey) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
-    }));
+    setSortConfig(prev => {
+      const next: SortConfig = {
+        key,
+        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
+      };
+      writeSortConfigCookie(next);
+      return next;
+    });
   };
 
   const handleQuickFilter = (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => {
