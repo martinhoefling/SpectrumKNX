@@ -383,6 +383,14 @@ async def knx_startup():
     global xknx_instance, global_knx_project, project_name_map
     logger.info("Starting KNX Daemon...")
 
+    # Check the database connection first
+    conn_check = await store.check_connection()
+    if not conn_check.ok:
+        logger.error(f"Database connection check failed: {conn_check.message}")
+        if conn_check.detail:
+            logger.error(f"Database connection details: {conn_check.detail}")
+        raise RuntimeError(f"Database connection check failed: {conn_check.message}")
+
     # Initialize the Telegram Store (including schema creation/renames)
     await store.initialize()
     store.start()

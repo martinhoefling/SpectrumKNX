@@ -59,3 +59,46 @@ def test_telegram_received_cb(mock_process, mock_get_loop):
 
     # Verify task creation
     assert mock_loop.create_task.called
+
+
+@pytest.mark.asyncio
+@patch("knx_daemon.store.check_connection")
+@patch("knx_daemon.store.initialize")
+@patch("knx_daemon.store.start")
+@patch("knx_daemon._load_project_data")
+@patch("knx_daemon.XKNX")
+@patch("knx_daemon._watch_files")
+async def test_knx_startup_success(
+    mock_watch_files, mock_xknx, mock_load_project, mock_store_start, mock_store_init, mock_check_conn
+):
+    from knx_telegram_store.connection import ConnectionCheckResult
+    mock_check_conn.return_value = ConnectionCheckResult.success()
+    mock_xknx_instance = MagicMock()
+    mock_xknx.return_value = mock_xknx_instance
+    mock_xknx_instance.start = AsyncMock()
+
+    from knx_daemon import knx_startup
+    with patch("knx_daemon.global_knx_project", None):
+        await knx_startup()
+
+    mock_check_conn.assert_called_once()
+    mock_store_init.assert_called_once()
+    mock_store_start.assert_called_once()
+    mock_xknx_instance.start.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("knx_daemon.store.check_connection")
+@patch("knx_daemon.store.initialize")
+async def test_knx_startup_db_failure(mock_store_init, mock_check_conn):
+    from knx_telegram_store.connection import ConnectionCheckResult, ConnectionErrorKind
+    mock_check_conn.return_value = ConnectionCheckResult.failure(
+        ConnectionErrorKind.HOST_UNREACHABLE, "Database host is unreachable"
+    )
+
+    from knx_daemon import knx_startup
+    with pytest.raises(RuntimeError, match="Database connection check failed"):
+        await knx_startup()
+
+    mock_check_conn.assert_called_once()
+    mock_store_init.assert_not_called()
