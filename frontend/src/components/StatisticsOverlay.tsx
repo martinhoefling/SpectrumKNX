@@ -7,6 +7,8 @@ interface StatEntry {
   address: string;
   name: string;
   count: number;
+  /** GA → contributing source PAs, or PA → destination GAs (desc by count). */
+  children?: StatEntry[];
 }
 
 interface StatisticsData {
@@ -38,15 +40,34 @@ interface StatTableProps {
   sortDir: 'asc' | 'desc';
   onSort: (key: SortKey) => void;
   searchQuery: string;
+  /** Kind of the top-level rows; children are the opposite dimension. */
+  entryKind: 'ga' | 'pa';
 }
 
-const StatTable: React.FC<StatTableProps> = ({ entries, total, sortKey, sortDir, onSort, searchQuery }) => {
+const StatTable: React.FC<StatTableProps> = ({ entries, total, sortKey, sortDir, onSort, searchQuery, entryKind }) => {
   const q = searchQuery.toLowerCase();
-  const visible = useMemo(
-    () => !q ? entries : entries.filter(e => e.address.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)),
-    [entries, q],
+  const matches = useCallback(
+    (e: StatEntry) => e.address.toLowerCase().includes(q) || e.name.toLowerCase().includes(q),
+    [q],
   );
-  const maxCount = entries[0]?.count ?? 1;
+  const visible = useMemo(
+    () => !q ? entries : entries.filter(e => matches(e) || (e.children?.some(matches) ?? false)),
+    [entries, q, matches],
+  );
+  const maxCount = useMemo(() => Math.max(1, ...entries.map(e => e.count)), [entries]);
+
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = useCallback((addr: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(addr)) next.delete(addr); else next.add(addr);
+      return next;
+    });
+  }, []);
+
+  const childTitle = entryKind === 'ga'
+    ? 'Show contributing devices (sources)'
+    : 'Show destination group addresses';
 
   const renderSortArrow = (k: SortKey) =>
     sortKey === k ? <span style={{ color: 'var(--accent-primary)', marginLeft: 2 }}>{sortDir === 'desc' ? '↓' : '↑'}</span> : null;
@@ -73,29 +94,65 @@ const StatTable: React.FC<StatTableProps> = ({ entries, total, sortKey, sortDir,
         <tbody>
           {visible.map(e => {
             const pct = total > 0 ? (e.count / total) * 100 : 0;
-            const barPct = maxCount > 0 ? (e.count / maxCount) * 100 : 0;
+            const barPct = (e.count / maxCount) * 100;
+            const children = e.children ?? [];
+            const hasChildren = children.length > 0;
+            const isOpen = expanded.has(e.address);
             return (
-              <tr key={e.address} style={{ borderBottom: '1px solid var(--border-subtle)' }}
-                onMouseEnter={ev => (ev.currentTarget.style.background = 'var(--bg-hover)')}
-                onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}>
-                <td style={{ padding: '0.4rem 0.75rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-                  {e.address}
-                </td>
-                <td style={{ padding: '0.4rem 0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
-                  {e.name}
-                </td>
-                <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                  {formatCount(e.count)}
-                  <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: '0.7rem', marginLeft: '0.3rem' }}>
-                    {pct.toFixed(1)}%
-                  </span>
-                </td>
-                <td style={{ padding: '0.4rem 0.75rem' }}>
-                  <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-tag)', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${barPct}%`, borderRadius: 3, background: 'var(--accent-primary)', transition: 'width 0.3s' }} />
-                  </div>
-                </td>
-              </tr>
+              <React.Fragment key={e.address}>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)', cursor: hasChildren ? 'pointer' : 'default' }}
+                  onClick={() => hasChildren && toggle(e.address)}
+                  onMouseEnter={ev => (ev.currentTarget.style.background = 'var(--bg-hover)')}
+                  onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}>
+                  <td style={{ padding: '0.4rem 0.75rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ width: 12, display: 'inline-flex', color: 'var(--text-dim)' }} title={hasChildren ? childTitle : undefined}>
+                        {hasChildren ? (isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
+                      </span>
+                      {e.address}
+                    </span>
+                  </td>
+                  <td style={{ padding: '0.4rem 0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+                    {e.name}
+                  </td>
+                  <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {formatCount(e.count)}
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: '0.7rem', marginLeft: '0.3rem' }}>
+                      {pct.toFixed(1)}%
+                    </span>
+                  </td>
+                  <td style={{ padding: '0.4rem 0.75rem' }}>
+                    <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-tag)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${barPct}%`, borderRadius: 3, background: 'var(--accent-primary)', transition: 'width 0.3s' }} />
+                    </div>
+                  </td>
+                </tr>
+                {isOpen && children.map(c => {
+                  // Child share is relative to its parent's traffic.
+                  const cPct = e.count > 0 ? (c.count / e.count) * 100 : 0;
+                  return (
+                    <tr key={`${e.address}>${c.address}`} style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-inset)' }}>
+                      <td style={{ padding: '0.3rem 0.75rem 0.3rem 2.1rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                        {c.address}
+                      </td>
+                      <td style={{ padding: '0.3rem 0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200, fontSize: '0.75rem' }}>
+                        {c.name}
+                      </td>
+                      <td style={{ padding: '0.3rem 0.75rem', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                        {formatCount(c.count)}
+                        <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: '0.7rem', marginLeft: '0.3rem' }}>
+                          {cPct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.3rem 0.75rem' }}>
+                        <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-tag)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${cPct}%`, borderRadius: 3, background: 'var(--text-dim)' }} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </React.Fragment>
             );
           })}
         </tbody>
@@ -372,9 +429,9 @@ export const StatisticsOverlay: React.FC<StatisticsOverlayProps> = ({ filterOpti
           No data
         </div>
       ) : tab === 'ga' ? (
-        <StatTable entries={sortedGa} total={data.total} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} searchQuery={searchQuery} />
+        <StatTable key="ga" entries={sortedGa} total={data.total} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} searchQuery={searchQuery} entryKind="ga" />
       ) : tab === 'pa' ? (
-        <StatTable entries={sortedPa} total={data.total} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} searchQuery={searchQuery} />
+        <StatTable key="pa" entries={sortedPa} total={data.total} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} searchQuery={searchQuery} entryKind="pa" />
       ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0' }}>
           {hierarchy.map(node => (

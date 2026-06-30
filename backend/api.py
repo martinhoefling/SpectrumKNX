@@ -212,6 +212,65 @@ async def get_filter_options():
     }
 
 
+def _aggregate_statistics(
+    rows: list,
+    ga_name_map: dict[str, str],
+    pa_name_map: dict[str, str],
+) -> dict:
+    """Aggregate (source, destination, count) rows into GA/PA totals.
+
+    Each GA entry carries a ``children`` list of the source PAs that addressed
+    it (with counts), and each PA entry carries the destination GAs it sent to,
+    so the frontend can drill down from either side. Input rows are expected to
+    already be grouped by (source, destination) — i.e. each pair appears once.
+    """
+    ga_counts: dict[str, int] = {}
+    pa_counts: dict[str, int] = {}
+    ga_sources: dict[str, dict[str, int]] = {}
+    pa_dests: dict[str, dict[str, int]] = {}
+    for source, destination, cnt in rows:
+        ga_counts[destination] = ga_counts.get(destination, 0) + cnt
+        pa_counts[source] = pa_counts.get(source, 0) + cnt
+        ga_sources.setdefault(destination, {})[source] = ga_sources.setdefault(destination, {}).get(source, 0) + cnt
+        pa_dests.setdefault(source, {})[destination] = pa_dests.setdefault(source, {}).get(destination, 0) + cnt
+
+    def _children(counts: dict[str, int], name_map: dict[str, str]) -> list:
+        return sorted(
+            [{"address": addr, "name": name_map.get(addr, ""), "count": cnt} for addr, cnt in counts.items()],
+            key=lambda x: x["count"],
+            reverse=True,
+        )
+
+    by_ga = sorted(
+        [
+            {
+                "address": addr,
+                "name": ga_name_map.get(addr, ""),
+                "count": cnt,
+                "children": _children(ga_sources.get(addr, {}), pa_name_map),
+            }
+            for addr, cnt in ga_counts.items()
+        ],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
+    by_pa = sorted(
+        [
+            {
+                "address": addr,
+                "name": pa_name_map.get(addr, ""),
+                "count": cnt,
+                "children": _children(pa_dests.get(addr, {}), ga_name_map),
+            }
+            for addr, cnt in pa_counts.items()
+        ],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
+
+    return {"total": sum(ga_counts.values()), "by_ga": by_ga, "by_pa": by_pa}
+
+
 @router.get("/api/statistics")
 async def get_statistics():
     """Returns telegram counts grouped by group address and physical address."""
@@ -227,12 +286,6 @@ async def get_statistics():
         result = await conn.execute(sql)
         rows = result.fetchall()
 
-    ga_counts: dict[str, int] = {}
-    pa_counts: dict[str, int] = {}
-    for source, destination, cnt in rows:
-        ga_counts[destination] = ga_counts.get(destination, 0) + cnt
-        pa_counts[source] = pa_counts.get(source, 0) + cnt
-
     ga_name_map: dict[str, str] = {}
     pa_name_map: dict[str, str] = {}
     if knx_daemon.global_knx_project:
@@ -245,18 +298,7 @@ async def get_statistics():
                 ia_str = str(addr)
             pa_name_map[ia_str] = data.get("name", "")
 
-    by_ga = sorted(
-        [{"address": addr, "name": ga_name_map.get(addr, ""), "count": cnt} for addr, cnt in ga_counts.items()],
-        key=lambda x: x["count"],
-        reverse=True,
-    )
-    by_pa = sorted(
-        [{"address": addr, "name": pa_name_map.get(addr, ""), "count": cnt} for addr, cnt in pa_counts.items()],
-        key=lambda x: x["count"],
-        reverse=True,
-    )
-
-    return {"total": sum(ga_counts.values()), "by_ga": by_ga, "by_pa": by_pa}
+    return _aggregate_statistics(rows, ga_name_map, pa_name_map)
 
 
 @router.get("/api/project")

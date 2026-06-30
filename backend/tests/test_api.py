@@ -4,10 +4,44 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 import knx_daemon
+from api import _aggregate_statistics
 from knx_telegram_store import StoredTelegram, TelegramQueryResult
 from main import app
 
 client = TestClient(app)
+
+
+def test_aggregate_statistics_builds_drilldown_children():
+    # (source PA, destination GA, count) rows, already grouped by pair.
+    rows = [
+        ("1.1.1", "1/2/3", 10),
+        ("1.1.2", "1/2/3", 4),
+        ("1.1.1", "1/2/4", 1),
+    ]
+    ga_names = {"1/2/3": "Kitchen Light", "1/2/4": "Hall Light"}
+    pa_names = {"1.1.1": "Switch A", "1.1.2": "Switch B"}
+
+    result = _aggregate_statistics(rows, ga_names, pa_names)
+
+    assert result["total"] == 15
+
+    # GA view: most-used GA first, with contributing PAs as children (desc).
+    top_ga = result["by_ga"][0]
+    assert top_ga["address"] == "1/2/3"
+    assert top_ga["count"] == 14
+    assert top_ga["name"] == "Kitchen Light"
+    assert [(c["address"], c["count"], c["name"]) for c in top_ga["children"]] == [
+        ("1.1.1", 10, "Switch A"),
+        ("1.1.2", 4, "Switch B"),
+    ]
+
+    # PA view: PA 1.1.1 sent to two GAs; children are destination GAs (desc).
+    pa_111 = next(p for p in result["by_pa"] if p["address"] == "1.1.1")
+    assert pa_111["count"] == 11
+    assert [(c["address"], c["count"], c["name"]) for c in pa_111["children"]] == [
+        ("1/2/3", 10, "Kitchen Light"),
+        ("1/2/4", 1, "Hall Light"),
+    ]
 
 
 def test_read_root():
