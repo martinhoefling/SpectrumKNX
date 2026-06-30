@@ -124,7 +124,7 @@ function App() {
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
   const [isLastSeenOpen, setIsLastSeenOpen] = useState(false);
-  const [lastSeenAddress, setLastSeenAddress] = useState('');
+  const [lastSeenAddresses, setLastSeenAddresses] = useState<string[]>([]);
   const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>('ga');
   const [isStatisticsOpen, setIsStatisticsOpen] = useState(false);
   const [isBuildingOpen, setIsBuildingOpen] = useState(false);
@@ -352,8 +352,8 @@ function App() {
     setIsBuildingOpen(false);
   };
 
-  const handleQuickLastSeen = useCallback((address: string, mode: 'ga' | 'pa') => {
-    setLastSeenAddress(address);
+  const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
+    setLastSeenAddresses(Array.isArray(address) ? address : [address]);
     setLastSeenMode(mode);
     setIsLastSeenOpen(true);
     setIsVisualizerOpen(false);
@@ -795,7 +795,7 @@ function App() {
                 ) : isLastSeenOpen ? (
                   <LastSeenOverlay
                     filterOptions={filterOptions}
-                    initialAddress={lastSeenAddress}
+                    initialAddresses={lastSeenAddresses}
                     initialMode={lastSeenMode}
                     onClose={() => setIsLastSeenOpen(false)}
                   />

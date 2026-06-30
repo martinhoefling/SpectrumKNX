@@ -9,7 +9,8 @@ const LIMITS = [10, 20, 50, 100] as const;
 
 interface LastSeenOverlayProps {
   filterOptions: FilterOptions;
-  initialAddress: string;
+  /** One or more addresses to show on open. Multiple are merged (e.g. all GAs of a KO). */
+  initialAddresses: string[];
   initialMode: 'ga' | 'pa';
   onClose: () => void;
 }
@@ -41,12 +42,12 @@ const tdStyle: React.CSSProperties = {
 
 export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   filterOptions,
-  initialAddress,
+  initialAddresses,
   initialMode,
   onClose,
 }) => {
   const [mode, setMode] = useState<'ga' | 'pa'>(initialMode);
-  const [selectedAddress, setSelectedAddress] = useState(initialAddress);
+  const [selectedAddresses, setSelectedAddresses] = useState<string[]>(initialAddresses);
   const [limit, setLimit] = useState<number>(20);
   const [search, setSearch] = useState('');
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
@@ -56,14 +57,17 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addressList = mode === 'ga' ? filterOptions.targets : filterOptions.sources;
+  const multi = selectedAddresses.length > 1;
 
   const fetchData = useCallback(async () => {
-    if (!selectedAddress) return;
+    if (selectedAddresses.length === 0) return;
     setIsLoading(true);
     try {
+      // The backend treats a comma-separated value as an OR filter, so a KO's
+      // multiple group addresses are merged into one most-recent-first list.
       const param = mode === 'ga' ? 'target_address' : 'source_address';
       const res = await fetch(
-        apiUrl(`/api/telegrams?${param}=${encodeURIComponent(selectedAddress)}&limit=${limit}`)
+        apiUrl(`/api/telegrams?${param}=${encodeURIComponent(selectedAddresses.join(','))}&limit=${limit}`)
       );
       const json = await res.json();
       setTelegrams(json.telegrams ?? []);
@@ -73,7 +77,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [selectedAddress, mode, limit]);
+  }, [selectedAddresses, mode, limit]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -91,8 +95,9 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   const handleModeChange = (newMode: 'ga' | 'pa') => {
     setMode(newMode);
     const list = newMode === 'ga' ? filterOptions.targets : filterOptions.sources;
-    if (list.length > 0 && !list.find(a => a.address === selectedAddress)) {
-      setSelectedAddress(list[0].address ?? '');
+    // Addresses are kind-specific, so switching GA/PA resets the selection.
+    if (!selectedAddresses.every(a => list.find(x => x.address === a))) {
+      setSelectedAddresses(list.length > 0 ? [list[0].address ?? ''] : []);
     }
     setSearch('');
   };
@@ -102,7 +107,9 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     return (a.address ?? '').toLowerCase().includes(q) || (a.name ?? '').toLowerCase().includes(q);
   });
 
-  const selectedInfo = addressList.find(a => a.address === selectedAddress);
+  const selectedInfo = !multi
+    ? addressList.find(a => a.address === selectedAddresses[0])
+    : undefined;
 
   const getDelta = (idx: number): string | null => {
     if (idx >= telegrams.length - 1) return null;
@@ -171,11 +178,11 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               {addressList.length === 0 ? 'No addresses seen yet.' : 'No matches.'}
             </div>
           ) : filteredAddresses.map(addr => {
-            const isSelected = addr.address === selectedAddress;
+            const isSelected = selectedAddresses.includes(addr.address ?? '');
             return (
               <button
                 key={addr.address}
-                onClick={() => setSelectedAddress(addr.address ?? '')}
+                onClick={() => setSelectedAddresses([addr.address ?? ''])}
                 style={{
                   width: '100%', textAlign: 'left', padding: '0.45rem 0.75rem',
                   border: 'none', cursor: 'pointer',
@@ -219,7 +226,12 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
             <Clock size={15} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Last Seen Values</div>
-              {selectedInfo && (
+              {multi ? (
+                <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', marginTop: '0.1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{selectedAddresses.join(', ')}</span>
+                  {' '}— {selectedAddresses.length} {mode === 'ga' ? 'group addresses' : 'devices'}
+                </div>
+              ) : selectedInfo && (
                 <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', marginTop: '0.1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{selectedInfo.address}</span>
                   {selectedInfo.name && <> — {selectedInfo.name}</>}
@@ -283,7 +295,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {!isLoading && telegrams.length === 0 ? (
             <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.875rem' }}>
-              No telegrams found for <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)' }}>{selectedAddress}</span>.
+              No telegrams found for <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)' }}>{selectedAddresses.join(', ')}</span>.
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
@@ -295,6 +307,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                 }}>
                   <th style={thStyle}>Time</th>
                   <th style={thStyle}>∆t</th>
+                  {multi && <th style={thStyle}>{mode === 'ga' ? 'GA' : 'PA'}</th>}
                   <th style={thStyle}>{mode === 'ga' ? 'Source' : 'Target'}</th>
                   <th style={thStyle}>{mode === 'ga' ? 'Source Name' : 'Target Name'}</th>
                   <th style={thStyle}>Type</th>
@@ -322,6 +335,11 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                     <td style={{ ...tdStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.72rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
                       {getDelta(idx) ?? '—'}
                     </td>
+                    {multi && (
+                      <td style={{ ...tdStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--accent-primary)', whiteSpace: 'nowrap' }}>
+                        {mode === 'ga' ? t.target_address : t.source_address}
+                      </td>
+                    )}
                     <td style={tdStyle}>
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--text-dim)' }}>
                         {mode === 'ga' ? t.source_address : t.target_address}

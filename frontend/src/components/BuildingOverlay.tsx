@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, Clock,
+  X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock,
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
+import { useExpanded } from '../utils/buildingExpansion';
 
 // ── Types (mirror /api/building response) ──────────────────────────────────────
 
@@ -53,11 +54,20 @@ interface BuildingOverlayProps {
   onClose: () => void;
   /** Add a device's individual address to the source filter. */
   onFilterDevice: (pa: string) => void;
-  /** Add all of a KO's connected group addresses to the target filter. */
+  /** Add a set of connected group addresses to the target filter. */
   onFilterGAs: (addresses: string[]) => void;
-  /** Open the last-seen overlay for an address. */
-  onLastSeen: (address: string, mode: 'ga' | 'pa') => void;
+  /** Open the last-seen overlay for one or more addresses. */
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
 }
+
+// ── Group-address collection helpers ─────────────────────────────────────────────
+
+const koGAs = (ko: Ko): string[] => ko.group_addresses.map(g => g.address);
+
+const channelGAs = (ch: Channel): string[] => [...new Set(ch.kos.flatMap(koGAs))];
+
+const deviceGAs = (d: DeviceNode): string[] =>
+  [...new Set([...d.channels.flatMap(channelGAs), ...d.kos.flatMap(koGAs)])];
 
 // ── Search matching helpers ─────────────────────────────────────────────────────
 
@@ -116,7 +126,7 @@ const KoRow: React.FC<{
   ko: Ko;
   depth: number;
   onFilterGAs: (addresses: string[]) => void;
-  onLastSeen: (address: string, mode: 'ga' | 'pa') => void;
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
 }> = ({ ko, depth, onFilterGAs, onLastSeen }) => {
   const dptLabel = formatDpt(ko.dpts);
   const gaAddresses = ko.group_addresses.map(g => g.address);
@@ -170,8 +180,8 @@ const KoRow: React.FC<{
           </button>
           <button
             style={iconBtnStyle}
-            title="Show last seen values"
-            onClick={e => { e.stopPropagation(); onLastSeen(gaAddresses[0], 'ga'); }}
+            title={`Show last seen values${gaAddresses.length > 1 ? ` (${gaAddresses.length} GAs)` : ''}`}
+            onClick={e => { e.stopPropagation(); onLastSeen(gaAddresses, 'ga'); }}
             onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
             onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
           >
@@ -191,18 +201,19 @@ const DeviceRow: React.FC<{
   query: string;
   onFilterDevice: (pa: string) => void;
   onFilterGAs: (addresses: string[]) => void;
-  onLastSeen: (address: string, mode: 'ga' | 'pa') => void;
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
 }> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen }) => {
-  const [open, setOpen] = useState(false);
+  const [open, toggle] = useExpanded(`dev:${device.address}`, false);
   const koCount = device.channels.reduce((s, c) => s + c.kos.length, 0) + device.kos.length;
   const hasChildren = koCount > 0;
   const effectiveOpen = open || !!query;
+  const allGAs = useMemo(() => deviceGAs(device), [device]);
 
   return (
     <div>
       <div
         style={{ ...rowStyle(depth), cursor: hasChildren ? 'pointer' : 'default' }}
-        onClick={() => hasChildren && setOpen(o => !o)}
+        onClick={() => hasChildren && toggle()}
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
@@ -230,6 +241,17 @@ const DeviceRow: React.FC<{
         >
           <Filter size={12} />
         </button>
+        {allGAs.length > 0 && (
+          <button
+            style={iconBtnStyle}
+            title={`Filter all ${allGAs.length} group address${allGAs.length > 1 ? 'es' : ''} of this device (targets)`}
+            onClick={e => { e.stopPropagation(); onFilterGAs(allGAs); }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+          >
+            <ListFilter size={12} />
+          </button>
+        )}
         <button
           style={iconBtnStyle}
           title="Show last seen values"
@@ -247,7 +269,7 @@ const DeviceRow: React.FC<{
             if (visibleKos.length === 0) return null;
             return (
               <ChannelRow
-                key={ch.id} channel={ch} visibleKos={visibleKos} depth={depth + 1}
+                key={ch.id} channel={ch} deviceAddress={device.address} visibleKos={visibleKos} depth={depth + 1}
                 query={query} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
               />
             );
@@ -263,19 +285,21 @@ const DeviceRow: React.FC<{
 
 const ChannelRow: React.FC<{
   channel: Channel;
+  deviceAddress: string;
   visibleKos: Ko[];
   depth: number;
   query: string;
   onFilterGAs: (addresses: string[]) => void;
-  onLastSeen: (address: string, mode: 'ga' | 'pa') => void;
-}> = ({ channel, visibleKos, depth, query, onFilterGAs, onLastSeen }) => {
-  const [open, setOpen] = useState(false);
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen }) => {
+  const [open, toggle] = useExpanded(`ch:${deviceAddress}:${channel.id}`, false);
   const effectiveOpen = open || !!query;
+  const allGAs = useMemo(() => channelGAs(channel), [channel]);
   return (
     <div>
       <div
         style={{ ...rowStyle(depth), cursor: 'pointer' }}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => toggle()}
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
@@ -287,6 +311,17 @@ const ChannelRow: React.FC<{
         <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', flexShrink: 0 }}>
           {visibleKos.length} KO{visibleKos.length !== 1 ? 's' : ''}
         </span>
+        {allGAs.length > 0 && (
+          <button
+            style={iconBtnStyle}
+            title={`Filter all ${allGAs.length} group address${allGAs.length > 1 ? 'es' : ''} in this channel (targets)`}
+            onClick={e => { e.stopPropagation(); onFilterGAs(allGAs); }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+          >
+            <ListFilter size={12} />
+          </button>
+        )}
       </div>
       {effectiveOpen && visibleKos.map((ko, i) => (
         <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} />
@@ -299,13 +334,14 @@ const ChannelRow: React.FC<{
 
 const SpaceRow: React.FC<{
   space: SpaceNode;
+  path: string;
   depth: number;
   query: string;
   onFilterDevice: (pa: string) => void;
   onFilterGAs: (addresses: string[]) => void;
-  onLastSeen: (address: string, mode: 'ga' | 'pa') => void;
-}> = ({ space, depth, query, onFilterDevice, onFilterGAs, onLastSeen }) => {
-  const [open, setOpen] = useState(depth < 2);
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen }) => {
+  const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
   if (query && !spaceMatches(space, query)) return null;
   const effectiveOpen = open || !!query;
   const hasChildren = space.spaces.length > 0 || space.devices.length > 0;
@@ -315,7 +351,7 @@ const SpaceRow: React.FC<{
     <div>
       <div
         style={{ ...rowStyle(depth), cursor: hasChildren ? 'pointer' : 'default' }}
-        onClick={() => hasChildren && setOpen(o => !o)}
+        onClick={() => hasChildren && toggle()}
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
@@ -334,7 +370,7 @@ const SpaceRow: React.FC<{
         <div>
           {space.spaces.map((sub, i) => (
             <SpaceRow
-              key={`${sub.name}-${i}`} space={sub} depth={depth + 1} query={query}
+              key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
             />
           ))}
@@ -426,7 +462,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
           {data.tree.map((space, i) => (
             <SpaceRow
-              key={`${space.name}-${i}`} space={space} depth={0} query={query}
+              key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
             />
           ))}
