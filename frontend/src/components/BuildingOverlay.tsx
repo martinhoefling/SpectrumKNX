@@ -69,6 +69,14 @@ const channelGAs = (ch: Channel): string[] => [...new Set(ch.kos.flatMap(koGAs))
 const deviceGAs = (d: DeviceNode): string[] =>
   [...new Set([...d.channels.flatMap(channelGAs), ...d.kos.flatMap(koGAs)])];
 
+const sortKos = (kos: Ko[]): Ko[] =>
+  [...kos].sort((a, b) => {
+    if (a.number === null && b.number === null) return 0;
+    if (a.number === null) return 1;
+    if (b.number === null) return -1;
+    return a.number - b.number;
+  });
+
 // ── Search matching helpers ─────────────────────────────────────────────────────
 
 const gaMatches = (ga: GaRef, q: string) =>
@@ -130,7 +138,10 @@ const KoRow: React.FC<{
 }> = ({ ko, depth, onFilterGAs, onLastSeen }) => {
   const dptLabel = formatDpt(ko.dpts);
   const gaAddresses = ko.group_addresses.map(g => g.address);
-  const label = ko.text || ko.name || ko.function_text || `Object ${ko.number ?? ''}`;
+  const nameText = ko.text || ko.name;
+  const label = (nameText && ko.function_text && nameText !== ko.function_text)
+    ? `${nameText} (${ko.function_text})`
+    : (nameText || ko.function_text || `Object ${ko.number ?? ''}`);
   return (
     <div
       style={{ ...rowStyle(depth) }}
@@ -265,7 +276,7 @@ const DeviceRow: React.FC<{
       {effectiveOpen && hasChildren && (
         <div>
           {device.channels.map(ch => {
-            const visibleKos = query ? ch.kos.filter(k => koMatches(k, query)) : ch.kos;
+            const visibleKos = sortKos(query ? ch.kos.filter(k => koMatches(k, query)) : ch.kos);
             if (visibleKos.length === 0) return null;
             return (
               <ChannelRow
@@ -274,7 +285,7 @@ const DeviceRow: React.FC<{
               />
             );
           })}
-          {(query ? device.kos.filter(k => koMatches(k, query)) : device.kos).map((ko, i) => (
+          {sortKos(query ? device.kos.filter(k => koMatches(k, query)) : device.kos).map((ko, i) => (
             <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} />
           ))}
         </div>
