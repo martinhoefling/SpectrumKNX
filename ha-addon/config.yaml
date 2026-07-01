@@ -11,7 +11,7 @@ arch:
 ingress: true
 ingress_port: 8000
 ingress_stream: true
-panel_icon: mdi:knx
+panel_icon: mdi:chart-timeline-variant
 panel_title: "Spectrum KNX"
 panel_admin: true
 options:
