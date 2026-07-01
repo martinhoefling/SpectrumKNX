@@ -77,6 +77,13 @@ const sortKos = (kos: Ko[]): Ko[] =>
     return a.number - b.number;
   });
 
+const sortSpaces = (spaces: SpaceNode[]): SpaceNode[] =>
+  [...spaces].sort((a, b) => {
+    const nameA = a.name || a.type || '';
+    const nameB = b.name || b.type || '';
+    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
 // ── Search matching helpers ─────────────────────────────────────────────────────
 
 const gaMatches = (ga: GaRef, q: string) =>
@@ -379,7 +386,7 @@ const SpaceRow: React.FC<{
       </div>
       {effectiveOpen && (
         <div>
-          {space.spaces.map((sub, i) => (
+          {sortSpaces(space.spaces).map((sub, i) => (
             <SpaceRow
               key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
@@ -471,7 +478,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
-          {data.tree.map((space, i) => (
+          {sortSpaces(data.tree).map((space, i) => (
             <SpaceRow
               key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
