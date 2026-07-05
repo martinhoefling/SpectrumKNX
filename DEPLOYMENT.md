@@ -5,7 +5,7 @@ Spectrum KNX is designed as a modular 12-factor application, making it agnostic 
 ## Prerequisites
 No matter the deployment, you will need:
 1. An ETS project file (`.knxproj`) parsed by the backend to translate KNX payloads.
-2. A running PostgreSQL database with the **TimescaleDB** extension installed.
+2. A database backend — either PostgreSQL with the **TimescaleDB** extension (default), or SQLite (no external database required).
 
 ---
 
@@ -21,7 +21,7 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ## 2. Home Assistant Add-on
 
-Spectrum KNX can be installed as a native **Home Assistant Add-on**. This is the easiest way to run it alongside an existing Home Assistant installation. The Add-on bundles everything (PostgreSQL + TimescaleDB + Backend + Frontend) into a single container managed by the HA Supervisor.
+Spectrum KNX can be installed as a native **Home Assistant Add-on**. This is the easiest way to run it alongside an existing Home Assistant installation. The Add-on bundles everything (Backend + Frontend, plus PostgreSQL + TimescaleDB when needed) into a single container managed by the HA Supervisor.
 
 ### 2.1 Installation
 
@@ -45,6 +45,7 @@ After installation, go to the **Configuration** tab of the Add-on. The following
 | `KNX_GATEWAY_IP` | IP address of your KNX IP Gateway/Router. Use `AUTO` to scan the network automatically. | `AUTO` |
 | `KNX_GATEWAY_PORT` | Port of your KNX IP Gateway. | `3671` |
 | `LOG_LEVEL` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). | `INFO` |
+| `DB_BACKEND` | Storage backend: `POSTGRES` (PostgreSQL + TimescaleDB) or `SQLITE` (local file, no external database needed). | `POSTGRES` |
 
 Example configuration (YAML view):
 ```yaml
@@ -83,7 +84,8 @@ All data is stored in the Add-on's persistent `/data` directory, which is manage
 
 | Data | Location | Persisted? |
 |---|---|---|
-| PostgreSQL / TimescaleDB | `/data/postgres/` | ✅ Survives restarts & updates |
+| PostgreSQL / TimescaleDB (when `DB_BACKEND=POSTGRES`) | `/data/postgres/` | ✅ Survives restarts & updates |
+| SQLite database (when `DB_BACKEND=SQLITE`) | `/data/spectrum_knx.db` | ✅ Survives restarts & updates |
 | Uploaded `.knxproj` file | `/data/project/` | ✅ Survives restarts & updates |
 | Uploaded project password | `/data/project/` | ✅ Survives restarts & updates |
 | Uploaded `.knxkeys` file | `/data/project/` | ✅ Survives restarts & updates |
@@ -92,6 +94,8 @@ All data is stored in the Add-on's persistent `/data` directory, which is manage
 > **Important:** Uninstalling the Add-on will delete all data. If you want to keep your telegram history, export it before uninstalling.
 
 ### 2.7 Database Access
+This section applies only when `DB_BACKEND=POSTGRES`.
+
 By default, the internal PostgreSQL database is restricted to `127.0.0.1` for security, as the Add-on runs on the host network. This ensures it is not exposed to your local network.
 
 To connect external tools (e.g., Grafana) to the database, you must access it from the same host or use a SSH tunnel to port `5432`.
@@ -124,12 +128,12 @@ You can configure the application via environment variables. These can be set in
 ### DB Connection
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | (Optional) Full SQLAlchemy connection string (must use `postgresql+asyncpg://`) | N/A |
-| `POSTGRES_USER` | Database username | `knxuser` |
-| `POSTGRES_PASSWORD`| Database password | `knxpassword` |
-| `POSTGRES_DB` | Database name | `knx_analyzer` |
-| `POSTGRES_HOST` | Database host | `db` |
-| `POSTGRES_PORT` | Database port | `5432` |
+| `DATABASE_URL` | Full SQLAlchemy connection string. Use `postgresql+asyncpg://...` for PostgreSQL or `sqlite+aiosqlite:////path/to/file.db` for SQLite. When set, `POSTGRES_*` variables are ignored. | N/A |
+| `POSTGRES_USER` | PostgreSQL username (used when `DATABASE_URL` is not set) | `knxuser` |
+| `POSTGRES_PASSWORD`| PostgreSQL password | `knxpassword` |
+| `POSTGRES_DB` | PostgreSQL database name | `knx_analyzer` |
+| `POSTGRES_HOST` | PostgreSQL host | `db` |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
 
 ### KNX Settings
 | Variable | Description | Default |

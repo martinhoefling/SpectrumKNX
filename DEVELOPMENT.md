@@ -9,7 +9,7 @@ This document provides instructions for setting up the development environment, 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)
 - **KNX Integration:** [xknx](https://xknx.io/) for bus communication and [xknxproject](https://github.com/XKNX/xknxproject) for ETS project parsing.
 - **ORM:** [SQLAlchemy](https://www.sqlalchemy.org/) (Async)
-- **Database Driver:** `asyncpg`
+- **Database Driver:** `asyncpg` (PostgreSQL) or `aiosqlite` (SQLite)
 
 ### Frontend
 - **Framework:** [React](https://react.dev/) + [Vite](https://vitejs.dev/)
@@ -20,7 +20,7 @@ This document provides instructions for setting up the development environment, 
 - **Styling:** Vanilla CSS (Modern CSS variables, Flexbox/Grid)
 
 ### Storage & Infrastructure
-- **Database:** [PostgreSQL 15](https://www.postgresql.org/) with [TimescaleDB](https://www.timescale.com/) extension.
+- **Database:** [PostgreSQL 15](https://www.postgresql.org/) with [TimescaleDB](https://www.timescale.com/) (default), or SQLite via `aiosqlite` for lightweight setups.
 - **Containerization:** [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/).
 
 ---
@@ -38,8 +38,8 @@ Copy the example environment file and adjust the values as needed:
 cp .env_example .env
 ```
 Key variables:
-- `DATABASE_URL`: (Optional) Full connection string for the PostgreSQL database (must start with `postgresql+asyncpg://`).
-- `POSTGRES_USER/PASSWORD/DB`: Individual credentials used if `DATABASE_URL` is omitted.
+- `DATABASE_URL`: (Optional) Full SQLAlchemy connection string. Use `postgresql+asyncpg://...` for PostgreSQL or `sqlite+aiosqlite:////path/to/file.db` for SQLite.
+- `POSTGRES_USER/PASSWORD/DB`: Individual PostgreSQL credentials used when `DATABASE_URL` is omitted and the PostgreSQL backend is active.
 - `KNX_PASSWORD`: Password for your ETS project export.
 - `KNX_PROJECT_PATH`: Path to the `.knxproj` file inside the container.
 - `KNX_GATEWAY_IP`: IP of your KNX interface (or `AUTO`). See `DEPLOYMENT.md` for advanced connection settings.
@@ -47,10 +47,16 @@ Key variables:
 - `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8000`).
 
 ### 3. Database Setup
-The easiest way to run the database is via Docker Compose. This will start TimescaleDB. The backend automatically creates the schema on first startup via the `knx-telegram-store` library.
+The backend supports two storage backends selected via `DATABASE_URL`:
 
+**PostgreSQL + TimescaleDB (default):** Start the database via Docker Compose. The backend automatically creates the schema on first startup.
 ```bash
 docker-compose up -d db
+```
+
+**SQLite (no external database required):** Set `DATABASE_URL` to a `sqlite+aiosqlite://` URL and skip the database container entirely.
+```bash
+export DATABASE_URL="sqlite+aiosqlite:///spectrum_knx.db"
 ```
 
 ### 4. Running the Backend

@@ -10,7 +10,7 @@
 
 ![Spectrum KNX Dashboard](assets/dashboard.png)
 
-Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus telegrams indefinitely. Built for speed and reliability, it merges a robust TimescaleDB backend with a premium, real-time React web interface.
+Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus telegrams indefinitely. Built for speed and reliability, it supports both a TimescaleDB backend for long-term time-series storage and a lightweight SQLite backend for simple setups — paired with a premium, real-time React web interface.
 
 ## 📺 Demo in Action
 
@@ -49,7 +49,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT
 
 ## 🛠 Tech Stack
 - **Backend:** Python 3.14+, FastAPI, `xknx`, WebSocket Streaming
-- **Database:** PostgreSQL + TimescaleDB
+- **Database:** PostgreSQL + TimescaleDB, or SQLite (via `aiosqlite`)
 - **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
 
 ## 🤝 Contributing
