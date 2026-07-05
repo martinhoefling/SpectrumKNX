@@ -1,6 +1,6 @@
 import os
 
-from knx_telegram_store.buffered import BufferedPostgresStore
+from knx_telegram_store.buffered import BufferedPostgresStore, BufferedSqliteStore
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # Uses env var or defaults to the docker-compose settings
@@ -16,8 +16,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql+asyncpg://{DB_USER}:{DB_PA
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
-# Global Telegram Store — BufferedPostgresStore combines buffering and persistence
-store = BufferedPostgresStore(DATABASE_URL, flush_interval=1.0)
+_SQLITE_PREFIX = "sqlite+aiosqlite:///"
+
+if DATABASE_URL.startswith(_SQLITE_PREFIX):
+    # Strip the URL scheme to get the file path (absolute paths keep their leading /)
+    _db_path = DATABASE_URL[len(_SQLITE_PREFIX):]
+    store = BufferedSqliteStore(_db_path, flush_interval=1.0)
+else:
+    store = BufferedPostgresStore(DATABASE_URL, flush_interval=1.0)
 
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
 

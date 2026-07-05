@@ -31,6 +31,7 @@ options:
   KNX_SECURE_BACKBONE_KEY: ""
   KNX_SECURE_LATENCY_MS: 0
   LOG_LEVEL: "INFO"
+  DB_BACKEND: "POSTGRES"
 schema:
   KNX_GATEWAY_IP: "str"
   KNX_GATEWAY_PORT: "port"
@@ -48,5 +49,6 @@ schema:
   KNX_SECURE_BACKBONE_KEY: "str?"
   KNX_SECURE_LATENCY_MS: "int?"
   LOG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR|CRITICAL)"
+  DB_BACKEND: "list(POSTGRES|SQLITE)"
 ports_description:
-  "5432/tcp": "PostgreSQL TimescaleDB (Internal Only)"
+  "5432/tcp": "PostgreSQL TimescaleDB (Internal Only, unused when DB_BACKEND=SQLITE)"

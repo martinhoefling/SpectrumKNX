@@ -1,4 +1,12 @@
 #!/usr/bin/with-contenv bashio
+
+# Skip PostgreSQL entirely when using the SQLite backend
+DB_BACKEND=$(bashio::config 'DB_BACKEND' 'POSTGRES')
+if [ "$DB_BACKEND" = "SQLITE" ]; then
+    bashio::log.info "SQLite backend selected — PostgreSQL will not be started."
+    exec sleep infinity
+fi
+
 # ── Persistent data directory ─────────────────────────────────────────────────
 # Home Assistant persists /data across container restarts and updates.
 # We store PostgreSQL data and KNX project files there.
