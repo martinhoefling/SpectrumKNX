@@ -24,6 +24,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 - **Data Rendering:** Dynamically graph numerical readouts over time, grouped by physical unit types.
 - **Zero Loss:** Pause the live feed without dropping packets—everything queues silently in the background buffer until you resume.
 - **Database Maintenance:** Inspect database size, telegram count and covered time range; purge old telegrams with a dry-run preview and reclaim the freed disk space—right from the UI.
+- **Home Assistant Companion Mode:** Run the analyzer directly on Home Assistant's own KNX telegram history—no second bus connection, no separate database.
 
 ## 🐳 Quick Start (Docker Compose)
 
@@ -44,6 +45,21 @@ The easiest way to run Spectrum KNX is with Docker Compose. This automatically p
    ```
 
 4. Access the web interface at `http://localhost:8000` (or `http://localhost:5173` in Dev mode).
+
+## 🏠 Home Assistant
+
+Two add-ons cover the two ways to run Spectrum KNX inside Home Assistant
+(add this repository URL in *Settings → Add-ons → Add-on Store → Repositories*):
+
+| | **Spectrum KNX** (standalone) | **Spectrum KNX (HA Companion)** |
+|---|---|---|
+| Bus connection | Own tunnel/routing connection to your KNX gateway | None — uses what HA already receives |
+| Database | Own PostgreSQL/TimescaleDB or SQLite | Reads HA's KNX telegram database (read-only) |
+| Live telegrams | Directly from the bus | Streamed from HA's websocket API |
+| Retention & cleanup | Managed in Spectrum KNX (Database Maintenance screen) | Managed by Home Assistant |
+| Use when… | You want an independent, full-featured recorder | You use HA's KNX integration and want its history analyzed without duplicating anything |
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for installation and configuration of both.
 
 ### Detailed Guides
 See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.

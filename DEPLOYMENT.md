@@ -107,6 +107,38 @@ To connect external tools (e.g., Grafana) to the database, you must access it fr
 | `amd64` (Intel/AMD) | ✅ |
 | `aarch64` (Raspberry Pi 4/5, ARM64) | ✅ |
 
+### 2.9 Companion Add-on (reads Home Assistant's KNX database)
+
+The **Spectrum KNX (HA Companion)** add-on (same repository, separate add-on in the
+store) runs the analyzer UI directly on the telegram history that Home Assistant's
+own KNX integration records — instead of connecting to the bus and recording a
+second copy:
+
+- **No bus connection**: it needs no gateway, tunnel or KNX Secure configuration.
+  Live telegrams are streamed from Home Assistant's websocket API
+  (`knx/subscribe_telegrams`); after a reconnect, missed telegrams are replayed
+  from the database so nothing is lost.
+- **No database of its own**: it opens Home Assistant's telegram store
+  (`.storage/knx/telegrams.db`) strictly read-only. The Database Maintenance
+  screen becomes an info screen — retention and cleanup stay in Home Assistant.
+- **Prerequisite**: the KNX integration must be set up in Home Assistant (it
+  creates and writes the telegram database).
+
+Options:
+
+| Option | Description | Default |
+|---|---|---|
+| `LIVE_SOURCE` | `ha_websocket` (push, sub-second), `poll` (interval-poll the database) or `none`. | `ha_websocket` |
+| `TELEGRAM_DB_PATH` | Override the telegram database path if auto-detection fails. | auto |
+| `LOG_LEVEL` | Backend log level. | `INFO` |
+| `COMPANION_MODE` | Marks this install as the companion variant — do not change. | `true` |
+
+An ETS project upload is optional here: live telegram names come resolved from
+Home Assistant, and uploading a project additionally enables the building view.
+
+Both add-ons can run side by side (e.g. the standalone one on a dedicated tunnel
+for long-term recording, the companion for HA's own history).
+
 ---
 
 ## 3. Kubernetes

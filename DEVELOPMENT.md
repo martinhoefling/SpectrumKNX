@@ -46,6 +46,13 @@ Key variables:
 - `APP_IMAGE`: Docker image to use for production stacks.
 - `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8000`).
 
+Companion mode (read an external telegram store instead of running the KNX daemon):
+- `STORE_MODE`: `standalone` (default) or `external-readonly` — read a sqlite store owned and written by another process (e.g. Home Assistant's KNX integration). Requires a `sqlite+aiosqlite://` `DATABASE_URL`; the KNX daemon is not started, and purge/optimize are disabled.
+- `LIVE_SOURCE`: Live-feed source in companion mode: `ha_websocket` (default — subscribe to HA's `knx/subscribe_telegrams`), `poll` (interval-poll the store; no HA required) or `none`.
+- `HA_WS_URL`: Home Assistant websocket URL (default `ws://supervisor/core/websocket`; for local dev e.g. `ws://localhost:8123/api/websocket`).
+- `HA_TOKEN` / `SUPERVISOR_TOKEN`: Access token for the HA websocket (a long-lived token in dev; the Supervisor injects `SUPERVISOR_TOKEN` in the add-on). Without a token, `ha_websocket` falls back to polling.
+- `LIVE_POLL_INTERVAL`: Poll interval in seconds for `LIVE_SOURCE=poll` (default `1.0`).
+
 ### 3. Database Setup
 The backend supports two storage backends selected via `DATABASE_URL`:
 
@@ -57,6 +64,13 @@ docker-compose up -d db
 **SQLite (no external database required):** Set `DATABASE_URL` to a `sqlite+aiosqlite://` URL and skip the database container entirely.
 ```bash
 export DATABASE_URL="sqlite+aiosqlite:///spectrum_knx.db"
+```
+
+**External read-only (companion mode):** Point at a sqlite store written by another process — no database of our own, no KNX daemon. Useful for developing against a copy of Home Assistant's `.storage/knx/telegrams.db`:
+```bash
+export STORE_MODE="external-readonly"
+export DATABASE_URL="sqlite+aiosqlite:////path/to/telegrams.db"
+export LIVE_SOURCE="poll"   # or ha_websocket + HA_WS_URL + HA_TOKEN
 ```
 
 ### 4. Running the Backend

@@ -1,9 +1,10 @@
 #!/usr/bin/with-contenv bashio
 
-# Skip PostgreSQL entirely when using the SQLite backend
+# Skip PostgreSQL entirely when using the SQLite backend or companion mode
 DB_BACKEND=$(bashio::config 'DB_BACKEND' 'POSTGRES')
-if [ "$DB_BACKEND" = "SQLITE" ]; then
-    bashio::log.info "SQLite backend selected — PostgreSQL will not be started."
+COMPANION_MODE=$(bashio::config 'COMPANION_MODE' 'false')
+if [ "$DB_BACKEND" = "SQLITE" ] || [ "$COMPANION_MODE" = "true" ]; then
+    bashio::log.info "No local database needed — PostgreSQL will not be started."
     exec sleep infinity
 fi
 

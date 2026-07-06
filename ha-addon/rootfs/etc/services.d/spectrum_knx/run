@@ -1,9 +1,33 @@
 #!/usr/bin/with-contenv bashio
 
+# Companion add-on (ha-addon-companion): read Home Assistant's own KNX telegram
+# store instead of running a bus connection and database of our own.
+COMPANION_MODE=$(bashio::config 'COMPANION_MODE' 'false')
 # Read DB_BACKEND early — it controls whether we wait for PostgreSQL
 DB_BACKEND=$(bashio::config 'DB_BACKEND' 'POSTGRES')
 
-if [ "$DB_BACKEND" = "SQLITE" ]; then
+if [ "$COMPANION_MODE" = "true" ]; then
+    bashio::log.info "Companion mode — reading Home Assistant's KNX telegram store."
+    export STORE_MODE="external-readonly"
+    export LIVE_SOURCE="$(bashio::config 'LIVE_SOURCE' 'ha_websocket')"
+
+    DB_PATH="$(bashio::config 'TELEGRAM_DB_PATH' '')"
+    if [ -z "$DB_PATH" ]; then
+        # Supervisor mounts homeassistant_config at /homeassistant (older: /config)
+        for candidate in /homeassistant/.storage/knx/telegrams.db /config/.storage/knx/telegrams.db; do
+            if [ -f "$candidate" ]; then
+                DB_PATH="$candidate"
+                break
+            fi
+        done
+    fi
+    if [ -z "$DB_PATH" ] || [ ! -f "$DB_PATH" ]; then
+        bashio::log.fatal "Home Assistant's KNX telegram database was not found."
+        bashio::log.fatal "Set up the KNX integration in Home Assistant first, or set TELEGRAM_DB_PATH."
+        exit 1
+    fi
+    export DATABASE_URL="sqlite+aiosqlite:///${DB_PATH}"
+elif [ "$DB_BACKEND" = "SQLITE" ]; then
     bashio::log.info "SQLite backend selected — skipping PostgreSQL wait."
     export DATABASE_URL="sqlite+aiosqlite:////data/spectrum_knx.db"
 else
