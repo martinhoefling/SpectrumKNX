@@ -593,3 +593,97 @@ def test_upload_project_empty_password(monkeypatch, tmp_path):
     response = client.post("/api/project/upload", data={"password": ""}, files={"file": ("test.knxproj", b"dummy")})
     assert response.status_code == 200
     m.assert_any_call(os.path.join("/project", "knx_project_password"), "w", encoding="utf-8")
+
+
+def _make_stats(count=100, size=4096):
+    from knx_telegram_store import StoreStats
+
+    return StoreStats(
+        telegram_count=count,
+        oldest_timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        newest_timestamp=datetime(2026, 7, 1, tzinfo=UTC),
+        size_bytes=size,
+        backend="sqlite",
+        retention_days=30,
+    )
+
+
+@patch("database.store.get_stats", new_callable=AsyncMock)
+def test_database_info(mock_stats):
+    mock_stats.return_value = _make_stats()
+
+    response = client.get("/api/database/info")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["backend"] == "sqlite"
+    assert data["telegram_count"] == 100
+    assert data["size_bytes"] == 4096
+    assert data["oldest_timestamp"].startswith("2026-01-01")
+    assert data["newest_timestamp"].startswith("2026-07-01")
+    assert data["retention_days"] == 30
+    # Real store capabilities (SQL backend) support both maintenance features
+    assert data["supports_size_stats"] is True
+    assert data["supports_optimize"] is True
+
+
+@patch("database.store.evict_older_than", new_callable=AsyncMock)
+def test_database_purge_dry_run(mock_evict):
+    mock_evict.return_value = 42
+
+    response = client.post(
+        "/api/database/purge",
+        json={"older_than": "2026-06-01T00:00:00+00:00", "dry_run": True},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 42, "dry_run": True}
+
+    args, kwargs = mock_evict.call_args
+    assert args[0] == datetime(2026, 6, 1, tzinfo=UTC)
+    assert kwargs["dry_run"] is True
+
+
+@patch("database.store.evict_older_than", new_callable=AsyncMock)
+def test_database_purge_naive_cutoff_treated_as_utc(mock_evict):
+    mock_evict.return_value = 7
+
+    response = client.post(
+        "/api/database/purge",
+        json={"older_than": "2026-06-01T00:00:00"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 7, "dry_run": False}
+    assert mock_evict.call_args[0][0] == datetime(2026, 6, 1, tzinfo=UTC)
+
+
+def test_database_purge_requires_cutoff_or_all():
+    response = client.post("/api/database/purge", json={})
+    assert response.status_code == 400
+
+
+@patch("database.store.clear", new_callable=AsyncMock)
+@patch("database.store.get_stats", new_callable=AsyncMock)
+def test_database_purge_all(mock_stats, mock_clear):
+    mock_stats.return_value = _make_stats(count=555)
+
+    # Dry run: report count, don't clear
+    response = client.post("/api/database/purge", json={"purge_all": True, "dry_run": True})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 555, "dry_run": True}
+    mock_clear.assert_not_called()
+
+    # Real purge
+    response = client.post("/api/database/purge", json={"purge_all": True})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 555, "dry_run": False}
+    mock_clear.assert_awaited_once()
+
+
+@patch("database.store.optimize", new_callable=AsyncMock)
+@patch("database.store.get_stats", new_callable=AsyncMock)
+def test_database_optimize(mock_stats, mock_optimize):
+    mock_stats.side_effect = [_make_stats(size=8192), _make_stats(size=2048)]
+
+    response = client.post("/api/database/optimize")
+    assert response.status_code == 200
+    assert response.json() == {"size_bytes_before": 8192, "size_bytes_after": 2048}
+    mock_optimize.assert_awaited_once()

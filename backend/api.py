@@ -1,8 +1,9 @@
 import os
 import subprocess
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from sqlalchemy import text
 from xknx.telegram.address import IndividualAddress
 
@@ -299,6 +300,65 @@ async def get_statistics():
             pa_name_map[ia_str] = data.get("name", "")
 
     return _aggregate_statistics(rows, ga_name_map, pa_name_map)
+
+
+@router.get("/api/database/info")
+async def get_database_info():
+    """Returns database stats (size, count, covered time range) and maintenance capabilities."""
+    stats = await store.get_stats()
+    caps = store.capabilities
+    return {
+        "backend": stats.backend,
+        "telegram_count": stats.telegram_count,
+        "oldest_timestamp": stats.oldest_timestamp,
+        "newest_timestamp": stats.newest_timestamp,
+        "size_bytes": stats.size_bytes,
+        "retention_days": stats.retention_days,
+        "supports_size_stats": caps.supports_size_stats,
+        "supports_optimize": caps.supports_optimize,
+    }
+
+
+class PurgeRequest(BaseModel):
+    older_than: datetime | None = None
+    purge_all: bool = False
+    dry_run: bool = False
+
+
+@router.post("/api/database/purge")
+async def purge_database(request: PurgeRequest):
+    """Deletes telegrams older than a cutoff (or all of them).
+
+    With dry_run=true, only returns how many telegrams would be deleted so the
+    frontend can ask for confirmation first.
+    """
+    if request.purge_all:
+        count = (await store.get_stats()).telegram_count
+        if not request.dry_run:
+            await store.clear()
+        return {"deleted": count, "dry_run": request.dry_run}
+
+    if request.older_than is None:
+        raise HTTPException(status_code=400, detail="Either older_than or purge_all must be given")
+
+    cutoff = request.older_than
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=UTC)
+
+    deleted = await store.evict_older_than(cutoff, dry_run=request.dry_run)
+    return {"deleted": deleted, "dry_run": request.dry_run}
+
+
+@router.post("/api/database/optimize")
+async def optimize_database():
+    """Reclaims disk space freed by deletions (VACUUM). May take a while on large databases."""
+    if not store.capabilities.supports_optimize:
+        raise HTTPException(status_code=400, detail="Backend does not support optimization")
+
+    size_before = (await store.get_stats()).size_bytes
+    await store.optimize()
+    size_after = (await store.get_stats()).size_bytes
+    return {"size_bytes_before": size_before, "size_bytes_after": size_after}
 
 
 @router.get("/api/project")
