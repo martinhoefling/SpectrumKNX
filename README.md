@@ -23,6 +23,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 - **Time-Delta Context:** Automatically capture the events "before and after" a filtered event to debug logic faults.
 - **Data Rendering:** Dynamically graph numerical readouts over time, grouped by physical unit types.
 - **Zero Loss:** Pause the live feed without dropping packets—everything queues silently in the background buffer until you resume.
+- **Database Maintenance:** Inspect database size, telegram count and covered time range; purge old telegrams with a dry-run preview and reclaim the freed disk space—right from the UI.
 
 ## 🐳 Quick Start (Docker Compose)
 
