@@ -37,6 +37,22 @@ system Chrome works: `npm i playwright` in a scratch dir, then
 `chromium.launch({ channel: 'chrome' })`. Toolbar overlays are reached via
 `button[title="..."]` (e.g. "Database maintenance", "Traffic statistics").
 
+## Companion mode (STORE_MODE=external-readonly)
+
+Run against any store sqlite file without a bus or HA:
+
+```bash
+STORE_MODE=external-readonly \
+DATABASE_URL="sqlite+aiosqlite:////abs/path/to/ha.db" \
+LIVE_SOURCE=ha_websocket HA_WS_URL=ws://localhost:8765 HA_TOKEN=test-token \
+venv/bin/uvicorn main:app --port 8322
+```
+
+A fake HA core websocket (auth_required/auth_ok + `knx/subscribe_telegrams`
+result + event frames) is ~50 lines with `websockets.serve`; see git history
+of this feature for the protocol shape. `LIVE_SOURCE=poll` needs no HA at all.
+Live output is observable on `ws://localhost:<port>/ws/telegrams`.
+
 ## Gotchas
 
 - Timestamps from sqlite round-trip as naive UTC ISO strings; the frontend

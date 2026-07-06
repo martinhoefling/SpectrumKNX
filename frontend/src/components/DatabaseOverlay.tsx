@@ -11,6 +11,7 @@ interface DatabaseInfo {
   retention_days: number | null;
   supports_size_stats: boolean;
   supports_optimize: boolean;
+  read_only: boolean;
 }
 
 interface PurgePreview {
@@ -161,6 +162,11 @@ export const DatabaseOverlay: React.FC<DatabaseOverlayProps> = ({ onClose }) => 
             {info.backend}
           </span>
         )}
+        {info?.read_only && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', background: 'var(--bg-tag)', padding: '0.15rem 0.5rem', borderRadius: '999px', border: '1px solid var(--border-color)' }}>
+            read-only
+          </span>
+        )}
         <button
           onClick={fetchInfo}
           disabled={isLoading}
@@ -195,7 +201,16 @@ export const DatabaseOverlay: React.FC<DatabaseOverlayProps> = ({ onClose }) => 
                 </div>
               </div>
 
+              {/* Read-only note */}
+              {info.read_only && (
+                <div style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '1rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                  This database is owned and managed by another application (e.g. Home Assistant) —
+                  retention, purging and space reclamation are configured there.
+                </div>
+              )}
+
               {/* Purge */}
+              {!info.read_only && (
               <div>
                 <h3 style={sectionTitleStyle}>Purge old telegrams</h3>
                 <div style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '1rem' }}>
@@ -271,6 +286,7 @@ export const DatabaseOverlay: React.FC<DatabaseOverlayProps> = ({ onClose }) => 
                   )}
                 </div>
               </div>
+              )}
 
               {/* Optimize */}
               {info.supports_optimize && (

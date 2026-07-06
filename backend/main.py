@@ -14,7 +14,8 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from api import get_backend_version  # noqa: E402
 from api import router as api_router  # noqa: E402
-from database import engine  # noqa: E402
+from database import READ_ONLY, engine  # noqa: E402
+from ha_live_bridge import companion_shutdown, companion_startup  # noqa: E402
 from knx_daemon import knx_shutdown, knx_startup  # noqa: E402
 from security import is_safe_path  # noqa: E402
 
@@ -26,10 +27,18 @@ async def lifespan(app: FastAPI):
     # Startup
     version = get_backend_version()
     logger.info(f"Starting Spectrum KNX Backend (Version: {version})")
-    await knx_startup()
+    if READ_ONLY:
+        # Companion mode: no KNX daemon — another process (Home Assistant)
+        # owns the bus connection and writes the store we read.
+        await companion_startup()
+    else:
+        await knx_startup()
     yield
     # Shutdown
-    await knx_shutdown()
+    if READ_ONLY:
+        await companion_shutdown()
+    else:
+        await knx_shutdown()
     await engine.dispose()
 
 

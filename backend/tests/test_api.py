@@ -687,3 +687,44 @@ def test_database_optimize(mock_stats, mock_optimize):
     assert response.status_code == 200
     assert response.json() == {"size_bytes_before": 8192, "size_bytes_after": 2048}
     mock_optimize.assert_awaited_once()
+
+
+def _read_only_caps():
+    from knx_telegram_store import StoreCapabilities
+
+    return StoreCapabilities(
+        supports_time_range=True,
+        supports_time_delta=True,
+        supports_pagination=True,
+        supports_count=True,
+        supports_size_stats=True,
+        supports_optimize=False,
+        read_only=True,
+    )
+
+
+@patch("database.store.get_stats", new_callable=AsyncMock)
+def test_database_info_reports_read_only(mock_stats):
+    from unittest.mock import PropertyMock
+
+    import database
+
+    mock_stats.return_value = _make_stats()
+    with patch.object(type(database.store), "capabilities", new_callable=PropertyMock, return_value=_read_only_caps()):
+        response = client.get("/api/database/info")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["read_only"] is True
+    assert data["supports_optimize"] is False
+
+
+def test_database_purge_rejected_when_read_only():
+    from unittest.mock import PropertyMock
+
+    import database
+
+    with patch.object(type(database.store), "capabilities", new_callable=PropertyMock, return_value=_read_only_caps()):
+        response = client.post("/api/database/purge", json={"purge_all": True})
+        assert response.status_code == 403
+        response = client.post("/api/database/optimize")
+        assert response.status_code == 403

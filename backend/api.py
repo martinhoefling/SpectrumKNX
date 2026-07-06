@@ -8,7 +8,7 @@ from sqlalchemy import text
 from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
-from database import engine, store
+from database import READ_ONLY, engine, store
 from knx_telegram_store import TelegramQuery
 from parsers import (
     format_dpt_name,
@@ -316,6 +316,7 @@ async def get_database_info():
         "retention_days": stats.retention_days,
         "supports_size_stats": caps.supports_size_stats,
         "supports_optimize": caps.supports_optimize,
+        "read_only": caps.read_only,
     }
 
 
@@ -332,6 +333,9 @@ async def purge_database(request: PurgeRequest):
     With dry_run=true, only returns how many telegrams would be deleted so the
     frontend can ask for confirmation first.
     """
+    if store.capabilities.read_only:
+        raise HTTPException(status_code=403, detail="Store is read-only; its owner manages retention and cleanup")
+
     if request.purge_all:
         count = (await store.get_stats()).telegram_count
         if not request.dry_run:
@@ -352,6 +356,8 @@ async def purge_database(request: PurgeRequest):
 @router.post("/api/database/optimize")
 async def optimize_database():
     """Reclaims disk space freed by deletions (VACUUM). May take a while on large databases."""
+    if store.capabilities.read_only:
+        raise HTTPException(status_code=403, detail="Store is read-only; its owner manages retention and cleanup")
     if not store.capabilities.supports_optimize:
         raise HTTPException(status_code=400, detail="Backend does not support optimization")
 
@@ -522,7 +528,9 @@ async def get_project_status():
     """Returns the status of the project upload feature"""
     project_loaded = knx_daemon.global_knx_project is not None
     upload_writable = _project_upload_writable()
-    upload_required = not project_loaded
+    # In companion mode the project is optional — live telegram names come from
+    # Home Assistant — so never block the UI behind the upload wizard.
+    upload_required = not project_loaded and not READ_ONLY
 
     return {
         "upload_feature_active": True,
