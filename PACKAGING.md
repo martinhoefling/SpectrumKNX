@@ -113,7 +113,10 @@ Steps:
 Steps:
 
 - [x] `packaging/windows/`: `launcher.py`, `spectrum-knx.spec`, `env.template`,
-      `spectrum-knx.ico` (generated from `frontend/public/favicon.svg`).
+      `spectrum-knx.ico` (generated from `frontend/public/favicon.svg`), and
+      `README.txt` — an end-user setup guide (config via `.env`, data
+      locations, firewall, upgrade/uninstall) that the release workflow copies
+      into the zip next to the exe (converted to CRLF).
       *Notes: the launcher finalizes the environment (defaults →
       `%LOCALAPPDATA%\SpectrumKNX`) before importing the backend, because
       `database.py` reads env at import time. `env.template` ships inside

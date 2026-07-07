@@ -188,7 +188,8 @@ and the service user; `apt remove` keeps them.
 
 Unzip `spectrum-knx-<version>-windows-x64.zip` anywhere and run
 `spectrum-knx.exe`: a console window shows the logs and the browser opens the
-UI (default `http://localhost:8000`).
+UI (default `http://localhost:8000`). A `README.txt` with the full setup
+guide is included in the zip.
 
 - Configuration lives in the `.env` file created next to the exe on first run
   (same variables as [Section 5](#5-configuration-variables-docker--kubernetes)).
@@ -196,8 +197,8 @@ UI (default `http://localhost:8000`).
   `%LOCALAPPDATA%\SpectrumKNX\`.
 - Windows Firewall asks for network permission on first start — required for
   gateway discovery and KNX routing (multicast).
-- To upgrade, replace the unzipped folder; the `.env` next to the exe and the
-  data directory are untouched.
+- To upgrade, unzip the new version and copy your `.env` next to the new exe;
+  the data directory in `%LOCALAPPDATA%` is untouched by upgrades.
 
 ---
 

@@ -164,6 +164,8 @@ jobs:
       - name: Zip bundle
         shell: pwsh
         run: |
+          # Get/Set-Content rewrites the README with CRLF line endings
+          Get-Content packaging/windows/README.txt | Set-Content dist/windows/spectrum-knx/README.txt
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           Compress-Archive -Path dist/windows/spectrum-knx -DestinationPath "dist/spectrum-knx-$version-windows-x64.zip"
 
