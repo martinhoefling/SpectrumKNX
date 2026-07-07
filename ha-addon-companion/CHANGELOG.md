@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.1
+
+### Fixed
+
+- **Branding**: browser tab title now reads "Spectrum KNX" instead of "frontend", and the favicon and in-app logo match the add-on's waveform icon (#139).
+
 ## 1.9.0
 
 ### Added
