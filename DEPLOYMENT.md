@@ -76,7 +76,7 @@ The Add-on uses the built-in **Project Upload Wizard** for ETS project configura
 
 ### 2.5 KNX Secure Keys
 
-If your KNX installation uses KNX IP Secure, you can upload a `.knxkeys` file via the web UI. See [Section 5: KNX Secure Keys](#5-knx-secure-keys) for details on the auto-detection, upload, and hot-reload behavior.
+If your KNX installation uses KNX IP Secure, you can upload a `.knxkeys` file via the web UI. See [Section 6: KNX Secure Keys](#6-knx-secure-keys) for details on the auto-detection, upload, and hot-reload behavior.
 
 ### 2.6 Data Persistence
 
@@ -154,7 +154,54 @@ See the [Kubernetes README](kubernetes/README.md) for specific deployment instru
 
 ---
 
-## 4. Configuration Variables (Docker / Kubernetes)
+## 4. Debian Package & Windows (SQLite, no Docker)
+
+Both packages run the analyzer as a single process with a local SQLite
+database — no PostgreSQL/TimescaleDB, no container runtime. They are built for
+every release and attached to the [GitHub release](https://github.com/martinhoefling/SpectrumKNX/releases);
+see [PACKAGING.md](PACKAGING.md) for how they are built.
+
+### 4.1 Debian / Ubuntu (amd64, arm64)
+
+Requires Python ≥ 3.13 from the distribution (Debian 13 "trixie" or newer).
+
+```bash
+sudo apt install ./spectrum-knx_<version>_<arch>.deb
+```
+
+The package installs a systemd service (`spectrum-knx`, enabled and started
+automatically) running as its own system user. Locations:
+
+| Path | Purpose |
+|---|---|
+| `/etc/spectrum-knx/spectrum-knx.env` | configuration (env file, preserved on upgrades) |
+| `/var/lib/spectrum-knx/` | SQLite database and uploaded `.knxproj` |
+| `/opt/spectrum-knx/` | application + bundled Python venv |
+
+Edit the env file (KNX connection, bind address/port — all variables from
+[Section 5](#5-configuration-variables-docker--kubernetes) apply), then
+`sudo systemctl restart spectrum-knx`. The web UI listens on port 8000 by
+default. Logs: `journalctl -u spectrum-knx`. `apt purge` removes the database
+and the service user; `apt remove` keeps them.
+
+### 4.2 Windows (x64)
+
+Unzip `spectrum-knx-<version>-windows-x64.zip` anywhere and run
+`spectrum-knx.exe`: a console window shows the logs and the browser opens the
+UI (default `http://localhost:8000`).
+
+- Configuration lives in the `.env` file created next to the exe on first run
+  (same variables as [Section 5](#5-configuration-variables-docker--kubernetes)).
+- Data (SQLite database, uploaded `.knxproj`) is stored in
+  `%LOCALAPPDATA%\SpectrumKNX\`.
+- Windows Firewall asks for network permission on first start — required for
+  gateway discovery and KNX routing (multicast).
+- To upgrade, replace the unzipped folder; the `.env` next to the exe and the
+  data directory are untouched.
+
+---
+
+## 5. Configuration Variables (Docker / Kubernetes)
 You can configure the application via environment variables. These can be set in a `.env` file or directly in your environment.
 
 ### DB Connection
@@ -217,11 +264,11 @@ KNX_KNXKEYS_PASSWORD=my_secure_password
 
 ---
 
-## 5. KNX Secure Keys
+## 6. KNX Secure Keys
 
 Spectrum KNX supports **KNX IP Secure** (both Tunneling and Routing) via `.knxkeys` files exported from ETS.
 
-### 5.1 Auto-Detection
+### 6.1 Auto-Detection
 
 When `KNX_KNXKEYS_FILE` is **not** set, the daemon automatically looks for a keyfile at the default path:
 
@@ -237,7 +284,7 @@ The password is read from:
 
 This means you can simply place the files at those paths (or upload them via the UI) without any environment variable configuration.
 
-### 5.2 Upload via Web UI
+### 6.2 Upload via Web UI
 
 If the `KNX_KNXKEYS_FILE` environment variable is **not** set, the Spectrum KNX UI provides an upload wizard accessible from **Settings → KNX Security Keys**:
 
@@ -249,7 +296,7 @@ If the `KNX_KNXKEYS_FILE` environment variable is **not** set, the Spectrum KNX 
 
 The backend will immediately **reconnect** to the KNX bus using the new credentials. No restart is required.
 
-### 5.3 Hot-Reload
+### 6.3 Hot-Reload
 
 The daemon watches the knxkeys file for changes every 60 seconds. If the file is replaced on disk (e.g., via a volume mount update or a new upload), the daemon will automatically:
 
@@ -258,7 +305,7 @@ The daemon watches the knxkeys file for changes every 60 seconds. If the file is
 3. Rebuild the secure configuration
 4. Reconnect with the new credentials
 
-### 5.4 Secure Configuration Priority
+### 6.4 Secure Configuration Priority
 
 If multiple security methods are configured simultaneously, the daemon uses the following priority:
 

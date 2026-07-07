@@ -53,3 +53,121 @@ jobs:
           files: |
             LICENSE
             README.md
+
+  # Debian package (bundled venv, sqlite backend) — see PACKAGING.md
+  build-deb:
+    runs-on: ubuntu-latest
+    # Run after the release exists so the upload never races its creation
+    needs: build-and-push
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Set up QEMU (arm64)
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build .deb in debian:trixie container
+        run: |
+          docker run --rm --platform linux/${{ matrix.arch }} \
+            -v "$PWD:/src" -w /src debian:trixie bash -c "
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq python3 python3-venv python3-pip dpkg-dev > /dev/null
+            packaging/debian/build.sh '${{ github.ref_name }}'
+          "
+
+      - name: Smoke test (install + HTTP check)
+        if: matrix.arch == 'amd64'
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" debian:trixie bash -c "
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq curl /dist/*.deb > /dev/null
+            mkdir -p /var/lib/spectrum-knx && chown spectrum-knx: /var/lib/spectrum-knx
+            set -a; . /etc/spectrum-knx/spectrum-knx.env; set +a
+            cd /opt/spectrum-knx/app
+            runuser -u spectrum-knx -- /opt/spectrum-knx/venv/bin/uvicorn main:app --port 8000 &
+            for i in \$(seq 1 30); do curl -sf http://localhost:8000/api/version && break; sleep 1; done
+            curl -sf http://localhost:8000/ | grep -q '<title>Spectrum KNX</title>'
+          "
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+
+  # Windows onedir bundle (PyInstaller) — see PACKAGING.md
+  build-windows:
+    runs-on: windows-latest
+    needs: build-and-push
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt pyinstaller
+
+      - name: Build bundle
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "$VERSION" > packaging/windows/VERSION
+          pyinstaller --noconfirm --distpath dist/windows packaging/windows/spectrum-knx.spec
+
+      - name: Smoke test (start exe + HTTP check)
+        shell: bash
+        run: |
+          ./dist/windows/spectrum-knx/spectrum-knx.exe &
+          for i in $(seq 1 60); do curl -sf http://localhost:8000/api/version && break; sleep 1; done
+          curl -sf http://localhost:8000/api/version | grep -q "${GITHUB_REF_NAME#v}"
+          curl -sf http://localhost:8000/ | grep -q '<title>Spectrum KNX</title>'
+          kill %1
+
+      - name: Zip bundle
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          Compress-Archive -Path dist/windows/spectrum-knx -DestinationPath "dist/spectrum-knx-$version-windows-x64.zip"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip

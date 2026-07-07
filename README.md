@@ -46,6 +46,21 @@ The easiest way to run Spectrum KNX is with Docker Compose. This automatically p
 
 4. Access the web interface at `http://localhost:8000` (or `http://localhost:5173` in Dev mode).
 
+## 📦 Debian Package & Windows
+
+No Docker needed — both packages run Spectrum KNX with a local SQLite database
+(no PostgreSQL) and are attached to every [GitHub release](https://github.com/martinhoefling/SpectrumKNX/releases):
+
+- **Debian 13+ / compatible (amd64, arm64):** `sudo apt install ./spectrum-knx_<version>_<arch>.deb`,
+  configure `/etc/spectrum-knx/spectrum-knx.env`, then `sudo systemctl restart spectrum-knx`.
+  Web UI on port 8000.
+- **Windows (x64):** unzip `spectrum-knx-<version>-windows-x64.zip`, run
+  `spectrum-knx.exe` — the browser opens automatically; settings live in the
+  `.env` file created next to the exe.
+
+See [PACKAGING.md](PACKAGING.md) for details and [DEPLOYMENT.md](DEPLOYMENT.md)
+for configuration.
+
 ## 🏠 Home Assistant
 
 Two add-ons cover the two ways to run Spectrum KNX inside Home Assistant
@@ -65,7 +80,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for installation and configuration of both.
 See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
 
 ## 🛠 Tech Stack
-- **Backend:** Python 3.14+, FastAPI, `xknx`, WebSocket Streaming
+- **Backend:** Python 3.13+, FastAPI, `xknx`, WebSocket Streaming
 - **Database:** PostgreSQL + TimescaleDB, or SQLite (via `aiosqlite`)
 - **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
 

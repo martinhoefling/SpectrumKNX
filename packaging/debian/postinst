@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if ! getent passwd spectrum-knx > /dev/null; then
+            adduser --system --group --home /var/lib/spectrum-knx \
+                --no-create-home --quiet spectrum-knx
+        fi
+        ;;
+esac
+
+# Automatically added maintainer-script behavior (we don't use debhelper):
+# reload systemd, enable and start/restart the service.
+if [ "$1" = "configure" ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+        systemctl enable spectrum-knx.service || true
+        if systemctl is-active --quiet spectrum-knx.service; then
+            systemctl restart spectrum-knx.service || true
+        else
+            systemctl start spectrum-knx.service || true
+        fi
+    fi
+fi
+
+exit 0

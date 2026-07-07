@@ -1,3 +1,5 @@
+# Pinned lock (runtime + dev + transitives) used by Docker, HA add-on and CI.
+# Direct dependencies are declared in pyproject.toml — update both together.
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.14.1
