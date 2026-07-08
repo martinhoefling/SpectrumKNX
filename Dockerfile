@@ -34,6 +34,9 @@ EXPOSE 8000
 
 # Environment variables
 ENV LOG_LEVEL=INFO
+ENV BIND_HOST=0.0.0.0
+ENV BIND_PORT=8000
 
-# Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Command to run the application. `exec` keeps uvicorn as PID 1 so it receives
+# signals for graceful shutdown; the shell form lets BIND_HOST/BIND_PORT expand.
+CMD ["sh", "-c", "exec uvicorn main:app --host \"$BIND_HOST\" --port \"$BIND_PORT\""]
