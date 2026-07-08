@@ -608,11 +608,37 @@ def _make_stats(count=100, size=4096):
     )
 
 
+def _optimizable_caps():
+    """A writable SQL backend advertising size stats + optimize (e.g. sqlite)."""
+    from knx_telegram_store import StoreCapabilities
+
+    return StoreCapabilities(
+        supports_time_range=True,
+        supports_time_delta=True,
+        supports_pagination=True,
+        supports_count=True,
+        supports_size_stats=True,
+        supports_optimize=True,
+        read_only=False,
+    )
+
+
+def _patch_capabilities(caps):
+    """Pins store.capabilities so these tests don't depend on the ambient DB
+    backend (Postgres correctly reports supports_optimize=False since 0.7.1)."""
+    from unittest.mock import PropertyMock
+
+    import database
+
+    return patch.object(type(database.store), "capabilities", new_callable=PropertyMock, return_value=caps)
+
+
 @patch("database.store.get_stats", new_callable=AsyncMock)
 def test_database_info(mock_stats):
     mock_stats.return_value = _make_stats()
 
-    response = client.get("/api/database/info")
+    with _patch_capabilities(_optimizable_caps()):
+        response = client.get("/api/database/info")
     assert response.status_code == 200
     data = response.json()
     assert data["backend"] == "sqlite"
@@ -621,7 +647,7 @@ def test_database_info(mock_stats):
     assert data["oldest_timestamp"].startswith("2026-01-01")
     assert data["newest_timestamp"].startswith("2026-07-01")
     assert data["retention_days"] == 30
-    # Real store capabilities (SQL backend) support both maintenance features
+    # A writable SQL backend (e.g. sqlite) supports both maintenance features
     assert data["supports_size_stats"] is True
     assert data["supports_optimize"] is True
 
@@ -683,7 +709,8 @@ def test_database_purge_all(mock_stats, mock_clear):
 def test_database_optimize(mock_stats, mock_optimize):
     mock_stats.side_effect = [_make_stats(size=8192), _make_stats(size=2048)]
 
-    response = client.post("/api/database/optimize")
+    with _patch_capabilities(_optimizable_caps()):
+        response = client.post("/api/database/optimize")
     assert response.status_code == 200
     assert response.json() == {"size_bytes_before": 8192, "size_bytes_after": 2048}
     mock_optimize.assert_awaited_once()

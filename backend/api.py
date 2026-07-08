@@ -1,13 +1,19 @@
+import dataclasses
 import os
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+from knx_telegram_store.formats import COMMUNICATION_LOG_FOOTER, COMMUNICATION_LOG_HEADER, format_telegram_element
 from pydantic import BaseModel
 from sqlalchemy import text
 from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
+import telegram_export
+import telegram_import
 from database import READ_ONLY, engine, store
 from knx_telegram_store import TelegramQuery
 from parsers import (
@@ -18,6 +24,8 @@ from parsers import (
 from ws_manager import manager
 
 router = APIRouter()
+
+EXPORT_PAGE_SIZE = 10_000
 
 
 def get_backend_version() -> str:
@@ -628,6 +636,98 @@ async def upload_knxkeys(file: UploadFile = File(...), password: str = Form(""))
     await knx_daemon._reconnect_knx()
 
     return {"status": "ok", "message": "KNX keys file uploaded. Reconnecting to bus..."}
+
+
+# ── Telegram log import / export (see DESIGN_IMPORT_EXPORT.md) ──────────────
+
+
+@router.get("/api/import/status")
+async def get_import_status():
+    """Returns the state of the current/last telegram log import job."""
+    job = telegram_import.current_job
+    state = job.to_dict() if job else {"state": "idle"}
+    return state | {"read_only": READ_ONLY}
+
+
+@router.post("/api/import")
+async def start_telegram_import(file: UploadFile = File(...)):
+    """Uploads a telegram log (.xml or .zip of .xml) and starts a background import."""
+    if READ_ONLY:
+        raise HTTPException(status_code=403, detail="Import is unavailable in read-only companion mode")
+    if not file.filename or not file.filename.lower().endswith((".xml", ".zip")):
+        raise HTTPException(status_code=400, detail="File must be a .xml or .zip telegram log")
+
+    suffix = os.path.splitext(file.filename)[1].lower()
+    upload = tempfile.NamedTemporaryFile(delete=False, prefix="knx-import-", suffix=suffix)
+    try:
+        while chunk := await file.read(1024 * 1024):
+            upload.write(chunk)
+    finally:
+        upload.close()
+
+    try:
+        job = telegram_import.start_import(store, upload.name, file.filename)
+    except RuntimeError as e:
+        os.unlink(upload.name)
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return job.to_dict()
+
+
+@router.post("/api/import/cancel")
+async def cancel_telegram_import():
+    """Requests cancellation of the running import job."""
+    if not telegram_import.cancel_import():
+        raise HTTPException(status_code=404, detail="No import is running")
+    return {"status": "ok"}
+
+
+@router.get("/api/export")
+async def export_telegrams(
+    source_address: str | None = None,
+    target_address: str | None = None,
+    telegram_type: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    limit: int = 500_000,
+):
+    """Streams matching telegrams as an ETS6-compatible CommunicationLog XML file."""
+    type_map_reverse = {"Write": "GroupValueWrite", "Read": "GroupValueRead", "Response": "GroupValueResponse"}
+    query = TelegramQuery(
+        sources=[s.strip() for s in source_address.split(",")] if source_address else [],
+        destinations=[s.strip() for s in target_address.split(",")] if target_address else [],
+        telegram_types=[type_map_reverse.get(t.strip(), t.strip()) for t in telegram_type.split(",")]
+        if telegram_type
+        else [],
+        start_time=start_time,
+        end_time=end_time,
+        limit=min(EXPORT_PAGE_SIZE, limit),
+        order_descending=False,
+    )
+
+    async def generate():
+        yield COMMUNICATION_LOG_HEADER
+        offset = 0
+        while offset < limit:
+            page = dataclasses.replace(query, limit=min(EXPORT_PAGE_SIZE, limit - offset), offset=offset)
+            result = await store.query(page, flush_first=True)
+            chunk = "".join(
+                format_telegram_element(record, connection_name="Spectrum KNX Export")
+                for telegram in result.telegrams
+                if (record := telegram_export.stored_to_record(telegram)) is not None
+            )
+            if chunk:
+                yield chunk
+            if not result.limit_reached or len(result.telegrams) == 0:
+                break
+            offset += len(result.telegrams)
+        yield COMMUNICATION_LOG_FOOTER
+
+    filename = f"spectrum-knx-export-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.xml"
+    return StreamingResponse(
+        generate(),
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.websocket("/ws/telegrams")

@@ -13,7 +13,7 @@ h11==0.16.0
 idna==3.18
 ifaddr==0.2.0
 iniconfig==2.3.0
-knx-telegram-store==0.7.1
+knx-telegram-store==0.8.0
 packaging==26.2
 pluggy==1.6.0
 pycparser==3.0

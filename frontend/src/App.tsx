@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
 import { HistorySearch } from './components/HistorySearch';
+import { ImportExportView } from './components/ImportExportView';
 import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
 import { ProjectUploadWizard } from './components/ProjectUploadWizard';
@@ -46,6 +47,7 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
   const items = [
     { id: 'live', label: 'Group Monitor', icon: LayoutDashboard },
     { id: 'history', label: 'History Search', icon: History },
+    { id: 'import', label: 'Import / Export', icon: FolderInput },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
@@ -120,7 +122,7 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
 
 function App() {
   const [theme, setTheme] = useTheme();
-  const [activeTab, setActiveTab] = useState<'live' | 'history'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>('live');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
@@ -466,10 +468,10 @@ function App() {
               onChange={(id) => {
                 if (id === 'settings') {
                   setIsSettingsOpen(true);
-                  if (activeTab === 'history') setActiveTab('live');
+                  if (activeTab !== 'live') setActiveTab('live');
                 } else {
                   setIsSettingsOpen(false);
-                  setActiveTab(id as 'live' | 'history');
+                  setActiveTab(id as 'live' | 'history' | 'import');
                 }
               }}
             />
@@ -840,6 +842,8 @@ function App() {
               </div>
             </div>
           </div>
+        ) : activeTab === 'import' ? (
+          <ImportExportView />
         ) : (
           <HistorySearch
             visibleColumns={visibleColumns}
