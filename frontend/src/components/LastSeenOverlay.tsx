@@ -354,14 +354,12 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               <Send size={14} /> Write
             </span>
             <input
+              className="glass-input"
               placeholder="Value (e.g. 50, 21.5, on)"
               value={writeValue}
               onChange={e => { setWriteValue(e.target.value); setSendError(null); }}
               onKeyDown={e => { if (e.key === 'Enter' && writeValue.trim() && !busy) handleWrite(formatDpt(selectedInfo?.main, selectedInfo?.sub)); }}
-              style={{
-                width: 200, fontSize: '0.8rem', padding: '0.3rem 0.5rem',
-                border: '1px solid var(--border-color)', borderRadius: 6, background: 'var(--bg-main)', color: 'var(--text-main)',
-              }}
+              style={{ width: 200 }}
             />
             <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>
               DPT {formatDpt(selectedInfo?.main, selectedInfo?.sub) || '—'}

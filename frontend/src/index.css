@@ -148,6 +148,25 @@ code, pre {
   transform: translateY(-2px);
 }
 
+.glass-input {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  color: var(--text-main);
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.glass-input::placeholder {
+  color: var(--text-dim);
+}
+
+.glass-input:focus {
+  border-color: var(--accent-primary);
+}
+
 /* Animations */
 @keyframes pulse-ring {
   0% { transform: scale(0.8); opacity: 0; }

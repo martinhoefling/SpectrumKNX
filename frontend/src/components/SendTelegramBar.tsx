@@ -98,18 +98,8 @@ export function SendTelegramBar({ targets, onClose }: Props) {
 
         {dptMain === 1 ? (
           <div style={{ display: 'flex', gap: '0.3rem' }}>
-            <button
-              className="icon-button"
-              disabled={busy || !addressValid}
-              onClick={() => { setValue('on'); void sendBoolean(true); }}
-              style={boolBtn}
-            >On</button>
-            <button
-              className="icon-button"
-              disabled={busy || !addressValid}
-              onClick={() => { setValue('off'); void sendBoolean(false); }}
-              style={boolBtn}
-            >Off</button>
+            <button disabled={busy || !addressValid} onClick={() => void sendBoolean(true)} style={boolBtn(busy || !addressValid)}>On</button>
+            <button disabled={busy || !addressValid} onClick={() => void sendBoolean(false)} style={boolBtn(busy || !addressValid)}>Off</button>
           </div>
         ) : (
           <input
@@ -117,7 +107,7 @@ export function SendTelegramBar({ targets, onClose }: Props) {
             placeholder="Value (e.g. 50, 21.5, on)"
             value={value}
             onChange={e => { setValue(e.target.value); setFeedback(null); }}
-            style={{ width: 170, fontSize: '0.8rem' }}
+            style={{ width: 170 }}
           />
         )}
 
@@ -172,10 +162,14 @@ export function SendTelegramBar({ targets, onClose }: Props) {
   }
 }
 
-const boolBtn: React.CSSProperties = {
-  padding: '0.3rem 0.7rem', fontSize: '0.78rem', fontWeight: 600,
-  border: '1px solid var(--border-color)', borderRadius: '6px', width: 'auto',
-};
+function boolBtn(disabled: boolean): React.CSSProperties {
+  return {
+    padding: '0.35rem 0.85rem', fontSize: '0.78rem', fontWeight: 600,
+    background: 'var(--bg-tag)', color: 'var(--text-main)',
+    border: '1px solid var(--border-color)', borderRadius: '6px',
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+  };
+}
 
 function primaryBtn(disabled: boolean): React.CSSProperties {
   return {
