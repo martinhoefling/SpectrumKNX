@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
@@ -17,6 +17,7 @@ import { LastSeenOverlay } from './components/LastSeenOverlay';
 import { StatisticsOverlay } from './components/StatisticsOverlay';
 import { BuildingOverlay } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
+import { SendTelegramBar } from './components/SendTelegramBar';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
@@ -132,6 +133,7 @@ function App() {
   const [isStatisticsOpen, setIsStatisticsOpen] = useState(false);
   const [isBuildingOpen, setIsBuildingOpen] = useState(false);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(false);
+  const [isSendOpen, setIsSendOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -567,6 +569,16 @@ function App() {
                 >
                   <Database size={18} />
                 </button>
+                {serverConfig?.status?.write_enabled && (
+                  <button
+                    className="icon-button"
+                    onClick={() => setIsSendOpen(o => !o)}
+                    title="Send / read telegrams"
+                    style={{ color: isSendOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                  >
+                    <Send size={18} />
+                  </button>
+                )}
                 <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
 
                 <button className="icon-button" onClick={togglePause} title={isPaused ? 'Resume' : 'Pause'}>
@@ -799,6 +811,9 @@ function App() {
 
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {isSendOpen && serverConfig?.status?.write_enabled && (
+                  <SendTelegramBar targets={filterOptions.targets} onClose={() => setIsSendOpen(false)} />
+                )}
                 {isVisualizerOpen ? (
                   <Visualizer
                     telegrams={filteredLiveTelegrams}
@@ -811,6 +826,7 @@ function App() {
                     filterOptions={filterOptions}
                     initialAddresses={lastSeenAddresses}
                     initialMode={lastSeenMode}
+                    writeEnabled={serverConfig?.status?.write_enabled}
                     onClose={() => setIsLastSeenOpen(false)}
                   />
                 ) : isStatisticsOpen ? (

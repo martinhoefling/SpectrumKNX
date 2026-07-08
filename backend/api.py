@@ -3,12 +3,14 @@ import os
 import subprocess
 import tempfile
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from knx_telegram_store.formats import COMMUNICATION_LOG_FOOTER, COMMUNICATION_LOG_HEADER, format_telegram_element
 from pydantic import BaseModel
 from sqlalchemy import text
+from xknx.exceptions import ConversionError, CouldNotParseAddress
 from xknx.telegram.address import IndividualAddress
 
 import knx_daemon  # import global config
@@ -165,17 +167,16 @@ async def get_filter_options():
         # Targets & DPTs — from group addresses
         gas = knx_daemon.global_knx_project.get("group_addresses", {})
         for ga_addr, data in gas.items():
-            targets.append({"address": ga_addr, "name": data.get("name", "")})
-
             dpt_info = data.get("dpt")
-            if dpt_info:
-                main = dpt_info.get("main")
-                sub = dpt_info.get("sub")
-                if main is not None:
-                    key = f"{main}.{sub:03d}" if sub is not None else str(main)
-                    if key not in dpts:
-                        d_name, _ = format_dpt_name(main, sub)
-                        dpts[key] = {"main": main, "sub": sub, "label": d_name or key}
+            main = dpt_info.get("main") if dpt_info else None
+            sub = dpt_info.get("sub") if dpt_info else None
+            targets.append({"address": ga_addr, "name": data.get("name", ""), "main": main, "sub": sub})
+
+            if main is not None:
+                key = f"{main}.{sub:03d}" if sub is not None else str(main)
+                if key not in dpts:
+                    d_name, _ = format_dpt_name(main, sub)
+                    dpts[key] = {"main": main, "sub": sub, "label": d_name or key}
 
     # Sort sources and targets by address for consistent display
     sources.sort(key=lambda x: x["address"])
@@ -332,6 +333,48 @@ class PurgeRequest(BaseModel):
     older_than: datetime | None = None
     purge_all: bool = False
     dry_run: bool = False
+
+
+class KnxSendRequest(BaseModel):
+    address: str
+    # Decoded value for the given DPT (e.g. True, 50, 21.5), or raw bytes when no DPT is given.
+    payload: Any
+    dpt: str | None = None
+    response: bool = False
+
+
+class KnxReadRequest(BaseModel):
+    address: str
+
+
+def _require_bus_write() -> None:
+    """Guard for the send/read endpoints: standalone mode, connected, and allowed."""
+    if READ_ONLY or not knx_daemon.ALLOW_WRITE:
+        raise HTTPException(status_code=403, detail="Sending to the KNX bus is disabled")
+    if not knx_daemon.is_connected():
+        raise HTTPException(status_code=409, detail="Not connected to the KNX bus")
+
+
+@router.post("/api/knx/send")
+async def knx_send(request: KnxSendRequest):
+    """Send a GroupValueWrite/Response telegram to the KNX bus (standalone mode only)."""
+    _require_bus_write()
+    try:
+        await knx_daemon.send_group_value(request.address, request.payload, request.dpt, request.response)
+    except (ConversionError, CouldNotParseAddress, ValueError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "sent"}
+
+
+@router.post("/api/knx/read")
+async def knx_read(request: KnxReadRequest):
+    """Send a GroupValueRead telegram; the response updates the GA's last value."""
+    _require_bus_write()
+    try:
+        await knx_daemon.read_group_value(request.address)
+    except (CouldNotParseAddress, ValueError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "sent"}
 
 
 @router.post("/api/database/purge")

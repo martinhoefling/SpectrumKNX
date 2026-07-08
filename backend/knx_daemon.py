@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from xknx import XKNX
+from xknx.dpt import DPTArray, DPTBase, DPTBinary
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
-from xknx.telegram.address import IndividualAddress
+from xknx.telegram.address import GroupAddress, IndividualAddress
+from xknx.telegram.apci import GroupValueRead, GroupValueResponse, GroupValueWrite
 
-from database import store
+from database import READ_ONLY, store
 from knx_telegram_store import StoredTelegram
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
 from ws_manager import manager
@@ -18,6 +20,10 @@ log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, log_level_str, logging.INFO))
 logger = logging.getLogger("knx_daemon")
 logger.setLevel(getattr(logging, log_level_str, logging.INFO))
+
+# Sending to the bus is only meaningful in standalone mode with a live
+# connection. It is on by default; set KNX_ALLOW_WRITE=false to forbid it.
+ALLOW_WRITE = os.getenv("KNX_ALLOW_WRITE", "true").lower() == "true"
 
 xknx_instance: XKNX | None = None
 global_knx_project: Any | None = None
@@ -325,6 +331,64 @@ def _build_connection_config() -> ConnectionConfig:
     )
 
 
+def is_connected() -> bool:
+    """Whether the KNX daemon currently holds a live connection to the bus."""
+    if xknx_instance is None:
+        return False
+    try:
+        return xknx_instance.connection_manager.connected.is_set()
+    except Exception:
+        return False
+
+
+def write_enabled() -> bool:
+    """Whether outbound telegrams (send/read) can be sent to the bus right now.
+
+    Requires standalone mode (our own live connection), an active connection,
+    and that writing has not been forbidden via KNX_ALLOW_WRITE=false.
+    """
+    return ALLOW_WRITE and not READ_ONLY and is_connected()
+
+
+def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
+    """Encode a value into a KNX payload. With a DPT the value is transcoded;
+    without one the payload is treated as raw bytes (int -> DPTBinary)."""
+    if dpt is not None:
+        transcoder = DPTBase.parse_transcoder(dpt)
+        if transcoder is None:
+            raise ValueError(f"Unknown DPT type: {dpt}")
+        return transcoder.to_knx(payload)
+    if isinstance(payload, int):
+        return DPTBinary(payload)
+    return DPTArray(payload)
+
+
+async def send_group_value(address: str, payload: Any, dpt: str | None = None, response: bool = False) -> None:
+    """Send a GroupValueWrite (or GroupValueResponse) telegram to the bus."""
+    if xknx_instance is None:
+        raise RuntimeError("Not connected to the KNX bus")
+    encoded = _encode_payload(payload, dpt)
+    telegram = XknxTelegram(
+        destination_address=GroupAddress(address),
+        payload=GroupValueResponse(encoded) if response else GroupValueWrite(encoded),
+        source_address=xknx_instance.current_address,
+    )
+    await xknx_instance.telegrams.put(telegram)
+
+
+async def read_group_value(address: str) -> None:
+    """Send a GroupValueRead telegram; the device's response arrives via the
+    normal receive path and updates the stored last value for the GA."""
+    if xknx_instance is None:
+        raise RuntimeError("Not connected to the KNX bus")
+    telegram = XknxTelegram(
+        destination_address=GroupAddress(address),
+        payload=GroupValueRead(),
+        source_address=xknx_instance.current_address,
+    )
+    await xknx_instance.telegrams.put(telegram)
+
+
 def get_server_config() -> dict:
     """Return the effective server configuration for the status API, with passwords masked."""
 
@@ -339,13 +403,6 @@ def get_server_config() -> dict:
         default_file = "/project/knx_project.knxproj"
         if os.path.exists(default_file):
             ets_project_file = default_file
-
-    connected = False
-    if xknx_instance is not None:
-        try:
-            connected = xknx_instance.connection_manager.connected.is_set()
-        except Exception:
-            connected = False
 
     return {
         "connection": {
@@ -374,7 +431,8 @@ def get_server_config() -> dict:
             "knxkeys_found": knxkeys_file is not None and os.path.exists(knxkeys_file),
         },
         "status": {
-            "connected": connected,
+            "connected": is_connected(),
+            "write_enabled": write_enabled(),
         },
     }
 

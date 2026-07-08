@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Clock, RefreshCw, Search, ToggleLeft, ToggleRight } from 'lucide-react';
+import { X, Clock, RefreshCw, Search, ToggleLeft, ToggleRight, Radio, Send } from 'lucide-react';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { FilterOptions } from '../types/filters';
 import { apiUrl } from '../utils/basePath';
+import { coerceValue, formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
 
 const LIMITS = [10, 20, 50, 100] as const;
 
@@ -12,6 +13,8 @@ interface LastSeenOverlayProps {
   /** One or more addresses to show on open. Multiple are merged (e.g. all GAs of a KO). */
   initialAddresses: string[];
   initialMode: 'ga' | 'pa';
+  /** When true, offer GroupValueRead/Write controls (standalone mode with a live bus). */
+  writeEnabled?: boolean;
   onClose: () => void;
 }
 
@@ -44,6 +47,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   filterOptions,
   initialAddresses,
   initialMode,
+  writeEnabled = false,
   onClose,
 }) => {
   const [mode, setMode] = useState<'ga' | 'pa'>(initialMode);
@@ -54,6 +58,9 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [writeValue, setWriteValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addressList = mode === 'ga' ? filterOptions.targets : filterOptions.sources;
@@ -91,6 +98,37 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [autoRefresh, fetchData]);
+
+  // After sending, the response/echo lands as a telegram shortly after; refresh to reflect it.
+  const refreshSoon = useCallback(() => {
+    setTimeout(fetchData, 700);
+  }, [fetchData]);
+
+  const handleRead = async () => {
+    setBusy(true);
+    setSendError(null);
+    try {
+      await Promise.all(selectedAddresses.map(a => readTelegram(a)));
+      refreshSoon();
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Read failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleWrite = async (dpt: string) => {
+    setBusy(true);
+    setSendError(null);
+    try {
+      await sendTelegram(selectedAddresses[0], coerceValue(writeValue), dpt || undefined);
+      refreshSoon();
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Write failed');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleModeChange = (newMode: 'ga' | 'pa') => {
     setMode(newMode);
@@ -271,6 +309,21 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               Live
             </button>
 
+            {/* Read from bus (GroupValueRead) */}
+            {writeEnabled && mode === 'ga' && selectedAddresses.length > 0 && (
+              <button
+                onClick={handleRead} disabled={busy}
+                title="Send a GroupValueRead; the response updates the last value"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.25rem',
+                  padding: '0.2rem 0.5rem', borderRadius: 4, cursor: busy ? 'wait' : 'pointer', fontSize: '0.72rem',
+                  border: '1px solid var(--accent-primary)', background: 'var(--bg-subtle)', color: 'var(--accent-primary)',
+                }}
+              >
+                <Radio size={13} /> Read
+              </button>
+            )}
+
             {/* Manual refresh */}
             <button
               onClick={fetchData} disabled={isLoading} title="Refresh now"
@@ -290,6 +343,45 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Write to bus (GroupValueWrite) — single group address only */}
+        {writeEnabled && mode === 'ga' && !multi && selectedAddresses.length === 1 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0,
+            padding: '0.5rem 0.85rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-subtle)',
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
+              <Send size={14} /> Write
+            </span>
+            <input
+              placeholder="Value (e.g. 50, 21.5, on)"
+              value={writeValue}
+              onChange={e => { setWriteValue(e.target.value); setSendError(null); }}
+              onKeyDown={e => { if (e.key === 'Enter' && writeValue.trim() && !busy) handleWrite(formatDpt(selectedInfo?.main, selectedInfo?.sub)); }}
+              style={{
+                width: 200, fontSize: '0.8rem', padding: '0.3rem 0.5rem',
+                border: '1px solid var(--border-color)', borderRadius: 6, background: 'var(--bg-main)', color: 'var(--text-main)',
+              }}
+            />
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>
+              DPT {formatDpt(selectedInfo?.main, selectedInfo?.sub) || '—'}
+            </span>
+            <button
+              onClick={() => handleWrite(formatDpt(selectedInfo?.main, selectedInfo?.sub))}
+              disabled={busy || writeValue.trim() === ''}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.3rem',
+                padding: '0.3rem 0.75rem', fontSize: '0.76rem', fontWeight: 600,
+                background: 'var(--accent-primary)', color: 'white', border: 'none', borderRadius: 6,
+                cursor: busy || writeValue.trim() === '' ? 'not-allowed' : 'pointer',
+                opacity: busy || writeValue.trim() === '' ? 0.5 : 1,
+              }}
+            >
+              <Send size={13} /> Send
+            </button>
+            {sendError && <span style={{ fontSize: '0.72rem', color: 'var(--error)' }}>{sendError}</span>}
+          </div>
+        )}
 
         {/* Table */}
         <div style={{ flex: 1, overflowY: 'auto' }}>

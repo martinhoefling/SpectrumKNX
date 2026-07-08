@@ -102,3 +102,93 @@ async def test_knx_startup_db_failure(mock_store_init, mock_check_conn):
 
     mock_check_conn.assert_called_once()
     mock_store_init.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("payload", "dpt", "expected_type", "expected_value"),
+    [
+        (True, "1.001", "DPTBinary", True),
+        (50, "5.001", "DPTArray", (0x80,)),
+        (21.5, "9.001", "DPTArray", (0x0C, 0x33)),
+        (1, None, "DPTBinary", 1),
+        ([0x0C, 0x22], None, "DPTArray", (0x0C, 0x22)),
+    ],
+)
+def test_encode_payload(payload, dpt, expected_type, expected_value):
+    from knx_daemon import _encode_payload
+
+    encoded = _encode_payload(payload, dpt)
+    assert type(encoded).__name__ == expected_type
+    assert encoded.value == expected_value
+
+
+def test_encode_payload_unknown_dpt_raises():
+    from knx_daemon import _encode_payload
+
+    with pytest.raises(ValueError, match="Unknown DPT"):
+        _encode_payload(1, "999.999")
+
+
+@pytest.mark.parametrize(
+    ("allow_write", "read_only", "connected", "expected"),
+    [
+        (True, False, True, True),
+        (False, False, True, False),
+        (True, True, True, False),
+        (True, False, False, False),
+    ],
+)
+def test_write_enabled(allow_write, read_only, connected, expected):
+    import knx_daemon
+
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", allow_write),
+        patch.object(knx_daemon, "READ_ONLY", read_only),
+        patch.object(knx_daemon, "is_connected", return_value=connected),
+    ):
+        assert knx_daemon.write_enabled() is expected
+
+
+@pytest.mark.asyncio
+async def test_send_group_value_queues_write_telegram():
+    from xknx.telegram.apci import GroupValueWrite
+
+    import knx_daemon
+
+    fake = MagicMock()
+    fake.current_address = IndividualAddress("1.1.1")
+    fake.telegrams.put = AsyncMock()
+    with patch.object(knx_daemon, "xknx_instance", fake):
+        await knx_daemon.send_group_value("1/2/3", True, "1.001")
+
+    fake.telegrams.put.assert_awaited_once()
+    telegram = fake.telegrams.put.await_args.args[0]
+    assert str(telegram.destination_address) == "1/2/3"
+    assert isinstance(telegram.payload, GroupValueWrite)
+
+
+@pytest.mark.asyncio
+async def test_read_group_value_queues_read_telegram():
+    from xknx.telegram.apci import GroupValueRead
+
+    import knx_daemon
+
+    fake = MagicMock()
+    fake.current_address = IndividualAddress("1.1.1")
+    fake.telegrams.put = AsyncMock()
+    with patch.object(knx_daemon, "xknx_instance", fake):
+        await knx_daemon.read_group_value("1/2/3")
+
+    fake.telegrams.put.assert_awaited_once()
+    telegram = fake.telegrams.put.await_args.args[0]
+    assert str(telegram.destination_address) == "1/2/3"
+    assert isinstance(telegram.payload, GroupValueRead)
+
+
+@pytest.mark.asyncio
+async def test_send_group_value_without_connection_raises():
+    import knx_daemon
+
+    with patch.object(knx_daemon, "xknx_instance", None):
+        with pytest.raises(RuntimeError, match="Not connected"):
+            await knx_daemon.send_group_value("1/2/3", True, "1.001")
