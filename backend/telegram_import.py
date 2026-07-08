@@ -13,6 +13,7 @@ import asyncio
 import heapq
 import logging
 import os
+import struct
 import uuid
 import zipfile
 from collections.abc import Callable, Iterator
@@ -148,9 +149,21 @@ class ImportSource:
 
 def _list_sources(path: str, filename: str) -> list[ImportSource]:
     if zipfile.is_zipfile(path):
-        archive = zipfile.ZipFile(path)
+        try:
+            archive = zipfile.ZipFile(path)
+            infos = archive.infolist()
+        except (zipfile.BadZipFile, struct.error, EOFError, OSError) as e:
+            # A struct/EOF error here usually means the archive is corrupt or was
+            # written only partially — commonly because the upload was truncated
+            # when the container's temp storage ran out of space. See the import
+            # docs for how to enlarge it (TMPDIR).
+            raise ValueError(
+                f"Could not read the zip archive ({e}). It may be corrupt or the upload "
+                f"was truncated — ensure the container has enough temp storage for large "
+                f"uploads (see the import docs)."
+            ) from e
         sources = []
-        for info in archive.infolist():
+        for info in infos:
             base = os.path.basename(info.filename)
             if info.is_dir() or not base.lower().endswith(".xml") or base.startswith("."):
                 continue

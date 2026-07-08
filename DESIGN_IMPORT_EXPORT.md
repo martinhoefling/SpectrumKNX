@@ -78,6 +78,26 @@ upload (.xml | .zip)
 * Zip entries are processed via `zipfile` streams — a multi-GB upload is decompressed
   incrementally, bounded by one day-group of telegrams in memory (≈100 k telegrams).
 
+### Temporary storage for uploads
+
+The **compressed** upload is written to disk twice before parsing begins: once by
+Starlette (spooled `UploadFile`, spills past 1 MB) and once by our own
+`NamedTemporaryFile` (`api.py`). Both land in the system temp dir — `$TMPDIR` if
+set, otherwise `/tmp`. The *uncompressed* size never hits disk (entries are
+streamed), so only the `.zip` matters: the temp filesystem needs roughly **2× the
+compressed archive size** free.
+
+In Docker/HA, `/tmp` is the container's writable layer (or a size-limited tmpfs if
+configured). If it runs out of space, the upload is truncated and parsing fails
+with a corrupt-archive error (e.g. `unpack requires a buffer of N bytes`). To give
+large imports more room, mount a bigger volume and point `TMPDIR` at it, e.g.:
+
+```yaml
+# docker-compose.yml (backend service)
+environment:
+  - TMPDIR=/project/tmp   # on the persisted knx_project_data volume
+```
+
 ### De-duplication (two layers)
 
 1. **Cross-media window de-dup** (within the import): key `(src, dst, apdu-bytes)` inside a

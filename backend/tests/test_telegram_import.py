@@ -10,11 +10,11 @@ import tempfile
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from knx_telegram_store.formats import RawTelegramRecord
 
 import knx_daemon
 import telegram_import as ti
 from knx_telegram_store import StoredTelegram, TelegramQueryResult
-from knx_telegram_store.formats import RawTelegramRecord
 
 
 @pytest.fixture(autouse=True)
@@ -241,3 +241,36 @@ async def test_start_import_rejects_concurrent_job():
         assert ti.current_job.cancel_requested is True
     finally:
         ti.current_job = None
+
+
+def test_list_sources_corrupt_zip_raises_actionable_error(monkeypatch, tmp_path):
+    """A zip that passes is_zipfile but fails to parse (e.g. truncated central
+    directory) surfaces a clear message instead of a raw struct.error."""
+    import struct
+    import zipfile
+
+    fake = tmp_path / "corrupt.zip"
+    fake.write_bytes(b"PK\x03\x04corrupt")
+
+    monkeypatch.setattr(ti.zipfile, "is_zipfile", lambda _p: True)
+
+    def _boom(*_a, **_k):
+        raise struct.error("unpack requires a buffer of 4 bytes")
+
+    monkeypatch.setattr(ti.zipfile, "ZipFile", _boom)
+
+    with pytest.raises(ValueError, match="Could not read the zip archive"):
+        ti._list_sources(str(fake), "corrupt.zip")
+
+    # sanity: real BadZipFile is also wrapped
+    monkeypatch.setattr(ti.zipfile, "ZipFile", lambda *_a, **_k: (_ for _ in ()).throw(zipfile.BadZipFile("bad")))
+    with pytest.raises(ValueError, match="Could not read the zip archive"):
+        ti._list_sources(str(fake), "corrupt.zip")
+
+
+def test_list_sources_single_xml_passthrough(tmp_path):
+    xml = tmp_path / "log.xml"
+    xml.write_bytes(b"<CommunicationLog/>")
+    sources = ti._list_sources(str(xml), "log.xml")
+    assert len(sources) == 1
+    assert sources[0].name == "log.xml"
