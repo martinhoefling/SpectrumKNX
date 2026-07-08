@@ -461,9 +461,9 @@ function App() {
       <main style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, borderRadius: '12px' }} className="glass">
 
         {/* === GLOBAL HEADER === */}
-        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
           {/* Left: App Section Dropdown */}
-          <div style={{ display: 'flex', alignItems: 'center', zIndex: 50 }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, zIndex: 50 }}>
             <NavDropdown
               activeTab={activeTab}
               isSettingsOpen={isSettingsOpen}
@@ -479,14 +479,16 @@ function App() {
             />
           </div>
 
-          {/* Center: Brand */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-            <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="Spectrum KNX" style={{ width: 22, height: 22 }} />
-            <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Spectrum KNX</h1>
+          {/* Center: Brand — flexible middle column, clips gracefully instead of overlapping the actions */}
+          <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', padding: '0 0.75rem', pointerEvents: 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexShrink: 0 }}>
+              <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="Spectrum KNX" style={{ width: 22, height: 22 }} />
+              <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>Spectrum KNX</h1>
+            </div>
           </div>
 
           {/* Right: Actions */}
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexShrink: 0 }}>
             {activeTab === 'live' && !isSettingsOpen && (
               <>
                 {/* Embedded Stats */}
