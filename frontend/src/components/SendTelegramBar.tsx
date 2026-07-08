@@ -3,6 +3,7 @@ import { Send, Radio, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 import { coerceValue, formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import { GaCombobox } from './GaCombobox';
 
 interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
@@ -34,11 +35,11 @@ export function SendTelegramBar({ targets, onClose }: Props) {
   const dptMain = known?.main ?? undefined;
   const addressValid = GA_RE.test(address.trim());
 
-  const onAddressChange = (next: string) => {
+  const onAddressChange = (next: string, option?: FilterOption) => {
     setAddress(next);
     setFeedback(null);
-    const match = byAddress.get(next.trim());
-    // Prefill the DPT from the project; leave a manual override untouched otherwise.
+    // Prefill the DPT from the project when a known GA is picked/typed.
+    const match = option ?? byAddress.get(next.trim());
     if (match && match.main != null) setDpt(formatDpt(match.main, match.sub));
   };
 
@@ -73,19 +74,13 @@ export function SendTelegramBar({ targets, onClose }: Props) {
           <Send size={15} /> Send to bus
         </span>
 
-        <input
-          className="glass-input"
-          list="knx-send-targets"
-          placeholder="Group address (e.g. 1/2/3)"
+        <GaCombobox
           value={address}
-          onChange={e => onAddressChange(e.target.value)}
-          style={{ width: 200, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem' }}
+          onChange={onAddressChange}
+          options={targets}
+          placeholder="Group address (e.g. 1/2/3)"
+          width={200}
         />
-        <datalist id="knx-send-targets">
-          {targets.map(t => (
-            <option key={t.address} value={t.address}>{t.name}</option>
-          ))}
-        </datalist>
 
         <input
           className="glass-input"
