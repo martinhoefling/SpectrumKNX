@@ -807,6 +807,8 @@ function App() {
                     counts={filterCounts}
                     onQuickLastSeen={handleQuickLastSeen}
                     mode="live"
+                    projectLoaded={projectStatus?.project_loaded}
+                    onUploadProject={() => setIsSettingsOpen(true)}
                   />
                 </div>
               </div>
@@ -870,6 +872,7 @@ function App() {
             activeFilters={activeFilters}
             onFiltersChange={handleFiltersChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            projectLoaded={projectStatus?.project_loaded}
             selectedVisualizationTargets={selectedVisualizationTargets}
             onVisualizationTargetsChange={setSelectedVisualizationTargets}
           />

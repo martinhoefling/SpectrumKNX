@@ -10,15 +10,12 @@ fi
 
 # ── Persistent data directory ─────────────────────────────────────────────────
 # Home Assistant persists /data across container restarts and updates.
-# We store PostgreSQL data and KNX project files there.
+# We store PostgreSQL data there. The KNX project directory (/project) is set up
+# by the spectrum_knx service so it also exists in SQLite/companion modes.
 DATADIR="/data/postgres"
 mkdir -p "$DATADIR"
 chown -R postgres:postgres "$DATADIR"
 chmod 700 "$DATADIR"
-
-# Symlink /project → /data/project so the backend can use its default path
-mkdir -p /data/project
-ln -sfn /data/project /project
 
 if [ ! -s "$DATADIR/PG_VERSION" ]; then
     bashio::log.info "Initializing database..."

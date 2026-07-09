@@ -27,13 +27,14 @@ interface HistorySearchProps {
   activeFilters: ActiveFilters;
   onFiltersChange: (f: ActiveFilters) => void;
   onOpenSettings: () => void;
+  projectLoaded?: boolean;
   selectedVisualizationTargets: string[];
   onVisualizationTargetsChange: (targets: string[] | ((prev: string[]) => string[])) => void;
 }
 
 export const HistorySearch: React.FC<HistorySearchProps> = ({
   visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings,
-  selectedVisualizationTargets, onVisualizationTargetsChange
+  projectLoaded, selectedVisualizationTargets, onVisualizationTargetsChange
 }) => {
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
@@ -265,6 +266,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               activeFilters={activeFilters}
               onFiltersChange={onFiltersChange}
               mode="history"
+              projectLoaded={projectLoaded}
+              onUploadProject={onOpenSettings}
             />
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, ChevronDown, ChevronRight, SlidersHorizontal, X, Clock } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, SlidersHorizontal, X, Clock, FolderInput, AlertTriangle } from 'lucide-react';
 import {
   type FilterOptions,
   type ActiveFilters,
@@ -19,6 +19,15 @@ interface FilterPanelProps {
   counts?: FilterCounts;
   mode: 'live' | 'history';
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
+  /**
+   * Whether an ETS project is loaded. Source/target/DPT options are derived from
+   * the project, so when it's absent (e.g. Home Assistant companion mode without
+   * an uploaded project) filtering by them is unavailable. `undefined` means the
+   * status isn't known yet, in which case no notice is shown.
+   */
+  projectLoaded?: boolean;
+  /** Opens the project upload flow (Settings). Enables the notice's CTA button. */
+  onUploadProject?: () => void;
 }
 
 interface SectionProps {
@@ -147,8 +156,14 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   counts,
   mode,
   onQuickLastSeen,
+  projectLoaded,
+  onUploadProject,
 }) => {
   const [search, setSearch] = useState('');
+
+  // Source/target/DPT options come from the ETS project. Without one, those
+  // filters are empty and searching them turns up nothing — surface why.
+  const showNoProjectNotice = projectLoaded === false;
 
   const q = search.toLowerCase();
 
@@ -339,6 +354,42 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
 
       {/* Scrollable options */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
+
+        {/* No-project notice — source/target/DPT filters need an ETS project */}
+        {showNoProjectNotice && (
+          <div style={{
+            margin: '0.75rem', padding: '0.85rem',
+            border: '1px solid var(--border-color)', borderRadius: '8px',
+            background: 'var(--bg-subtle)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+              <AlertTriangle size={14} style={{ color: 'var(--warning, #f59e0b)', flexShrink: 0 }} />
+              <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                No ETS project loaded
+              </span>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: onUploadProject ? '0.7rem' : 0 }}>
+              Filtering by source, target and DPT needs the group and device names
+              from your ETS project. Upload a <code>.knxproj</code> file to enable it.
+            </div>
+            {onUploadProject && (
+              <button
+                onClick={onUploadProject}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.4rem',
+                  width: '100%', justifyContent: 'center',
+                  padding: '0.5rem 0.65rem', borderRadius: '6px', cursor: 'pointer',
+                  border: '1px solid var(--accent-primary)',
+                  background: 'rgba(99,102,241,0.12)', color: 'var(--accent-primary)',
+                  fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+                }}
+              >
+                <FolderInput size={14} />
+                Upload ETS project
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Source */}
         {filteredSources.length > 0 && (

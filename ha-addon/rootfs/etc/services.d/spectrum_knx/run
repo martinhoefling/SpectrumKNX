@@ -51,6 +51,14 @@ if [ -z "$LOG_LEVEL" ]; then
     export LOG_LEVEL="INFO"
 fi
 
+# Persist uploaded ETS project files across restarts/updates. Home Assistant
+# keeps /data across the container lifecycle, so point the backend's default
+# project directory (/project) at it. This runs in every mode — including
+# companion mode, where it's the only writable place to store the project so
+# group/individual address names (and thus filtering) become available.
+mkdir -p /data/project
+ln -sfn /data/project /project
+
 # Ingress support path (provided by Home Assistant)
 if bashio::config.has_value 'ingress_port'; then
     # We serve directly on the port and Home Assistant handles the Ingress proxying
