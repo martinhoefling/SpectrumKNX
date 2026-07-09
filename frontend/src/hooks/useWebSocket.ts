@@ -6,6 +6,7 @@ export interface Telegram {
   source_name?: string | null;
   target_address: string;
   target_name?: string | null;
+  direction?: string | null;
   telegram_type: string;
   simplified_type?: string | null;
   dpt: string | null;

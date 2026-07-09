@@ -8,6 +8,7 @@ from xknx import XKNX
 from xknx.dpt import DPTArray, DPTBase, DPTBinary
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
+from xknx.telegram import TelegramDirection
 from xknx.telegram.address import GroupAddress, IndividualAddress
 from xknx.telegram.apci import GroupValueRead, GroupValueResponse, GroupValueWrite
 
@@ -108,7 +109,8 @@ async def _reconnect_knx():
         }
         xknx_instance.group_address_dpt.set(dpt_dict)
 
-    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb)
+    # match_for_outgoing=True so telegrams we send to the bus are stored/broadcast too (#161).
+    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb, match_for_outgoing=True)
     try:
         await xknx_instance.start()
         logger.info("KNX Daemon reconnected to bus successfully.")
@@ -164,6 +166,7 @@ async def process_telegram_async(telegram: XknxTelegram):
         source_addr = str(telegram.source_address)
         target_addr = str(telegram.destination_address) if telegram.destination_address else "0/0/0"
         telegram_type_name = type(telegram.payload).__name__
+        direction = "Outgoing" if telegram.direction == TelegramDirection.OUTGOING else "Incoming"
 
         value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
             parse_telegram_payload(telegram, xknx_instance)
@@ -180,7 +183,7 @@ async def process_telegram_async(telegram: XknxTelegram):
                 source=source_addr,
                 destination=target_addr,
                 telegramtype=telegram_type_name,
-                direction="Incoming",  # Default for daemon received telegrams
+                direction=direction,
                 dpt_main=dpt_main,
                 dpt_sub=dpt_sub,
                 payload=value_json,
@@ -199,6 +202,7 @@ async def process_telegram_async(telegram: XknxTelegram):
             "source_name": source_name,
             "target_address": target_addr,
             "target_name": target_name,
+            "direction": direction,
             "telegram_type": telegram_type_name,
             "simplified_type": get_simplified_type(telegram_type_name),
             "dpt": dpt_str,
@@ -476,7 +480,8 @@ async def knx_startup():
         }
         xknx_instance.group_address_dpt.set(dpt_dict)
 
-    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb)
+    # match_for_outgoing=True so telegrams we send to the bus are stored/broadcast too (#161).
+    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb, match_for_outgoing=True)
     try:
         await xknx_instance.start()
         logger.info("KNX Daemon connected to bus and listening.")

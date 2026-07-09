@@ -317,7 +317,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <X className="cancel-icon" size={12} />
               </button>
             </div>
-            <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
+            <div style={{ fontSize: '0.65rem', color: t.direction === 'Outgoing' ? '#f59e0b' : '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>{t.direction === 'Outgoing' ? 'Outgoing' : 'Incoming'}</div>
           </div>
         );
 

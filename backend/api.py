@@ -59,6 +59,7 @@ def _build_telegram_response(telegrams: list) -> list:
             "timestamp": t.timestamp,
             "source_address": t.source,
             "target_address": t.destination,
+            "direction": t.direction,
             "telegram_type": t.telegramtype,
             "dpt_main": t.dpt_main,
             "dpt_sub": t.dpt_sub,

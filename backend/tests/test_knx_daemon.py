@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from xknx.dpt import DPTBinary
 from xknx.telegram import Telegram as XknxTelegram
+from xknx.telegram import TelegramDirection
 from xknx.telegram.address import GroupAddress, IndividualAddress
 
 from knx_daemon import process_telegram_async, telegram_received_cb
@@ -19,9 +20,12 @@ async def test_process_telegram_async(mock_parse, mock_broadcast, mock_store):
     # value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex
     mock_parse.return_value = (1.0, True, b"\x01", "1.001", 1, 1, "on/off", "On", "01")
 
-    # Create a dummy xknx telegram
+    # Create a dummy xknx telegram received from the bus
     telegram = XknxTelegram(
-        source_address=IndividualAddress("1.1.1"), destination_address=GroupAddress("1/1/1"), payload=DPTBinary(1)
+        source_address=IndividualAddress("1.1.1"),
+        destination_address=GroupAddress("1/1/1"),
+        payload=DPTBinary(1),
+        direction=TelegramDirection.INCOMING,
     )
 
     # Run the function
@@ -43,6 +47,35 @@ async def test_process_telegram_async(mock_parse, mock_broadcast, mock_store):
     assert broadcast_data["target_address"] == "1/1/1"
     assert broadcast_data["value_numeric"] == 1.0
     assert broadcast_data["value_formatted"] == "On"
+    # Incoming is the default direction for telegrams received from the bus.
+    assert stored_telegram.direction == "Incoming"
+    assert broadcast_data["direction"] == "Incoming"
+
+
+@pytest.mark.asyncio
+@patch("knx_daemon.store.store", new_callable=AsyncMock)
+@patch("knx_daemon.manager.broadcast", new_callable=AsyncMock)
+@patch("knx_daemon.parse_telegram_payload")
+async def test_process_telegram_async_outgoing_is_stored(mock_parse, mock_broadcast, mock_store):
+    """Telegrams we send to the bus (#161) are stored and broadcast as Outgoing."""
+    mock_parse.return_value = (1.0, True, b"\x01", "1.001", 1, 1, "on/off", "On", "01")
+
+    telegram = XknxTelegram(
+        source_address=IndividualAddress("1.1.1"),
+        destination_address=GroupAddress("1/1/1"),
+        payload=DPTBinary(1),
+        direction=TelegramDirection.OUTGOING,
+    )
+
+    await process_telegram_async(telegram)
+
+    assert mock_store.called
+    stored_telegram = mock_store.call_args[0][0]
+    assert stored_telegram.direction == "Outgoing"
+
+    assert mock_broadcast.called
+    broadcast_data = mock_broadcast.call_args[0][0]
+    assert broadcast_data["direction"] == "Outgoing"
 
 
 @patch("knx_daemon.asyncio.get_running_loop")
@@ -85,6 +118,10 @@ async def test_knx_startup_success(
     mock_store_init.assert_called_once()
     mock_store_start.assert_called_once()
     mock_xknx_instance.start.assert_called_once()
+    # The received callback must also fire for outgoing telegrams so sent
+    # telegrams are stored/broadcast (#161).
+    _, kwargs = mock_xknx_instance.telegram_queue.register_telegram_received_cb.call_args
+    assert kwargs.get("match_for_outgoing") is True
 
 
 @pytest.mark.asyncio
