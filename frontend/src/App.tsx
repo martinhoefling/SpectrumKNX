@@ -152,7 +152,10 @@ function App() {
   const [knxkeysStatus, setKnxkeysStatus] = useState<{ upload_feature_active: boolean; knxkeys_found: boolean } | null>(null);
   const updateInfo = useUpdateCheck();
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
-  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [updateClosed, setUpdateClosed] = useState(false);
+  // Version the user has already been shown, read once at mount. Kept in state
+  // (not re-read) so persisting "seen" below doesn't retract the popup mid-view.
+  const [seenUpdateVersion] = useState(() => getCookie(DISMISSED_UPDATE_COOKIE));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [serverConfig, setServerConfig] = useState<any>(null);
 
@@ -262,14 +265,20 @@ function App() {
       .catch(err => console.error("Failed to load server config", err));
   }, []);
 
-  // Show the popup once per new release (skip versions already dismissed), plus
-  // whenever the user reopens it from Settings. Derived — no setState-in-effect.
-  const autoShowUpdate =
-    !updateDismissed &&
-    !!updateInfo?.update_available &&
-    !!updateInfo.latest &&
-    getCookie(DISMISSED_UPDATE_COOKIE) !== updateInfo.latest;
-  const showUpdate = isUpdateOpen || autoShowUpdate;
+  // A new release the user hasn't been shown yet (seenUpdateVersion is frozen
+  // at mount, so it stays true for the session once detected). Auto-shows once;
+  // updateClosed hides it after the user dismisses it, the chip can reopen it.
+  const hasNewUpdate =
+    !!updateInfo?.update_available && !!updateInfo.latest && updateInfo.latest !== seenUpdateVersion;
+  const showUpdate = isUpdateOpen || (hasNewUpdate && !updateClosed);
+
+  // Persist "seen" as soon as a new release is detected, so the popup appears
+  // only once across reloads even if the user navigates away without closing it.
+  useEffect(() => {
+    if (hasNewUpdate && updateInfo?.latest) {
+      setCookie(DISMISSED_UPDATE_COOKIE, updateInfo.latest);
+    }
+  }, [hasNewUpdate, updateInfo?.latest]);
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
   const handleTelegram = useCallback((t: Telegram) => {
@@ -963,7 +972,7 @@ function App() {
           info={updateInfo}
           onClose={() => {
             if (updateInfo.latest) setCookie(DISMISSED_UPDATE_COOKIE, updateInfo.latest);
-            setUpdateDismissed(true);
+            setUpdateClosed(true);
             setIsUpdateOpen(false);
           }}
         />
