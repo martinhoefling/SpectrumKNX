@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
@@ -18,6 +18,8 @@ import { StatisticsOverlay } from './components/StatisticsOverlay';
 import { BuildingOverlay } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
 import { SendTelegramBar } from './components/SendTelegramBar';
+import { UpdateNotification } from './components/UpdateNotification';
+import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
   DEFAULT_FILTERS,
   hasActiveFilters,
@@ -28,6 +30,10 @@ import {
 } from './types/filters';
 
 declare const __APP_VERSION__: string;
+
+// Remembers the latest version the user already dismissed, so the popup shows
+// once per new release rather than on every load.
+const DISMISSED_UPDATE_COOKIE = 'dismissed_update_version';
 
 const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [], ga_group_names: {}, pa_line_names: {} };
 
@@ -144,6 +150,9 @@ function App() {
   const [isUploadWizardOpen, setIsUploadWizardOpen] = useState(false);
   const [isKeysWizardOpen, setIsKeysWizardOpen] = useState(false);
   const [knxkeysStatus, setKnxkeysStatus] = useState<{ upload_feature_active: boolean; knxkeys_found: boolean } | null>(null);
+  const updateInfo = useUpdateCheck();
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [serverConfig, setServerConfig] = useState<any>(null);
 
@@ -252,6 +261,15 @@ function App() {
       .then(data => setServerConfig(data))
       .catch(err => console.error("Failed to load server config", err));
   }, []);
+
+  // Show the popup once per new release (skip versions already dismissed), plus
+  // whenever the user reopens it from Settings. Derived — no setState-in-effect.
+  const autoShowUpdate =
+    !updateDismissed &&
+    !!updateInfo?.update_available &&
+    !!updateInfo.latest &&
+    getCookie(DISMISSED_UPDATE_COOKIE) !== updateInfo.latest;
+  const showUpdate = isUpdateOpen || autoShowUpdate;
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
   const handleTelegram = useCallback((t: Telegram) => {
@@ -781,6 +799,29 @@ function App() {
                     {backendVersion}
                   </span>
                 </div>
+                {updateInfo?.enabled && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                    <span style={{ color: 'var(--text-dim)' }}>Updates:</span>
+                    {updateInfo.update_available ? (
+                      <button
+                        onClick={() => setIsUpdateOpen(true)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer',
+                          fontFamily: '"JetBrains Mono", monospace', fontSize: '0.8rem', fontWeight: 600,
+                          padding: '0.2rem 0.5rem', borderRadius: 4,
+                          border: '1px solid var(--accent-primary)', background: 'rgba(99,102,241,0.12)',
+                          color: 'var(--accent-primary)',
+                        }}
+                      >
+                        <Sparkles size={13} /> {updateInfo.latest} available
+                      </button>
+                    ) : (
+                      <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>
+                        {updateInfo.error ? 'Check failed' : 'Up to date'}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -913,6 +954,17 @@ function App() {
               .then(r => r.json())
               .then(data => setKnxkeysStatus(data))
               .catch(() => {});
+          }}
+        />
+      )}
+
+      {showUpdate && updateInfo && (
+        <UpdateNotification
+          info={updateInfo}
+          onClose={() => {
+            if (updateInfo.latest) setCookie(DISMISSED_UPDATE_COOKIE, updateInfo.latest);
+            setUpdateDismissed(true);
+            setIsUpdateOpen(false);
           }}
         />
       )}

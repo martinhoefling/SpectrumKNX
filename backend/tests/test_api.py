@@ -11,6 +11,15 @@ from main import app
 client = TestClient(app)
 
 
+def test_get_update_endpoint():
+    with patch("api.update_check.get_update_info", new_callable=AsyncMock) as mock_update:
+        mock_update.return_value = {"enabled": True, "update_available": True, "latest": "v1.11.0", "releases": []}
+        response = client.get("/api/update")
+    assert response.status_code == 200
+    assert response.json()["latest"] == "v1.11.0"
+    mock_update.assert_awaited_once()
+
+
 def test_aggregate_statistics_builds_drilldown_children():
     # (source PA, destination GA, count) rows, already grouped by pair.
     rows = [

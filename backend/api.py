@@ -16,6 +16,7 @@ from xknx.telegram.address import IndividualAddress
 import knx_daemon  # import global config
 import telegram_export
 import telegram_import
+import update_check
 from database import READ_ONLY, engine, store
 from knx_telegram_store import TelegramQuery
 from parsers import (
@@ -48,6 +49,16 @@ def get_backend_version() -> str:
 async def get_version():
     """Returns the backend version from ENV or git"""
     return {"version": get_backend_version()}
+
+
+@router.get("/api/update")
+async def get_update():
+    """Reports whether a newer release exists, with notes, for the update popup.
+
+    Best-effort: returns update_available=False when disabled (UPDATE_CHECK) or
+    when the GitHub check fails, so the UI degrades quietly.
+    """
+    return await update_check.get_update_info(get_backend_version())
 
 
 def _build_telegram_response(telegrams: list) -> list:
