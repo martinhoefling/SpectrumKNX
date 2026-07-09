@@ -113,7 +113,13 @@ def test_get_building_with_project():
             },
         },
         "communication_objects": {
-            "O-1": {"number": 1, "name": "Switch", "text": "On/Off", "group_address_links": ["1/2/3"]},
+            "O-1": {
+                "number": 1,
+                "name": "Switch",
+                "text": "On/Off",
+                "dpts": [{"main": 1, "sub": 1}],
+                "group_address_links": ["1/2/3"],
+            },
             # No GA links → must be omitted.
             "O-2": {"number": 2, "name": "Unused", "text": "", "group_address_links": []},
             # Linked but not in any channel → unassigned KO list.
@@ -143,6 +149,8 @@ def test_get_building_with_project():
     assert device["channels"][0]["name"] == "Channel A"
     assert device["channels"][0]["kos"][0]["number"] == 1
     assert device["channels"][0]["kos"][0]["group_addresses"][0] == {"address": "1/2/3", "name": "Light On/Off"}
+    # DPTs carry a resolved descriptive name for the building view (#160).
+    assert device["channels"][0]["kos"][0]["dpts"] == [{"main": 1, "sub": 1, "name": "1.001 - Switch"}]
     assert len(device["kos"]) == 1
     assert device["kos"][0]["number"] == 3
 

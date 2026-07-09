@@ -437,12 +437,18 @@ def _build_ko(co: dict, gas: dict) -> dict:
     group_addresses = [
         {"address": ga, "name": gas.get(ga, {}).get("name", "")} for ga in co.get("group_address_links") or []
     ]
+    # Resolve each DPT's descriptive name (e.g. "5.001 - Percent") so the building
+    # view can show it like the group monitor does, not just the raw numbers.
+    dpts = [
+        {"main": d.get("main"), "sub": d.get("sub"), "name": format_dpt_name(d.get("main"), d.get("sub"))[0]}
+        for d in co.get("dpts") or []
+    ]
     return {
         "number": co.get("number"),
         "name": co.get("name", ""),
         "text": co.get("text", ""),
         "function_text": co.get("function_text", ""),
-        "dpts": co.get("dpts") or [],
+        "dpts": dpts,
         "flags": co.get("flags") or {},
         "group_addresses": group_addresses,
     }

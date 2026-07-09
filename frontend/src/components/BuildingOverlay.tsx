@@ -17,7 +17,7 @@ interface Ko {
   name: string;
   text: string;
   function_text: string;
-  dpts: { main: number; sub: number | null }[];
+  dpts: { main: number; sub: number | null; name?: string | null }[];
   group_addresses: GaRef[];
 }
 
@@ -109,10 +109,20 @@ const spaceMatches = (s: SpaceNode, q: string): boolean =>
   s.spaces.some(sub => spaceMatches(sub, q)) ||
   s.devices.some(d => deviceMatches(d, q));
 
-const formatDpt = (dpts: { main: number; sub: number | null }[]): string | null => {
+const formatDpt = (
+  dpts: { main: number; sub: number | null; name?: string | null }[]
+): { label: string; name: string | null } | null => {
   if (!dpts || dpts.length === 0) return null;
   const d = dpts[0];
-  return d.sub != null ? `DPT ${d.main}.${String(d.sub).padStart(3, '0')}` : `DPT ${d.main}`;
+  const label = d.sub != null ? `DPT ${d.main}.${String(d.sub).padStart(3, '0')}` : `DPT ${d.main}`;
+  // Backend names read like "5.001 - Percent"; keep only the descriptive part
+  // since the numeric label is already shown alongside it.
+  let name: string | null = null;
+  if (d.name) {
+    const sep = d.name.indexOf(' - ');
+    name = sep >= 0 ? d.name.slice(sep + 3) : null;
+  }
+  return { label, name };
 };
 
 // ── Row primitives ──────────────────────────────────────────────────────────────
@@ -143,7 +153,7 @@ const KoRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
 }> = ({ ko, depth, onFilterGAs, onLastSeen }) => {
-  const dptLabel = formatDpt(ko.dpts);
+  const dpt = formatDpt(ko.dpts);
   const gaAddresses = ko.group_addresses.map(g => g.address);
   const nameText = ko.text || ko.name;
   const label = (nameText && ko.function_text && nameText !== ko.function_text)
@@ -180,10 +190,26 @@ const KoRow: React.FC<{
           ))}
         </div>
       </div>
-      {dptLabel && (
-        <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {dptLabel}
-        </span>
+      {dpt && (
+        <div
+          title={dpt.name ? `${dpt.label} – ${dpt.name}` : dpt.label}
+          style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+            flexShrink: 0, minWidth: 0, maxWidth: '45%',
+          }}
+        >
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+            {dpt.label}
+          </span>
+          {dpt.name && (
+            <span style={{
+              fontSize: '0.6rem', color: 'var(--text-dim)', opacity: 0.75,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+            }}>
+              {dpt.name}
+            </span>
+          )}
+        </div>
       )}
       {gaAddresses.length > 0 && (
         <>
