@@ -307,7 +307,7 @@ function App() {
   const handleConnectionState = useCallback((e: ConnectionStateEvent) => {
     // Flip the badge immediately, then refetch for authoritative state
     // (write_enabled depends on the connection and is recomputed server-side).
-    setServerConfig((prev: any) => prev
+    setServerConfig((prev: { status?: { connected?: boolean; write_enabled?: boolean } } | null) => prev
       ? {
           ...prev,
           status: {
