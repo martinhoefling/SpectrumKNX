@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useWebSocket, type Telegram } from './hooks/useWebSocket';
+import { useWebSocket, type Telegram, type ConnectionStateEvent } from './hooks/useWebSocket';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles } from 'lucide-react';
@@ -218,6 +218,13 @@ function App() {
     });
   }, []);
 
+  const refreshServerConfig = useCallback(() => {
+    fetch(apiUrl('/api/server/config'))
+      .then(r => r.json())
+      .then(data => setServerConfig(data))
+      .catch(err => console.error("Failed to load server config", err));
+  }, []);
+
   // Load filter options from backend on mount
   useEffect(() => {
     fetch(apiUrl('/api/filter-options'))
@@ -259,11 +266,8 @@ function App() {
       .catch(err => console.error("Failed to check knxkeys status", err));
 
     // Load server config
-    fetch(apiUrl('/api/server/config'))
-      .then(r => r.json())
-      .then(data => setServerConfig(data))
-      .catch(err => console.error("Failed to load server config", err));
-  }, []);
+    refreshServerConfig();
+  }, [refreshServerConfig]);
 
   // A new release the user hasn't been shown yet (seenUpdateVersion is frozen
   // at mount, so it stays true for the session once detected). Auto-shows once;
@@ -300,8 +304,24 @@ function App() {
     }
   }, [isPaused, loadLimit]);
 
+  const handleConnectionState = useCallback((e: ConnectionStateEvent) => {
+    // Flip the badge immediately, then refetch for authoritative state
+    // (write_enabled depends on the connection and is recomputed server-side).
+    setServerConfig((prev: any) => prev
+      ? {
+          ...prev,
+          status: {
+            ...prev.status,
+            connected: e.connected,
+            write_enabled: prev.status?.write_enabled && e.connected,
+          },
+        }
+      : prev);
+    refreshServerConfig();
+  }, [refreshServerConfig]);
+
   const wsEndpoint = wsUrl('/ws/telegrams');
-  const { isConnected } = useWebSocket(wsEndpoint, handleTelegram);
+  const { isConnected } = useWebSocket(wsEndpoint, handleTelegram, handleConnectionState);
 
   // ── Persist settings to cookies ─────────────────────────────────────────────
   useEffect(() => {

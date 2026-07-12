@@ -794,6 +794,17 @@ async def export_telegrams(
 @router.websocket("/ws/telegrams")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    if not READ_ONLY:
+        # Initial state so (re)connecting clients don't have to wait for a change
+        connected = knx_daemon.is_connected()
+        await websocket.send_json(
+            {
+                "type": "connection_state",
+                "connected": connected,
+                "state": "connected" if connected else "disconnected",
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
     try:
         while True:
             # Client sends filters over WS as JSON

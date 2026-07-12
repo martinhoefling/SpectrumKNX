@@ -21,7 +21,18 @@ export interface Telegram {
   raw_hex?: string | null;
 }
 
-export function useWebSocket(url: string, onTelegram?: (t: Telegram) => void) {
+export interface ConnectionStateEvent {
+  type: 'connection_state';
+  connected: boolean;
+  state: string;
+  timestamp: string;
+}
+
+export function useWebSocket(
+  url: string,
+  onTelegram?: (t: Telegram) => void,
+  onEvent?: (e: ConnectionStateEvent) => void,
+) {
   const [isConnected, setIsConnected] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
@@ -31,6 +42,11 @@ export function useWebSocket(url: string, onTelegram?: (t: Telegram) => void) {
   useEffect(() => {
     onTelegramRef.current = onTelegram;
   }, [onTelegram]);
+
+  const onEventRef = useRef(onEvent);
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return;
@@ -44,9 +60,13 @@ export function useWebSocket(url: string, onTelegram?: (t: Telegram) => void) {
 
     socket.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as Telegram;
+        const data = JSON.parse(event.data) as Telegram | ConnectionStateEvent;
+        if ('type' in data && data.type === 'connection_state') {
+          onEventRef.current?.(data);
+          return;
+        }
         if (onTelegramRef.current) {
-          onTelegramRef.current(data);
+          onTelegramRef.current(data as Telegram);
         }
       } catch (err) {
         console.error('Error parsing WS message:', err);

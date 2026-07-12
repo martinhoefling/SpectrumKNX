@@ -18,6 +18,17 @@ class ConnectionManager:
         """Update the server-side filters for this specific connection."""
         self.active_connections[websocket] = filters
 
+    async def broadcast_event(self, event: dict):
+        """Broadcast a non-telegram event (e.g. connection state) to all clients, bypassing filters."""
+        if "timestamp" in event and isinstance(event["timestamp"], datetime):
+            event["timestamp"] = event["timestamp"].isoformat()
+
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(event)
+            except Exception:
+                self.disconnect(connection)
+
     async def broadcast(self, telegram: dict):
         """Broadcasts telegrams to connected clients, applying server-side filters."""
         if "timestamp" in telegram and isinstance(telegram["timestamp"], datetime):
