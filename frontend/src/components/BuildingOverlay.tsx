@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock,
+  X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock, Activity,
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import { useExpanded } from '../utils/buildingExpansion';
 
 // ── Types (mirror /api/building response) ──────────────────────────────────────
 
-interface GaRef {
+export interface GaRef {
   address: string;
   name: string;
 }
 
-interface Ko {
+export interface Ko {
   number: number | null;
   name: string;
   text: string;
@@ -21,13 +21,13 @@ interface Ko {
   group_addresses: GaRef[];
 }
 
-interface Channel {
+export interface Channel {
   id: string;
   name: string;
   kos: Ko[];
 }
 
-interface DeviceNode {
+export interface DeviceNode {
   address: string;
   name: string;
   manufacturer: string;
@@ -58,6 +58,8 @@ interface BuildingOverlayProps {
   onFilterGAs: (addresses: string[]) => void;
   /** Open the last-seen overlay for one or more addresses. */
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
+  /** Open the live KO status view for a device (#153). */
+  onDeviceStatus: (device: DeviceNode) => void;
 }
 
 // ── Group-address collection helpers ─────────────────────────────────────────────
@@ -246,7 +248,8 @@ const DeviceRow: React.FC<{
   onFilterDevice: (pa: string) => void;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen }) => {
+  onDeviceStatus: (device: DeviceNode) => void;
+}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus }) => {
   const [open, toggle] = useExpanded(`dev:${device.address}`, false);
   const koCount = device.channels.reduce((s, c) => s + c.kos.length, 0) + device.kos.length;
   const hasChildren = koCount > 0;
@@ -305,6 +308,17 @@ const DeviceRow: React.FC<{
         >
           <Clock size={12} />
         </button>
+        {hasChildren && (
+          <button
+            style={iconBtnStyle}
+            title="Live status of all communication objects"
+            onClick={e => { e.stopPropagation(); onDeviceStatus(device); }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+          >
+            <Activity size={12} />
+          </button>
+        )}
       </div>
       {effectiveOpen && hasChildren && (
         <div>
@@ -384,7 +398,8 @@ const SpaceRow: React.FC<{
   onFilterDevice: (pa: string) => void;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen }) => {
+  onDeviceStatus: (device: DeviceNode) => void;
+}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus }) => {
   const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
   if (query && !spaceMatches(space, query)) return null;
   const effectiveOpen = open || !!query;
@@ -415,13 +430,13 @@ const SpaceRow: React.FC<{
           {sortSpaces(space.spaces).map((sub, i) => (
             <SpaceRow
               key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
-              onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+              onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
             />
           ))}
           {visibleDevices.map(device => (
             <DeviceRow
               key={device.address} device={device} depth={depth + 1} query={query}
-              onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+              onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
             />
           ))}
         </div>
@@ -433,7 +448,7 @@ const SpaceRow: React.FC<{
 // ── Main overlay ────────────────────────────────────────────────────────────────
 
 export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
-  onClose, onFilterDevice, onFilterGAs, onLastSeen,
+  onClose, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus,
 }) => {
   const [data, setData] = useState<BuildingData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -507,7 +522,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
           {sortSpaces(data.tree).map((space, i) => (
             <SpaceRow
               key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
-              onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+              onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
             />
           ))}
 
@@ -519,7 +534,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
               {visibleUnassigned.map(device => (
                 <DeviceRow
                   key={device.address} device={device} depth={1} query={query}
-                  onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+                  onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
                 />
               ))}
             </div>

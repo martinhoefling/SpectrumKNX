@@ -156,6 +156,21 @@ async def get_telegrams(
     }
 
 
+@router.get("/api/telegrams/last")
+async def get_last_telegrams(target_address: str | None = None):
+    """Returns the most recent telegram per group address (#153).
+
+    Unlike /api/telegrams this is an aggregation: one entry per destination GA,
+    so quiet addresses are included instead of falling off a recency-limited
+    list. Optionally filtered to a comma-separated set of group addresses.
+    """
+    telegrams = await store.get_last_unique_telegrams()
+    if target_address:
+        wanted = {t.strip() for t in target_address.split(",") if t.strip()}
+        telegrams = [t for t in telegrams if t.destination in wanted]
+    return {"telegrams": _build_telegram_response(telegrams)}
+
+
 @router.get("/api/filter-options")
 async def get_filter_options():
     """

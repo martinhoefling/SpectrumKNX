@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram, type ConnectionStateEvent } from './hooks/useWebSocket';
+import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles } from 'lucide-react';
@@ -15,7 +16,7 @@ import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import { KeysUploadWizard } from './components/KeysUploadWizard';
 import { LastSeenOverlay } from './components/LastSeenOverlay';
 import { StatisticsOverlay } from './components/StatisticsOverlay';
-import { BuildingOverlay } from './components/BuildingOverlay';
+import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
 import { SendTelegramBar } from './components/SendTelegramBar';
 import { UpdateNotification } from './components/UpdateNotification';
@@ -138,6 +139,8 @@ function App() {
   const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>('ga');
   const [isStatisticsOpen, setIsStatisticsOpen] = useState(false);
   const [isBuildingOpen, setIsBuildingOpen] = useState(false);
+  const [statusDevice, setStatusDevice] = useState<DeviceNode | null>(null);
+  const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(false);
   const [isSendOpen, setIsSendOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
@@ -286,6 +289,9 @@ function App() {
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
   const handleTelegram = useCallback((t: Telegram) => {
+    // Track the newest telegram even while paused — the device status view (#153)
+    // stays live independently of the table.
+    setLatestTelegram(t);
     const now = Date.now();
     arrivalTimesRef.current.push(now);
     const oneHourAgo = now - 3_600_000;
@@ -604,7 +610,7 @@ function App() {
                 </button>
                 <button
                   className="icon-button"
-                  onClick={() => { setIsBuildingOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsDatabaseOpen(false); }}
+                  onClick={() => { setIsBuildingOpen(v => !v); setStatusDevice(null); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsDatabaseOpen(false); }}
                   title="Building structure"
                   style={{ color: isBuildingOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
                 >
@@ -908,12 +914,19 @@ function App() {
                     filterOptions={filterOptions}
                     onClose={() => setIsStatisticsOpen(false)}
                   />
+                ) : isBuildingOpen && statusDevice ? (
+                  <DeviceStatusOverlay
+                    device={statusDevice}
+                    latestTelegram={latestTelegram}
+                    onClose={() => setStatusDevice(null)}
+                  />
                 ) : isBuildingOpen ? (
                   <BuildingOverlay
                     onClose={() => setIsBuildingOpen(false)}
                     onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
                     onFilterGAs={handleFilterGAs}
                     onLastSeen={handleQuickLastSeen}
+                    onDeviceStatus={setStatusDevice}
                   />
                 ) : isDatabaseOpen ? (
                   <DatabaseOverlay onClose={() => setIsDatabaseOpen(false)} />

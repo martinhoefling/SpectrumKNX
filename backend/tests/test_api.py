@@ -243,6 +243,47 @@ def test_get_telegrams(mock_query):
     assert data["telegrams"][0]["raw_data"] == "01"
 
 
+def _stored_telegram(destination: str, value: float) -> StoredTelegram:
+    return StoredTelegram(
+        timestamp=datetime(2023, 1, 1),
+        source="1.1.1",
+        destination=destination,
+        telegramtype="GroupValueWrite",
+        direction="Incoming",
+        dpt_main=5,
+        dpt_sub=1,
+        payload=None,
+        value=value,
+        raw_data="7f",
+        source_name="Test Source",
+        destination_name="Test GA",
+    )
+
+
+@patch("database.store.get_last_unique_telegrams", new_callable=AsyncMock)
+def test_get_last_telegrams(mock_last):
+    mock_last.return_value = [_stored_telegram("1/2/3", 50.0), _stored_telegram("4/5/6", 25.0)]
+
+    response = client.get("/api/telegrams/last")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["telegrams"]) == 2
+    assert data["telegrams"][0]["target_address"] == "1/2/3"
+    # Serialized like /api/telegrams (DPT names, formatted values, ...)
+    assert data["telegrams"][0]["value_formatted"] is not None
+    assert data["telegrams"][0]["dpt_name"] is not None
+
+
+@patch("database.store.get_last_unique_telegrams", new_callable=AsyncMock)
+def test_get_last_telegrams_filtered(mock_last):
+    mock_last.return_value = [_stored_telegram("1/2/3", 50.0), _stored_telegram("4/5/6", 25.0)]
+
+    response = client.get("/api/telegrams/last?target_address=4/5/6,7/8/9")
+    assert response.status_code == 200
+    data = response.json()
+    assert [t["target_address"] for t in data["telegrams"]] == ["4/5/6"]
+
+
 @patch("database.store.query", new_callable=AsyncMock)
 def test_get_telegrams_string_value_formatted(mock_query):
     """Strings stored as plain payload (new format) should display without JSON wrapping."""

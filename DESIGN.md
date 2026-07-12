@@ -95,6 +95,14 @@ User preferences are persisted locally using cookies:
 - Selected Bus Rate unit (s/m/h)
 - Column visibility toggles (e.g., hiding Raw Data or DPT columns)
 
+### 2.8 Building Structure & Device Status
+Device-centric browsing and diagnostics derived from the ETS project (`/api/building`).
+- **Building Tree:** Mirrors the ETS building view — nested spaces → devices → channels → communication objects (KOs), each KO listing its linked group addresses, DPT names and flags. Rows offer quick actions: filter by device (source), filter connected GAs (targets), and open the last-seen view.
+- **Device Status View (Live KOs):** A per-device panel showing **all** communication objects with the current value of each linked group address — regardless of which device wrote it (KNX-Lens style diagnostics, #153).
+  - Initial values come from `GET /api/telegrams/last`, which returns the most recent telegram **per group address** (`store.get_last_unique_telegrams()`), so quiet addresses are included instead of falling off a recency-limited list. An optional `target_address` param (comma-separated) narrows the result.
+  - Values then update live from the existing telegram websocket feed — no polling.
+  - Each row shows KO number, object text/function, DPT, group address, formatted value with unit, age of the value, and the source device that last wrote it.
+
 ---
 
 ## 3. Implementation Plan (Development State)
