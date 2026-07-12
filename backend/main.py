@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
+import cyclic_send  # noqa: E402
 from api import get_backend_version  # noqa: E402
 from api import router as api_router  # noqa: E402
 from database import READ_ONLY, engine  # noqa: E402
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
     if READ_ONLY:
         await companion_shutdown()
     else:
+        await cyclic_send.shutdown()
         await knx_shutdown()
     await engine.dispose()
 

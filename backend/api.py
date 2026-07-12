@@ -8,11 +8,12 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from knx_telegram_store.formats import COMMUNICATION_LOG_FOOTER, COMMUNICATION_LOG_HEADER, format_telegram_element
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from xknx.exceptions import ConversionError, CouldNotParseAddress
-from xknx.telegram.address import IndividualAddress
+from xknx.telegram.address import GroupAddress, IndividualAddress
 
+import cyclic_send
 import knx_daemon  # import global config
 import telegram_export
 import telegram_import
@@ -387,6 +388,58 @@ async def knx_read(request: KnxReadRequest):
     except (CouldNotParseAddress, ValueError) as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return {"status": "sent"}
+
+
+class KnxScheduledSendRequest(BaseModel):
+    address: str
+    payload: Any
+    dpt: str | None = None
+    response: bool = False
+    # One-shot delay before the (first) send.
+    delay_seconds: float = Field(0, ge=0, le=86400)
+    # Repeat interval; 1s floor keeps a runaway job from flooding the bus.
+    interval_seconds: float | None = Field(None, ge=1.0, le=86400)
+
+
+@router.post("/api/knx/send/scheduled")
+async def knx_send_scheduled(request: KnxScheduledSendRequest):
+    """Start a delayed and/or cyclic send job (#167). One job at a time."""
+    _require_bus_write()
+    if request.delay_seconds == 0 and request.interval_seconds is None:
+        raise HTTPException(status_code=400, detail="Set a delay or interval; use /api/knx/send for immediate sends")
+    # Validate address and payload up front so the background job can't fail on bad input
+    try:
+        GroupAddress(request.address)
+        knx_daemon._encode_payload(request.payload, request.dpt)
+    except (ConversionError, CouldNotParseAddress, ValueError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    try:
+        job = cyclic_send.start_send(
+            request.address,
+            request.payload,
+            request.dpt,
+            request.response,
+            request.delay_seconds,
+            request.interval_seconds,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return job.to_dict()
+
+
+@router.get("/api/knx/send/scheduled/status")
+async def get_scheduled_send_status():
+    """Returns the state of the current/last scheduled send job."""
+    job = cyclic_send.current_job
+    return job.to_dict() if job else {"state": "idle"}
+
+
+@router.post("/api/knx/send/scheduled/cancel")
+async def cancel_scheduled_send():
+    """Cancels the active scheduled send job."""
+    if not cyclic_send.cancel_send():
+        raise HTTPException(status_code=404, detail="No scheduled send is active")
+    return {"status": "ok"}
 
 
 @router.post("/api/database/purge")

@@ -18,28 +18,69 @@ export function formatDpt(main?: number | null, sub?: number | null): string {
   return sub == null ? String(main) : `${main}.${String(sub).padStart(3, '0')}`;
 }
 
-async function post(endpoint: string, body: unknown): Promise<void> {
+async function post<T = unknown>(endpoint: string, body?: unknown): Promise<T> {
   const res = await fetch(apiUrl(endpoint), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
     try {
       const data = await res.json();
-      if (data?.detail) detail = data.detail;
+      if (typeof data?.detail === 'string') detail = data.detail;
     } catch {
       // non-JSON error body — keep the generic message
     }
     throw new Error(detail);
   }
+  return res.json() as Promise<T>;
 }
 
-export function sendTelegram(address: string, payload: unknown, dpt?: string, response = false): Promise<void> {
+export function sendTelegram(address: string, payload: unknown, dpt?: string, response = false): Promise<unknown> {
   return post('/api/knx/send', { address, payload, dpt: dpt || null, response });
 }
 
-export function readTelegram(address: string): Promise<void> {
+export function readTelegram(address: string): Promise<unknown> {
   return post('/api/knx/read', { address });
+}
+
+/** Status of the (single) delayed/cyclic send job, as returned by the backend. */
+export interface ScheduledSendStatus {
+  state: 'idle' | 'waiting' | 'running' | 'done' | 'cancelled' | 'failed';
+  id?: string;
+  address?: string;
+  delay_seconds?: number;
+  interval_seconds?: number | null;
+  sends_done?: number;
+  sends_skipped?: number;
+  next_send_at?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+}
+
+export function startScheduledSend(
+  address: string,
+  payload: unknown,
+  dpt: string | undefined,
+  opts: { delaySeconds?: number; intervalSeconds?: number },
+): Promise<ScheduledSendStatus> {
+  return post<ScheduledSendStatus>('/api/knx/send/scheduled', {
+    address,
+    payload,
+    dpt: dpt || null,
+    response: false,
+    delay_seconds: opts.delaySeconds ?? 0,
+    interval_seconds: opts.intervalSeconds ?? null,
+  });
+}
+
+export async function getScheduledSendStatus(): Promise<ScheduledSendStatus> {
+  const res = await fetch(apiUrl('/api/knx/send/scheduled/status'));
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  return res.json() as Promise<ScheduledSendStatus>;
+}
+
+export function cancelScheduledSend(): Promise<unknown> {
+  return post('/api/knx/send/scheduled/cancel');
 }

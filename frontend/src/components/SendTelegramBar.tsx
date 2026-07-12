@@ -1,8 +1,17 @@
-import { useMemo, useState } from 'react';
-import { Send, Radio, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Send, Radio, X, AlertTriangle, CheckCircle2, Timer } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
-import { coerceValue, formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import {
+  coerceValue,
+  formatDpt,
+  readTelegram,
+  sendTelegram,
+  startScheduledSend,
+  getScheduledSendStatus,
+  cancelScheduledSend,
+  type ScheduledSendStatus,
+} from '../utils/knxSend';
 import { GaCombobox } from './GaCombobox';
 
 interface Props {
@@ -13,17 +22,25 @@ interface Props {
 
 const GA_RE = /^\d{1,2}\/\d{1,2}\/\d{1,3}$|^\d{1,2}\/\d{1,4}$|^\d{1,5}$/;
 
+const POLL_INTERVAL_MS = 1000;
+
 /**
  * Group-monitor send bar: write a value to a group address or trigger a
- * GroupValueRead. Shown above the telegram table in live mode only, and only
- * when the backend reports the bus is writable.
+ * GroupValueRead. Optionally delays the send or repeats it cyclically (#167).
+ * Shown above the telegram table in live mode only, and only when the backend
+ * reports the bus is writable.
  */
 export function SendTelegramBar({ targets, onClose }: Props) {
   const [address, setAddress] = useState('');
   const [dpt, setDpt] = useState('');
   const [value, setValue] = useState('');
+  const [delay, setDelay] = useState('');
+  const [every, setEvery] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [job, setJob] = useState<ScheduledSendStatus | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const watchingRef = useRef(false);
 
   const byAddress = useMemo(() => {
     const m = new Map<string, FilterOption>();
@@ -34,6 +51,19 @@ export function SendTelegramBar({ targets, onClose }: Props) {
   const known = byAddress.get(address.trim());
   const dptMain = known?.main ?? undefined;
   const addressValid = GA_RE.test(address.trim());
+
+  const delaySeconds = parseFloat(delay) || 0;
+  const intervalSeconds = parseFloat(every) || 0;
+  const isScheduled = delaySeconds > 0 || intervalSeconds > 0;
+  const jobActive = job != null && (job.state === 'waiting' || job.state === 'running');
+  const sendDisabled = busy || jobActive || !addressValid;
+
+  // Pick up an already-active job (e.g. after a page reload) and clean up the poller.
+  useEffect(() => {
+    void refreshJob();
+    return stopPolling;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onAddressChange = (next: string, option?: FilterOption) => {
     setAddress(next);
@@ -50,6 +80,8 @@ export function SendTelegramBar({ targets, onClose }: Props) {
       if (action === 'read') {
         await readTelegram(address.trim());
         setFeedback({ ok: true, msg: `Read request sent to ${address.trim()}` });
+      } else if (isScheduled) {
+        await startScheduled(coerceValue(value));
       } else {
         await sendTelegram(address.trim(), coerceValue(value), dpt.trim() || undefined);
         setFeedback({ ok: true, msg: `Sent ${value || '(raw)'} to ${address.trim()}` });
@@ -93,8 +125,8 @@ export function SendTelegramBar({ targets, onClose }: Props) {
 
         {dptMain === 1 ? (
           <div style={{ display: 'flex', gap: '0.3rem' }}>
-            <button disabled={busy || !addressValid} onClick={() => void sendBoolean(true)} style={boolBtn(busy || !addressValid)}>On</button>
-            <button disabled={busy || !addressValid} onClick={() => void sendBoolean(false)} style={boolBtn(busy || !addressValid)}>Off</button>
+            <button disabled={sendDisabled} onClick={() => void sendBoolean(true)} style={boolBtn(sendDisabled)}>On</button>
+            <button disabled={sendDisabled} onClick={() => void sendBoolean(false)} style={boolBtn(sendDisabled)}>Off</button>
           </div>
         ) : (
           <input
@@ -106,11 +138,29 @@ export function SendTelegramBar({ targets, onClose }: Props) {
           />
         )}
 
+        <input
+          className="glass-input"
+          placeholder="Delay s"
+          value={delay}
+          onChange={e => { setDelay(e.target.value); setFeedback(null); }}
+          title="Wait this many seconds before sending"
+          style={{ width: 70 }}
+        />
+
+        <input
+          className="glass-input"
+          placeholder="Every s"
+          value={every}
+          onChange={e => { setEvery(e.target.value); setFeedback(null); }}
+          title="Repeat the send at this interval in seconds (min 1) until cancelled"
+          style={{ width: 70 }}
+        />
+
         {dptMain !== 1 && (
           <button
             onClick={() => run('send')}
-            disabled={busy || !addressValid || value.trim() === ''}
-            style={primaryBtn(busy || !addressValid || value.trim() === '')}
+            disabled={sendDisabled || value.trim() === ''}
+            style={primaryBtn(sendDisabled || value.trim() === '')}
           >
             <Send size={14} /> Write
           </button>
@@ -130,6 +180,16 @@ export function SendTelegramBar({ targets, onClose }: Props) {
         </button>
       </div>
 
+      {jobActive && job && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--accent-primary)' }}>
+          <Timer size={13} />
+          <span>{describeJob(job)}</span>
+          <button onClick={() => void cancelJob()} style={secondaryBtn(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
       {(label || feedback) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', minHeight: '1rem' }}>
           {label && <span style={{ color: 'var(--text-dim)' }}>{address.trim()} — {label}</span>}
@@ -147,14 +207,92 @@ export function SendTelegramBar({ targets, onClose }: Props) {
     setBusy(true);
     setFeedback(null);
     try {
-      await sendTelegram(address.trim(), on, dpt.trim() || undefined);
-      setFeedback({ ok: true, msg: `Sent ${on ? 'on' : 'off'} to ${address.trim()}` });
+      if (isScheduled) {
+        await startScheduled(on);
+      } else {
+        await sendTelegram(address.trim(), on, dpt.trim() || undefined);
+        setFeedback({ ok: true, msg: `Sent ${on ? 'on' : 'off'} to ${address.trim()}` });
+      }
     } catch (err) {
       setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Request failed' });
     } finally {
       setBusy(false);
     }
   }
+
+  async function startScheduled(payload: unknown) {
+    if (intervalSeconds > 0 && intervalSeconds < 1) {
+      setFeedback({ ok: false, msg: 'Interval must be at least 1 second' });
+      return;
+    }
+    const status = await startScheduledSend(address.trim(), payload, dpt.trim() || undefined, {
+      delaySeconds: delaySeconds > 0 ? delaySeconds : undefined,
+      intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
+    });
+    watchingRef.current = true;
+    setJob(status);
+    startPolling();
+  }
+
+  async function refreshJob() {
+    let status: ScheduledSendStatus;
+    try {
+      status = await getScheduledSendStatus();
+    } catch {
+      return; // transient fetch error — keep polling
+    }
+    if (status.state === 'waiting' || status.state === 'running') {
+      watchingRef.current = true;
+      setJob(status);
+      if (pollRef.current == null) startPolling();
+      return;
+    }
+    stopPolling();
+    setJob(null);
+    if (watchingRef.current) {
+      watchingRef.current = false;
+      if (status.state === 'done') {
+        setFeedback({ ok: true, msg: `Sent to ${status.address}` });
+      } else if (status.state === 'cancelled') {
+        setFeedback({ ok: true, msg: `Scheduled send to ${status.address} cancelled after ${status.sends_done ?? 0} send(s)` });
+      } else if (status.state === 'failed') {
+        setFeedback({ ok: false, msg: status.error || 'Scheduled send failed' });
+      }
+    }
+  }
+
+  async function cancelJob() {
+    try {
+      await cancelScheduledSend();
+    } catch (err) {
+      setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Cancel failed' });
+    }
+    await refreshJob();
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollRef.current = window.setInterval(() => void refreshJob(), POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+}
+
+function describeJob(job: ScheduledSendStatus): string {
+  if (job.state === 'waiting') {
+    const at = job.next_send_at ? ` at ${new Date(job.next_send_at).toLocaleTimeString()}` : '';
+    return `Delayed send to ${job.address} — first send${at}`;
+  }
+  if (job.interval_seconds) {
+    const skipped = job.sends_skipped ? ` (${job.sends_skipped} skipped)` : '';
+    return `Cyclic send to ${job.address} every ${job.interval_seconds}s — ${job.sends_done ?? 0} sent${skipped}`;
+  }
+  return `Sending to ${job.address}…`;
 }
 
 function boolBtn(disabled: boolean): React.CSSProperties {
