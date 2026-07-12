@@ -12,7 +12,7 @@ Use a throwaway sqlite DB to avoid needing Postgres:
 
 ```bash
 cd backend
-DATABASE_URL="sqlite+aiosqlite:////abs/path/to/test.db" venv/bin/uvicorn main:app --port 8321
+DATABASE_URL="sqlite+aiosqlite:////abs/path/to/test.db" .venv/bin/uvicorn main:app --port 8321
 ```
 
 Seed telegrams through the storage library (NOT `seed_data.py` — that targets the
@@ -32,10 +32,23 @@ VITE_BACKEND_URL=http://localhost:8321 npx vite --port 5199
 
 ## Driving the UI headlessly
 
-Playwright's bundled chromium is not installed and `--with-deps` needs sudo;
-system Chrome works: `npm i playwright` in a scratch dir, then
-`chromium.launch({ channel: 'chrome' })`. Toolbar overlays are reached via
-`button[title="..."]` (e.g. "Database maintenance", "Traffic statistics").
+`npm i playwright` in a scratch dir, then `npx playwright install chromium`
+(works without sudo; system deps are present). No system Chrome on this host.
+Toolbar overlays are reached via `button[title="..."]` (e.g. "Database
+maintenance", "Traffic statistics").
+
+With no `.knxproj` loaded, a blocking non-closable "Project Setup" wizard
+covers the app. Stub it at the network boundary:
+
+```js
+await ctx.route('**/api/project/status', route => route.fulfill({
+  json: { upload_feature_active: true, upload_writable: false, project_loaded: false, upload_required: false },
+}));
+```
+
+The venv is `backend/.venv` (not `venv`). Tab switching goes through the nav
+dropdown: click the current tab name (e.g. "Group Monitor"), then the entry
+(e.g. "History Search").
 
 ## Companion mode (STORE_MODE=external-readonly)
 
@@ -45,7 +58,7 @@ Run against any store sqlite file without a bus or HA:
 STORE_MODE=external-readonly \
 DATABASE_URL="sqlite+aiosqlite:////abs/path/to/ha.db" \
 LIVE_SOURCE=ha_websocket HA_WS_URL=ws://localhost:8765 HA_TOKEN=test-token \
-venv/bin/uvicorn main:app --port 8322
+.venv/bin/uvicorn main:app --port 8322
 ```
 
 A fake HA core websocket (auth_required/auth_ok + `knx/subscribe_telegrams`

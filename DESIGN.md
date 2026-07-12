@@ -95,7 +95,14 @@ User preferences are persisted locally using cookies:
 - Selected Bus Rate unit (s/m/h)
 - Column visibility toggles (e.g., hiding Raw Data or DPT columns)
 
-### 2.8 Building Structure & Device Status
+### 2.8 Shareable Visualization URLs & Embed Mode
+A visualization (filters + plotted targets + time window) can be captured as a URL, bookmarked, and embedded (#150).
+- **URL scheme:** `/?view=viz&plot=1/2/3,1/2/4&rel=24h` plus optional filter params (`src`, `tgt`, `type`, `dpt`, `before`, `after`, `rel_st=OR`), an absolute window (`start`/`end`, datetime-local UTC) instead of `rel`, and `limit`. Parsing/serialization lives in `utils/viewUrl.ts`; defaults are omitted so URLs stay short.
+- **Restore:** opening a view URL lands on the History tab with filters applied, auto-loads the window server-side (via the fetch logic shared with the loader modal in `utils/historyLoad.ts`), and opens the visualizer.
+- **Share:** a "Copy link" button in the visualizer header serializes the currently loaded view. Links from relative windows always show the *current* trailing window; absolute links always show the same data.
+- **Embed mode:** `&embed=1` renders only the chart area (mounted instead of the full app, so no websocket table/polling/wizards) for iframes such as Home Assistant's Webpage card. Relative windows stay current via the live websocket feed plus a periodic re-fetch (`&refresh=<seconds>`, default 300); `&theme=dark|light` forces a theme. Note: the app has no auth of its own and HA ingress URLs are session-bound — embedding targets direct-port/reverse-proxy setups.
+
+### 2.9 Building Structure & Device Status
 Device-centric browsing and diagnostics derived from the ETS project (`/api/building`).
 - **Building Tree:** Mirrors the ETS building view — nested spaces → devices → channels → communication objects (KOs), each KO listing its linked group addresses, DPT names and flags. Rows offer quick actions: filter by device (source), filter connected GAs (targets), and open the last-seen view.
 - **Device Status View (Live KOs):** A per-device panel showing **all** communication objects with the current value of each linked group address — regardless of which device wrote it (KNX-Lens style diagnostics, #153).

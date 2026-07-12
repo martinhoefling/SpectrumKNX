@@ -3,16 +3,11 @@ import { X, Clock, Database, AlertCircle, CheckCircle2, Calendar, Search } from 
 import type { Telegram } from '../hooks/useWebSocket';
 import type { ActiveFilters } from '../types/filters';
 import type { LoaderTimeRange } from './HistorySearch';
-import { apiUrl } from '../utils/basePath';
-
-interface Metadata {
-  total_count: number;
-  limit_reached: boolean;
-}
+import { loadHistoryTelegrams, type HistoryMetadata, type LoadedRange } from '../utils/historyLoad';
 
 interface HistoryLoaderProps {
   onClose: () => void;
-  onLoad: (telegrams: Telegram[], metadata?: Metadata) => void;
+  onLoad: (telegrams: Telegram[], metadata?: HistoryMetadata, range?: LoadedRange) => void;
   limit: number;
   /** 'monitor' = no date range pickers (Group Monitor); 'search' = full options (History Search) */
   mode?: 'monitor' | 'search';
@@ -32,25 +27,11 @@ const UNIT_TO_SECONDS: Record<Unit, number> = {
   days: 86400,
 };
 
-/** Appends active filter state as query params to a base URL string. */
-function applyFilterParams(url: string, filters?: ActiveFilters): string {
-  if (!filters) return url;
-  const params: string[] = [];
-  if (filters.sources.length > 0) params.push(`source_address=${encodeURIComponent(filters.sources.join(','))}`);
-  if (filters.targets.length > 0) params.push(`target_address=${encodeURIComponent(filters.targets.join(','))}`);
-  if (filters.types.length > 0) params.push(`telegram_type=${encodeURIComponent(filters.types.join(','))}`);
-  if (filters.dpts.length > 0) params.push(`dpt_main=${encodeURIComponent(filters.dpts.join(','))}`);
-  if (filters.deltaBeforeMs > 0) params.push(`delta_before_ms=${filters.deltaBeforeMs}`);
-  if (filters.deltaAfterMs > 0) params.push(`delta_after_ms=${filters.deltaAfterMs}`);
-  if (params.length === 0) return url;
-  return url + (url.includes('?') ? '&' : '?') + params.join('&');
-}
-
 export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, limit, mode = 'search', filters, timeRange, onTimeRangeChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
-  const [resultMeta, setResultMeta] = useState<Metadata | null>(null);
+  const [resultMeta, setResultMeta] = useState<HistoryMetadata | null>(null);
 
   // Custom relative — initialised from persisted timeRange if provided
   const [relValue, setRelValue] = useState<number>(timeRange?.relValue ?? 1);
@@ -92,57 +73,16 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     persistTimeRange({ endTime: clamped });
   };
 
-  const doFetch = useCallback(async (baseUrl: string) => {
+  const doFetch = useCallback(async (range: LoadedRange) => {
     setIsLoading(true);
     setError(null);
     setStatus('loading');
     setResultMeta(null);
     try {
-      const isOrMode = filters?.sourceTargetRelation === 'OR'
-        && (filters.sources.length > 0)
-        && (filters.targets.length > 0);
-
-      let telegrams: Telegram[];
-      let meta: Metadata;
-
-      if (isOrMode) {
-        // OR mode: two queries — one filtered by sources only, one by targets only.
-        // Results are merged and deduplicated by timestamp. The knx-telegram-store
-        // library only supports AND across source/destination filters, so we
-        // handle the OR logic here rather than in the library.
-        const srcFilters = { ...filters, targets: [], sourceTargetRelation: 'AND' as const };
-        const tgtFilters = { ...filters, sources: [], sourceTargetRelation: 'AND' as const };
-        const [srcRes, tgtRes] = await Promise.all([
-          fetch(applyFilterParams(baseUrl, srcFilters)),
-          fetch(applyFilterParams(baseUrl, tgtFilters)),
-        ]);
-        if (!srcRes.ok || !tgtRes.ok) throw new Error(`Server error: ${srcRes.ok ? tgtRes.status : srcRes.status}`);
-        const [srcData, tgtData] = await Promise.all([srcRes.json(), tgtRes.json()]);
-
-        const seen = new Set<string>();
-        const merged: Telegram[] = [];
-        for (const t of [...(srcData.telegrams || []), ...(tgtData.telegrams || [])]) {
-          if (!seen.has(t.timestamp)) {
-            seen.add(t.timestamp);
-            merged.push(t);
-          }
-        }
-        // Re-sort descending (both halves arrive sorted but interleaved)
-        merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        const limitReached = (srcData.metadata?.limit_reached || tgtData.metadata?.limit_reached) ?? false;
-        meta = { total_count: merged.length, limit_reached: limitReached };
-        telegrams = merged;
-      } else {
-        const res = await fetch(applyFilterParams(baseUrl, filters));
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        const data = await res.json();
-        meta = data.metadata || { total_count: 0, limit_reached: false };
-        telegrams = data.telegrams || [];
-      }
-
-      setResultMeta(meta);
+      const { telegrams, metadata } = await loadHistoryTelegrams(range, limit, filters);
+      setResultMeta(metadata);
       setStatus('success');
-      onLoad(telegrams, meta);
+      onLoad(telegrams, metadata, range);
       setTimeout(onClose, 1500);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
@@ -151,13 +91,11 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     } finally {
       setIsLoading(false);
     }
-  }, [filters, onLoad, onClose]);
+  }, [filters, limit, onLoad, onClose]);
 
   const handleLoadRelative = useCallback((seconds: number) => {
-    const start = new Date(Date.now() - seconds * 1000).toISOString();
-    const base = apiUrl(`/api/telegrams?limit=${limit}&start_time=${encodeURIComponent(start)}`);
-    doFetch(base);
-  }, [limit, doFetch]);
+    doFetch({ kind: 'relative', seconds });
+  }, [doFetch]);
 
   const handleLoadCustomRelative = useCallback(() => {
     if (!relValue || relValue <= 0) { setError('Enter a positive value.'); return; }
@@ -166,11 +104,8 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
 
   const handleLoadCustomAbsolute = useCallback(() => {
     if (!startTime && !endTime) { setError('Enter at least a start or end time.'); return; }
-    let url = apiUrl(`/api/telegrams?limit=${limit}`);
-    if (startTime) url += `&start_time=${encodeURIComponent(startTime + ':00Z')}`;
-    if (endTime) url += `&end_time=${encodeURIComponent(endTime + ':00Z')}`;
-    doFetch(url);
-  }, [limit, startTime, endTime, doFetch]);
+    doFetch({ kind: 'absolute', startTime, endTime });
+  }, [startTime, endTime, doFetch]);
 
   return (
     <div className="modal-overlay">

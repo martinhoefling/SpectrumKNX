@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from '../utils/sortConfig';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -6,6 +6,8 @@ import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart,
 import { HistoryLoader } from './HistoryLoader';
 import { Visualizer } from './Visualizer';
 import { FilterPanel } from './FilterPanel';
+import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
+import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
   hasActiveFilters,
   matchesTelegram,
@@ -30,11 +32,13 @@ interface HistorySearchProps {
   projectLoaded?: boolean;
   selectedVisualizationTargets: string[];
   onVisualizationTargetsChange: (targets: string[] | ((prev: string[]) => string[])) => void;
+  /** Shared-view state parsed from the URL — triggers an auto-load on mount (#150). */
+  initialView?: VizViewState | null;
 }
 
 export const HistorySearch: React.FC<HistorySearchProps> = ({
   visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings,
-  projectLoaded, selectedVisualizationTargets, onVisualizationTargetsChange
+  projectLoaded, selectedVisualizationTargets, onVisualizationTargetsChange, initialView
 }) => {
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
@@ -50,6 +54,26 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
 
   // Snapshot of filters at the time of the last load — used to detect stale results
   const [filtersAtLoad, setFiltersAtLoad] = useState<ActiveFilters | null>(null);
+
+  // The time window of the last load — basis for shareable links (#150)
+  const [loadedRange, setLoadedRange] = useState<LoadedRange | null>(null);
+
+  // Auto-load a view shared via URL exactly once on mount (#150)
+  const initialViewLoaded = useRef(false);
+  useEffect(() => {
+    if (!initialView || initialViewLoaded.current) return;
+    initialViewLoaded.current = true;
+    const limit = initialView.limit ?? loadLimit;
+    loadHistoryTelegrams(initialView.range, limit, initialView.filters)
+      .then(({ telegrams: loaded, metadata: meta }) => {
+        setTelegrams(loaded);
+        setMetadata(meta);
+        setFiltersAtLoad(initialView.filters);
+        setLoadedRange(initialView.range);
+        setIsVisualizerOpen(true);
+      })
+      .catch(err => console.error('Failed to load shared view:', err));
+  }, [initialView, loadLimit]);
 
   const handleSort = (key: SortKey) => {
     setSortConfig(prev => {
@@ -106,7 +130,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     return items;
   }, [telegrams, sortConfig]);
 
-  const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }) => {
+  const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }, range?: LoadedRange) => {
     setTelegrams(prev => {
       const existingTs = new Set(prev.map(t => t.timestamp));
       const newUnique = loaded.filter(t => !existingTs.has(t.timestamp));
@@ -122,6 +146,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     setMetadata(meta || null);
     // Snapshot the filters at load time so we can detect when they diverge
     setFiltersAtLoad(activeFilters);
+    if (range) setLoadedRange(range);
   };
 
   // In-memory filter pass — mirrors live view filtering so changing filters
@@ -280,6 +305,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               selectedTargets={selectedVisualizationTargets}
               onTargetsChange={onVisualizationTargetsChange}
               onClose={() => setIsVisualizerOpen(false)}
+              getShareLink={loadedRange ? () => buildViewUrl({
+                plot: selectedVisualizationTargets,
+                filters: activeFilters,
+                range: loadedRange,
+                limit: loadLimit,
+              }) : undefined}
             />
           ) : telegrams.length === 0 ? (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>

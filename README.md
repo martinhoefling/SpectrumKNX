@@ -23,6 +23,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 - **Time-Delta Context:** Automatically capture the events "before and after" a filtered event to debug logic faults.
 - **Data Rendering:** Dynamically graph numerical readouts over time, grouped by physical unit types.
 - **Device Status View:** Browse the ETS building structure and open any device to see all its communication objects with live values — KNX-Lens-style diagnostics in the browser.
+- **Shareable Charts:** Copy a link to any visualization (filters, targets, time window) to bookmark it — or add `&embed=1` and drop it into a Home Assistant dashboard as a self-updating chart.
 - **Zero Loss:** Pause the live feed without dropping packets—everything queues silently in the background buffer until you resume.
 - **Database Maintenance:** Inspect database size, telegram count and covered time range; purge old telegrams with a dry-run preview and reclaim the freed disk space—right from the UI.
 - **Home Assistant Companion Mode:** Run the analyzer directly on Home Assistant's own KNX telegram history—no second bus connection, no separate database.

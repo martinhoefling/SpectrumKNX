@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram, type ConnectionStateEvent } from './hooks/useWebSocket';
+import { parseViewUrl } from './utils/viewUrl';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
@@ -130,7 +131,9 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
 
 function App() {
   const [theme, setTheme] = useTheme();
-  const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>('live');
+  // A view shared via URL (#150) starts on the History tab with its filters applied.
+  const [initialView] = useState(() => parseViewUrl(window.location.search));
+  const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>(initialView ? 'history' : 'live');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
@@ -179,7 +182,7 @@ function App() {
   const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getCookie('rateMode') as 's' | 'm' | 'h') || 's');
 
   const [isHistoryLoaderOpen, setIsHistoryLoaderOpen] = useState(false);
-  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>([]);
+  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(initialView?.plot ?? []);
 
   // ── Live State ──────────────────────────────────────────────────────────────
   const [liveTelegrams, setLiveTelegrams] = useState<Telegram[]>([]);
@@ -193,7 +196,7 @@ function App() {
 
   // ── Filter State ────────────────────────────────────────────────────────────
   const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
-  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(initialView?.filters ?? DEFAULT_FILTERS);
 
   const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
     setActiveFilters((prevFilters) => {
@@ -958,6 +961,7 @@ function App() {
             projectLoaded={projectStatus?.project_loaded}
             selectedVisualizationTargets={selectedVisualizationTargets}
             onVisualizationTargetsChange={setSelectedVisualizationTargets}
+            initialView={initialView}
           />
         )}
       </main>

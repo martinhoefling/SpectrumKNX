@@ -4,7 +4,7 @@ import { VisualizerSidebar } from './VisualizerSidebar';
 import { useChartData } from '../hooks/useChartData';
 import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
-import { Download } from 'lucide-react';
+import { Download, Link2, Check } from 'lucide-react';
 import { getCookie, setCookie } from '../utils/cookies';
 
 interface VisualizerProps {
@@ -12,13 +12,20 @@ interface VisualizerProps {
   selectedTargets: string[];
   onTargetsChange: (targets: string[]) => void;
   onClose: () => void;
+  /** Returns a shareable URL for the current view (#150); shows a Copy-link button when set. */
+  getShareLink?: () => string;
+  /** Chart-area-only rendering for iframe/dashboard embedding (#150). */
+  embed?: boolean;
 }
 
-export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTargets, onTargetsChange, onClose }) => {
+export const Visualizer: React.FC<VisualizerProps> = ({
+  telegrams, selectedTargets, onTargetsChange, onClose, getShareLink, embed = false,
+}) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
   const [stepped, setStepped] = useState(() => getCookie('chartStepped') !== 'false');
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const toggleStepped = () => {
     setStepped(s => {
@@ -36,6 +43,45 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
     // or just trigger print.
     window.print();
   };
+
+  const copyShareLink = async () => {
+    if (!getShareLink) return;
+    const absolute = new URL(getShareLink(), window.location.href).toString();
+    try {
+      await navigator.clipboard.writeText(absolute);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable (e.g. non-secure context) — show the URL instead.
+      window.prompt('Copy this link:', absolute);
+    }
+  };
+
+  const charts = (
+    <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
+      {buckets.map(b => (
+        b.isBinary ? (
+          <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+        ) : (
+          <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} stepped={stepped} />
+        )
+      ))}
+
+      {buckets.length === 0 && selectedTargets.length > 0 && (
+        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '3rem' }}>
+          No plottable values (numeric or continuous) found for the selected targets.
+        </div>
+      )}
+    </div>
+  );
+
+  if (embed) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-subtle)' }}>
+        {charts}
+      </div>
+    );
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -75,6 +121,20 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
                 >
                   {stepped ? 'Stepped' : 'Linear'}
                 </button>
+                {getShareLink && (
+                  <button
+                    className="icon-button"
+                    onClick={() => void copyShareLink()}
+                    title="Copy a shareable link to this visualization (filters, targets and time range)"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.85rem',
+                      border: '1px solid var(--border-color)', borderRadius: '7px', fontSize: '0.8125rem',
+                      color: linkCopied ? 'var(--success)' : undefined,
+                    }}
+                  >
+                    {linkCopied ? <><Check size={16} /> Copied</> : <><Link2 size={16} /> Copy link</>}
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   onClick={exportPng}
@@ -87,21 +147,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
             )}
           </div>
 
-          <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
-            {buckets.map(b => (
-              b.isBinary ? (
-                <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
-              ) : (
-                <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} stepped={stepped} />
-              )
-            ))}
-
-            {buckets.length === 0 && selectedTargets.length > 0 && (
-              <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '3rem' }}>
-                No plottable values (numeric or continuous) found for the selected targets.
-              </div>
-            )}
-          </div>
+          {charts}
         </div>
       </div>
     </div>
