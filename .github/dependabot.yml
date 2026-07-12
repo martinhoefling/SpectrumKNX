@@ -14,18 +14,14 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      pydantic:
-        patterns:
-          - "pydantic"
-          - "pydantic_core"
-          - "pydantic-core"
       dependencies:
         patterns:
           - "*"
-        exclude-patterns:
-          - "pydantic"
-          - "pydantic_core"
-          - "pydantic-core"
+    # pydantic-core is not pinned in requirements.txt (pydantic pins it
+    # exactly itself); ignore it in case it ever shows up transitively.
+    ignore:
+      - dependency-name: "pydantic-core"
+      - dependency-name: "pydantic_core"
 
   - package-ecosystem: "docker"
     directory: "/"

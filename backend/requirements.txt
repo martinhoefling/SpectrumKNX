@@ -18,8 +18,9 @@ packaging==26.2
 pluggy==1.6.0
 pycparser==3.0
 pycryptodomex==3.23.0
+# pydantic-core is deliberately unpinned: pydantic requires an exact core
+# version itself, so pinning it here only creates unresolvable Dependabot PRs.
 pydantic==2.13.4
-pydantic_core==2.46.4
 Pygments==2.20.0
 pytest==9.1.1
 python-dotenv==1.2.2
