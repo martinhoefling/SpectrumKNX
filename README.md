@@ -10,7 +10,7 @@
 
 ![Spectrum KNX Dashboard](assets/dashboard.png)
 
-Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus telegrams indefinitely. Built for speed and reliability, it supports both a TimescaleDB backend for long-term time-series storage and a lightweight SQLite backend for simple setups — paired with a premium, real-time React web interface.
+Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus telegrams indefinitely. Built for speed and reliability, it supports both a PostgreSQL backend for long-term time-series storage (the TimescaleDB extension is optional — used automatically for hypertable partitioning and native compression when available) and a lightweight SQLite backend for simple setups — paired with a premium, real-time React web interface.
 
 ## 📺 Demo in Action
 
@@ -74,7 +74,7 @@ Two add-ons cover the two ways to run Spectrum KNX inside Home Assistant
 | | **Spectrum KNX** (standalone) | **Spectrum KNX (HA Companion)** |
 |---|---|---|
 | Bus connection | Own tunnel/routing connection to your KNX gateway | None — uses what HA already receives |
-| Database | Own PostgreSQL/TimescaleDB or SQLite | Reads HA's KNX telegram database (read-only) |
+| Database | Own PostgreSQL (TimescaleDB optional) or SQLite | Reads HA's KNX telegram database (read-only) |
 | Live telegrams | Directly from the bus | Streamed from HA's websocket API |
 | Retention & cleanup | Managed in Spectrum KNX (Database Maintenance screen) | Managed by Home Assistant |
 | Use when… | You want an independent, full-featured recorder | You use HA's KNX integration and want its history analyzed without duplicating anything |
@@ -86,7 +86,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT
 
 ## 🛠 Tech Stack
 - **Backend:** Python 3.13+, FastAPI, `xknx`, WebSocket Streaming
-- **Database:** PostgreSQL + TimescaleDB, or SQLite (via `aiosqlite`)
+- **Database:** PostgreSQL (with optional TimescaleDB acceleration), or SQLite (via `aiosqlite`)
 - **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
 
 ## 🤝 Contributing

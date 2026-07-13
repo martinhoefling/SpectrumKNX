@@ -20,7 +20,7 @@ This document provides instructions for setting up the development environment, 
 - **Styling:** Vanilla CSS (Modern CSS variables, Flexbox/Grid)
 
 ### Storage & Infrastructure
-- **Database:** [PostgreSQL 15](https://www.postgresql.org/) with [TimescaleDB](https://www.timescale.com/) (default), or SQLite via `aiosqlite` for lightweight setups.
+- **Database:** [PostgreSQL](https://www.postgresql.org/) (default). The [TimescaleDB](https://www.timescale.com/) extension is optional — when available it is used automatically for hypertable partitioning and native compression; any plain PostgreSQL server works too. Alternatively SQLite via `aiosqlite` for lightweight setups.
 - **Containerization:** [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/).
 
 ---
@@ -56,7 +56,7 @@ Companion mode (read an external telegram store instead of running the KNX daemo
 ### 3. Database Setup
 The backend supports two storage backends selected via `DATABASE_URL`:
 
-**PostgreSQL + TimescaleDB (default):** Start the database via Docker Compose. The backend automatically creates the schema on first startup.
+**PostgreSQL (default):** Start the database via Docker Compose. The bundled container ships TimescaleDB, but any plain PostgreSQL server works as well — the backend detects the extension at startup and falls back automatically. The schema is created automatically on first startup.
 ```bash
 docker-compose up -d db
 ```

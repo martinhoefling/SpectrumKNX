@@ -5,7 +5,7 @@ Spectrum KNX is designed as a modular 12-factor application, making it agnostic 
 ## Prerequisites
 No matter the deployment, you will need:
 1. An ETS project file (`.knxproj`) parsed by the backend to translate KNX payloads.
-2. A database backend — either PostgreSQL with the **TimescaleDB** extension (default), or SQLite (no external database required).
+2. A database backend — either PostgreSQL (default), or SQLite (no external database required). The **TimescaleDB** extension is optional: when it is available on the PostgreSQL server it is used automatically (hypertable partitioning + native compression); without it, Spectrum KNX runs on plain PostgreSQL with identical functionality.
 
 ---
 
@@ -45,7 +45,7 @@ After installation, go to the **Configuration** tab of the Add-on. The following
 | `KNX_GATEWAY_IP` | IP address of your KNX IP Gateway/Router. Use `AUTO` to scan the network automatically. | `AUTO` |
 | `KNX_GATEWAY_PORT` | Port of your KNX IP Gateway. | `3671` |
 | `LOG_LEVEL` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). | `INFO` |
-| `DB_BACKEND` | Storage backend: `POSTGRES` (PostgreSQL + TimescaleDB) or `SQLITE` (local file, no external database needed). | `POSTGRES` |
+| `DB_BACKEND` | Storage backend: `POSTGRES` (PostgreSQL; TimescaleDB is used automatically when available) or `SQLITE` (local file, no external database needed). | `POSTGRES` |
 
 Example configuration (YAML view):
 ```yaml

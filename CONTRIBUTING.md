@@ -5,12 +5,12 @@ Thank you for your interest in making Spectrum KNX better!
 ## Development Requirements
 - **Python 3.14+**
 - **Node.js 18+ & npm**
-- **Docker Compose** (for providing the local TimescaleDB instance)
+- **Docker Compose** (for providing the local PostgreSQL/TimescaleDB instance)
 
 ## Setting up the Dev Environment
 
 ### 1. Database infrastructure
-Spin up the local TimescaleDB instance in the background:
+Spin up the local database instance in the background (the bundled container ships TimescaleDB; any plain PostgreSQL works too):
 ```bash
 docker-compose up -d db
 ```

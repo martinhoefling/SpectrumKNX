@@ -20,8 +20,8 @@ The system follows a standard modern client-server architecture with real-time s
   - `xknxproject` parses ETS `.knxproj` files, allowing the app to resolve physical/group addresses into human-readable names and properly decode DPT (Data Point Type) payloads.
 - **Real-Time Streaming:** A WebSocket manager (`ws_manager.py`) broadcasts all received telegrams to connected UI clients instantly.
 
-### Storage (PostgreSQL + TimescaleDB)
-- **Database Engine:** PostgreSQL with the TimescaleDB extension, optimized for heavy time-series workloads and large-scale data retention.
+### Storage (PostgreSQL, optional TimescaleDB)
+- **Database Engine:** PostgreSQL, optimized for heavy time-series workloads and large-scale data retention. The TimescaleDB extension is optional (since `knx-telegram-store` 0.9.0): when available it is detected at startup and used automatically for hypertable partitioning and native compression; otherwise the store runs on plain PostgreSQL tables.
 - **Data Volume Expectations:** ~5,000 telegrams/hour (~120,000/day, ~43.8 million/year). Expected uncompressed text size is ~10MB/day (~3.6GB/year).
 - **Core Schema (`telegrams` hypertable):**
   - `timestamp`: The primary time column (TimescaleDB hypertable index).
