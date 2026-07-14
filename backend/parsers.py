@@ -31,15 +31,26 @@ def get_simplified_type(tech_type: str) -> str:
 
 def format_value_nicely(value, dpt_main=None, dpt_sub=None):
     """Formats numeric or boolean values into clean, HA-style strings."""
+    if value is None:
+        # Payload-less telegrams (GroupValueRead) and undecoded payloads carry
+        # no value — never fabricate one (#181).
+        return None
+
     if isinstance(value, bool) or (dpt_main == 1):
-        try:
-            num_str = f"{dpt_main}.{dpt_sub:03d}" if dpt_sub is not None else "1.001"
-            tc = DPTBase.parse_transcoder(num_str)
-            if tc and hasattr(tc, "value_to_str"):
-                # Note: xknx's to_str often returns the descriptive name
-                return str(tc.to_knx(value).to_str() if hasattr(tc, "to_knx") else value).lower()
-        except Exception:
-            pass
+        # DPT-1 values arrive as bools, 0/1 numerics, or already-decoded enum
+        # names ("off", "down", ...) from Home Assistant. Strings ARE the
+        # display value — truth-testing them would render "off" as "on" (#181).
+        if isinstance(value, str):
+            return value.lower()
+        if dpt_sub is not None:
+            try:
+                tc = DPTBase.parse_transcoder(f"{dpt_main or 1}.{dpt_sub:03d}")
+                data_type = getattr(tc, "data_type", None)
+                if data_type is not None:
+                    # Subtype-specific name, e.g. 1.008: False -> "up"
+                    return data_type(bool(value)).name.lower()
+            except Exception:
+                pass
         return "on" if value else "off"
 
     if isinstance(value, int | float):

@@ -3,6 +3,7 @@ from unittest.mock import patch
 from parsers import (
     convert_value_for_db,
     format_dpt_name,
+    format_value_nicely,
     get_simplified_type,
     parse_telegram_dpt,
     parse_telegram_payload,
@@ -272,6 +273,41 @@ def test_format_dpt_name():
     assert "9.001" in name
 
     assert format_dpt_name(None, None) == (None, None)
+
+
+def test_format_value_nicely_none_is_not_fabricated():
+    # GroupValueRead telegrams carry no payload: no "None"/"off" values (#181)
+    assert format_value_nicely(None) is None
+    assert format_value_nicely(None, 1, 1) is None
+    assert format_value_nicely(None, 5, 1) is None
+
+
+def test_format_value_nicely_bools_and_numerics():
+    assert format_value_nicely(True, 1, 1) == "on"
+    assert format_value_nicely(False, 1, 1) == "off"
+    assert format_value_nicely(0, 1, 1) == "off"
+    assert format_value_nicely(1.0, 1, 1) == "on"
+    # Subtype-specific enum names
+    assert format_value_nicely(False, 1, 8) == "up"
+    assert format_value_nicely(True, 1, 8) == "down"
+    assert format_value_nicely(True, 1, 100) == "heat"
+    # Bool without a known DPT-1 subtype falls back to on/off
+    assert format_value_nicely(True) == "on"
+    assert format_value_nicely(False, 1, None) == "off"
+
+
+def test_format_value_nicely_ha_enum_strings_not_truth_tested():
+    # HA decodes DPT-1 to enum name strings; "off" must not render as "on" (#181)
+    assert format_value_nicely("off", 1, 1) == "off"
+    assert format_value_nicely("on", 1, 1) == "on"
+    assert format_value_nicely("up", 1, 8) == "up"
+    assert format_value_nicely("down", 1, 8) == "down"
+
+
+def test_format_value_nicely_other_types():
+    assert format_value_nicely(21.60, 9, 1) == "21.6"
+    assert format_value_nicely(100.00, 5, 1) == "100"
+    assert format_value_nicely("hello", 16, 0) == "hello"
 
 
 def test_format_dpt_name_invalid_inputs():
