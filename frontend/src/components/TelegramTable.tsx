@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react'
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock, Send } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { getCookie, setCookie } from '../utils/cookies';
 
@@ -22,6 +22,8 @@ interface TelegramTableProps {
   onQuickFilter: (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => void;
   onQuickVisualize: (targetAddress: string) => void;
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
+  /** Copies the row's GA into the send bar; only passed when the bus is writable (#187). */
+  onQuickSend?: (targetAddress: string) => void;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -78,7 +80,7 @@ type TelegramRow = Telegram & { deltaStr: string | null };
 const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
-  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen
+  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, onQuickSend
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -292,6 +294,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   <Clock size={12} />
                 </button>
               )}
+              {onQuickSend && (
+                <button
+                  className="quick-send-btn"
+                  onClick={(e) => { e.stopPropagation(); onQuickSend(t.target_address); }}
+                  title="Send to this GA"
+                >
+                  <Send size={12} />
+                </button>
+              )}
             </div>
             {visibleColumns.targetName && (
               <div className="subtitle-name" title={t.target_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -468,7 +479,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 // Add styles for quick filter buttons and resize handles
 const style = document.createElement('style');
 style.textContent = `
-  .quick-filter-btn, .quick-visualize-btn, .quick-last-seen-btn {
+  .quick-filter-btn, .quick-visualize-btn, .quick-last-seen-btn, .quick-send-btn {
     background: transparent;
     border: none;
     cursor: pointer;
@@ -503,11 +514,12 @@ style.textContent = `
 
   .log-row:hover .quick-filter-btn:not(.active),
   .log-row:hover .quick-visualize-btn,
-  .log-row:hover .quick-last-seen-btn {
+  .log-row:hover .quick-last-seen-btn,
+  .log-row:hover .quick-send-btn {
     opacity: 0.6;
   }
 
-  .quick-filter-btn:hover, .quick-visualize-btn:hover, .quick-last-seen-btn:hover {
+  .quick-filter-btn:hover, .quick-visualize-btn:hover, .quick-last-seen-btn:hover, .quick-send-btn:hover {
     opacity: 1 !important;
     background: var(--bg-hover);
     color: var(--accent-primary);

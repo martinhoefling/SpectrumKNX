@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Clock } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 
@@ -7,6 +8,8 @@ interface Props {
   /** Called on every change. `option` is set only when picked from the list. */
   onChange: (address: string, option?: FilterOption) => void;
   options: FilterOption[];
+  /** Recently used addresses, newest first — listed on top while the input is empty (#187). */
+  recentAddresses?: string[];
   placeholder?: string;
   width?: number | string;
 }
@@ -16,18 +19,26 @@ interface Props {
  * allows typing an arbitrary address (free entry), unlike a native <datalist>
  * which the browser renders unthemed.
  */
-export function GaCombobox({ value, onChange, options, placeholder, width = 220 }: Props) {
+export function GaCombobox({ value, onChange, options, recentAddresses, placeholder, width = 220 }: Props) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const matches = useMemo(() => {
+  const { matches, recentCount } = useMemo(() => {
     const q = value.trim().toLowerCase();
-    const list = q === ''
-      ? options
-      : options.filter(o => (o.address ?? '').toLowerCase().includes(q) || (o.name ?? '').toLowerCase().includes(q));
-    return list.slice(0, 100);
-  }, [value, options]);
+    if (q !== '') {
+      const list = options.filter(
+        o => (o.address ?? '').toLowerCase().includes(q) || (o.name ?? '').toLowerCase().includes(q)
+      );
+      return { matches: list.slice(0, 100), recentCount: 0 };
+    }
+    // Empty input: recently sent addresses first (with project names when known)
+    const byAddress = new Map(options.filter(o => o.address).map(o => [o.address!, o]));
+    const recent = (recentAddresses ?? []).map(a => byAddress.get(a) ?? ({ address: a } as FilterOption));
+    const recentSet = new Set(recent.map(r => r.address));
+    const rest = options.filter(o => !recentSet.has(o.address));
+    return { matches: [...recent, ...rest].slice(0, 100), recentCount: recent.length };
+  }, [value, options, recentAddresses]);
 
   useEffect(() => {
     if (!open) return;
@@ -82,8 +93,9 @@ export function GaCombobox({ value, onChange, options, placeholder, width = 220 
                 background: i === highlight ? 'var(--bg-hover)' : 'transparent',
               }}
             >
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--text-main)' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--text-main)' }}>
                 {o.address}
+                {i < recentCount && <Clock size={11} style={{ color: 'var(--text-dim)' }} />}
               </span>
               {o.name && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{o.name}</span>}
             </button>

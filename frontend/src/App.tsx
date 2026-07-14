@@ -147,6 +147,7 @@ function App() {
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(false);
   const [isSendOpen, setIsSendOpen] = useState(false);
+  const [sendPrefill, setSendPrefill] = useState<{ address: string; nonce: number } | null>(null);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -403,6 +404,11 @@ function App() {
       };
     });
     setIsFilterOpen(true);
+  };
+
+  const handleQuickSend = (targetAddress: string) => {
+    setSendPrefill({ address: targetAddress, nonce: Date.now() });
+    setIsSendOpen(true);
   };
 
   const handleQuickVisualize = (targetAddress: string) => {
@@ -901,7 +907,12 @@ function App() {
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {isSendOpen && serverConfig?.status?.write_enabled && (
-                  <SendTelegramBar targets={filterOptions.targets} onClose={() => setIsSendOpen(false)} />
+                  <SendTelegramBar
+                    key={sendPrefill?.nonce ?? 'send-bar'}
+                    targets={filterOptions.targets}
+                    initialAddress={sendPrefill?.address}
+                    onClose={() => setIsSendOpen(false)}
+                  />
                 )}
                 {isVisualizerOpen ? (
                   <Visualizer
@@ -949,6 +960,7 @@ function App() {
                     onQuickFilter={handleQuickFilter}
                     onQuickVisualize={handleQuickVisualize}
                     onQuickLastSeen={handleQuickLastSeen}
+                    onQuickSend={serverConfig?.status?.write_enabled ? handleQuickSend : undefined}
                   />
                 )}
               </div>

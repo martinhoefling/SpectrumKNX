@@ -13,10 +13,13 @@ import {
   type ScheduledSendStatus,
 } from '../utils/knxSend';
 import { GaCombobox } from './GaCombobox';
+import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
 
 interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
   targets: FilterOption[];
+  /** Address to start with (row shortcut, #187). Remount via `key` to re-apply. */
+  initialAddress?: string;
   onClose: () => void;
 }
 
@@ -30,12 +33,16 @@ const POLL_INTERVAL_MS = 1000;
  * Shown above the telegram table in live mode only, and only when the backend
  * reports the bus is writable.
  */
-export function SendTelegramBar({ targets, onClose }: Props) {
-  const [address, setAddress] = useState('');
-  const [dpt, setDpt] = useState('');
+export function SendTelegramBar({ targets, initialAddress, onClose }: Props) {
+  const [address, setAddress] = useState(initialAddress ?? '');
+  const [dpt, setDpt] = useState(() => {
+    const known = targets.find(t => t.address === initialAddress);
+    return known && known.main != null ? formatDpt(known.main, known.sub) : '';
+  });
   const [value, setValue] = useState('');
   const [delay, setDelay] = useState('');
   const [every, setEvery] = useState('');
+  const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [job, setJob] = useState<ScheduledSendStatus | null>(null);
@@ -86,6 +93,7 @@ export function SendTelegramBar({ targets, onClose }: Props) {
         await sendTelegram(address.trim(), coerceValue(value), dpt.trim() || undefined);
         setFeedback({ ok: true, msg: `Sent ${value || '(raw)'} to ${address.trim()}` });
       }
+      setRecentGas(pushRecentGa(address.trim()));
     } catch (err) {
       setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Request failed' });
     } finally {
@@ -110,6 +118,7 @@ export function SendTelegramBar({ targets, onClose }: Props) {
           value={address}
           onChange={onAddressChange}
           options={targets}
+          recentAddresses={recentGas}
           placeholder="Group address (e.g. 1/2/3)"
           width={200}
         />
