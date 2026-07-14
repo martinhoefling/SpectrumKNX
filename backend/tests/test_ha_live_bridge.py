@@ -104,3 +104,17 @@ async def test_fetch_since_filters_and_advances(mock_query):
     query = mock_query.call_args[0][0]
     assert query.start_time == since
     assert query.order_descending is False
+
+
+def test_live_feed_status_reflects_bridge_state():
+    with (
+        patch.object(ha_live_bridge, "_active_source", "poll"),
+        patch.object(ha_live_bridge, "_connected", True),
+    ):
+        assert ha_live_bridge.live_feed_status() == {"source": "poll", "connected": True}
+
+    with (
+        patch.object(ha_live_bridge, "_active_source", "none"),
+        patch.object(ha_live_bridge, "_connected", False),
+    ):
+        assert ha_live_bridge.live_feed_status() == {"source": "none", "connected": False}

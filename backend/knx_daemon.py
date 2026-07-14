@@ -473,7 +473,33 @@ def get_server_config() -> dict:
         if os.path.exists(default_file):
             ets_project_file = default_file
 
+    if READ_ONLY:
+        # Companion mode: Home Assistant owns the bus connection and the
+        # telegram store — reporting the daemon's (nonexistent) bus connection
+        # as "Disconnected" here was misleading (#184). Report the live-feed
+        # state instead and drop the gateway/security settings that don't apply.
+        import ha_live_bridge
+
+        feed = ha_live_bridge.live_feed_status()
+        return {
+            "mode": "companion",
+            "connection": {
+                "type": "HOME_ASSISTANT",
+                "live_source": feed["source"],
+            },
+            "security": {},
+            "files": {
+                "project_file": ets_project_file,
+                "project_loaded": global_knx_project is not None,
+            },
+            "status": {
+                "connected": feed["connected"],
+                "write_enabled": False,
+            },
+        }
+
     return {
+        "mode": "standalone",
         "connection": {
             "type": os.getenv("KNX_CONNECTION_TYPE", "AUTOMATIC"),
             "gateway_ip": os.getenv("KNX_GATEWAY_IP", "AUTO"),

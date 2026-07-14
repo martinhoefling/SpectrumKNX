@@ -380,3 +380,36 @@ async def test_send_group_value_without_connection_raises():
     with patch.object(knx_daemon, "xknx_instance", None):
         with pytest.raises(RuntimeError, match="Not connected"):
             await knx_daemon.send_group_value("1/2/3", True, "1.001")
+
+
+def test_get_server_config_standalone_reports_mode():
+    import knx_daemon
+
+    with patch.object(knx_daemon, "READ_ONLY", False):
+        config = knx_daemon.get_server_config()
+
+    assert config["mode"] == "standalone"
+    assert "gateway_ip" in config["connection"]
+    assert "knxkeys_found" in config["files"]
+
+
+@pytest.mark.parametrize("feed_connected", [True, False])
+def test_get_server_config_companion_reports_live_feed(feed_connected):
+    """Companion mode must not report the daemon's bus connection (#184)."""
+    import ha_live_bridge
+    import knx_daemon
+
+    with (
+        patch.object(knx_daemon, "READ_ONLY", True),
+        patch.object(ha_live_bridge, "_active_source", "ha_websocket"),
+        patch.object(ha_live_bridge, "_connected", feed_connected),
+    ):
+        config = knx_daemon.get_server_config()
+
+    assert config["mode"] == "companion"
+    assert config["status"]["connected"] is feed_connected
+    assert config["status"]["write_enabled"] is False
+    assert config["connection"] == {"type": "HOME_ASSISTANT", "live_source": "ha_websocket"}
+    # No gateway/security noise that doesn't apply in companion mode
+    assert config["security"] == {}
+    assert "knxkeys_found" not in config["files"]

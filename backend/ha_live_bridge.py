@@ -32,6 +32,13 @@ POLL_INTERVAL = float(os.getenv("LIVE_POLL_INTERVAL", "1.0"))
 
 _task: asyncio.Task | None = None
 _last_seen: datetime | None = None
+_active_source: str = "none"  # resolved live source after fallbacks
+_connected: bool = False
+
+
+def live_feed_status() -> dict:
+    """Current live-feed state for the status API (companion mode, #184)."""
+    return {"source": _active_source, "connected": _connected}
 
 
 def _ha_token() -> str:
@@ -120,6 +127,7 @@ async def _replay_gap() -> None:
 
 async def _bridge_loop() -> None:
     """Subscribe to HA's KNX telegram stream and forward it to our live feed."""
+    global _connected
     backoff = 1.0
     while True:
         try:
@@ -137,6 +145,7 @@ async def _bridge_loop() -> None:
                     raise RuntimeError(f"knx/subscribe_telegrams failed: {result}")
 
                 logger.info("Connected to Home Assistant websocket, subscribed to KNX telegrams")
+                _connected = True
                 backoff = 1.0
                 await _replay_gap()
 
@@ -148,8 +157,10 @@ async def _bridge_loop() -> None:
                     _note_seen(telegram["timestamp"])
                     await manager.broadcast(telegram)
         except asyncio.CancelledError:
+            _connected = False
             raise
         except Exception as err:
+            _connected = False
             logger.warning(f"HA websocket bridge disconnected: {err} — retrying in {backoff:.0f}s")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
@@ -157,22 +168,26 @@ async def _bridge_loop() -> None:
 
 async def _poll_loop() -> None:
     """Poll the shared store for new rows and broadcast them."""
-    global _last_seen
+    global _connected, _last_seen
     _last_seen = datetime.now(UTC)  # history is loaded by the frontend separately
+    _connected = True  # store readability was verified at startup
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         try:
             for telegram in await _fetch_since(_last_seen):
                 await manager.broadcast(telegram)
+            _connected = True
         except asyncio.CancelledError:
+            _connected = False
             raise
         except Exception as err:
+            _connected = False
             logger.warning(f"Live poll of telegram store failed: {err}")
 
 
 async def companion_startup() -> None:
     """Initialize the read-only store and start the configured live source."""
-    global _task
+    global _task, _active_source
 
     conn_check = await store.check_connection()
     if not conn_check.ok:
@@ -196,10 +211,13 @@ async def companion_startup() -> None:
     if LIVE_SOURCE == "ha_websocket":
         if not _ha_token():
             logger.warning("No SUPERVISOR_TOKEN/HA_TOKEN available — falling back to store polling")
+            _active_source = "poll"
             _task = asyncio.create_task(_poll_loop())
         else:
+            _active_source = "ha_websocket"
             _task = asyncio.create_task(_bridge_loop())
     elif LIVE_SOURCE == "poll":
+        _active_source = "poll"
         _task = asyncio.create_task(_poll_loop())
     elif LIVE_SOURCE == "none":
         logger.info("Live updates disabled (LIVE_SOURCE=none)")
@@ -209,7 +227,8 @@ async def companion_startup() -> None:
 
 async def companion_shutdown() -> None:
     """Stop the live source and close the store."""
-    global _task
+    global _task, _connected
+    _connected = False
     if _task is not None:
         _task.cancel()
         try:

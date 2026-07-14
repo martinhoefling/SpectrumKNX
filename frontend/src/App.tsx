@@ -767,9 +767,12 @@ function App() {
                 </h3>
                 {serverConfig ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
-                    {/* Connection Status */}
+                    {/* Connection Status — in companion mode Home Assistant owns the
+                        bus; what matters is whether our live feed from HA works (#184) */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: 'var(--text-dim)' }}>KNX Connection:</span>
+                      <span style={{ color: 'var(--text-dim)' }}>
+                        {serverConfig.mode === 'companion' ? 'Home Assistant Feed:' : 'KNX Connection:'}
+                      </span>
                       <span style={{
                         color: serverConfig.status?.connected ? 'var(--success)' : 'var(--error)',
                         fontWeight: 600
@@ -798,12 +801,14 @@ function App() {
                           {serverConfig.files?.project_loaded ? '● Loaded' : '○ Not loaded'}
                         </span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                        <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>
-                        <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
-                          {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
-                        </span>
-                      </div>
+                      {serverConfig.files?.knxkeys_found !== undefined && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                          <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>
+                          <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                            {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Security */}
