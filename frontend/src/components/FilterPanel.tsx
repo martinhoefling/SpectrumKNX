@@ -4,7 +4,8 @@ import {
   type FilterOptions,
   type ActiveFilters,
   type FilterCounts,
-  DEFAULT_FILTERS
+  DEFAULT_FILTERS,
+  dptKey
 } from '../types/filters';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { KnxAddressTree } from './KnxAddressTree';
@@ -306,7 +307,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             />
           ))}
           {activeFilters.dpts.map(d => {
-            const label = options.dpts.find(opt => opt.main === d)?.label;
+            const label = options.dpts.find(opt => dptKey(opt.main!, opt.sub) === d)?.label;
             return (
               <OptionRow
                 key={`active-dpt-${d}`}
@@ -468,15 +469,18 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         {/* DPT */}
         {filteredDpts.length > 0 && (
           <Section title="DPT" defaultOpen={false}>
-            {filteredDpts.map(d => (
-              <OptionRow
-                key={d.main}
-                label={d.label!}
-                checked={activeFilters.dpts.includes(d.main!)}
-                count={mode === 'live' ? (counts?.dpts[d.main!] ?? 0) : undefined}
-                onToggle={() => update({ dpts: toggle(activeFilters.dpts, d.main!) })}
-              />
-            ))}
+            {filteredDpts.map(d => {
+              const key = dptKey(d.main!, d.sub);
+              return (
+                <OptionRow
+                  key={key}
+                  label={d.label!}
+                  checked={activeFilters.dpts.includes(key)}
+                  count={mode === 'live' ? (counts?.dpts[key] ?? 0) : undefined}
+                  onToggle={() => update({ dpts: toggle(activeFilters.dpts, key) })}
+                />
+              );
+            })}
           </Section>
         )}
 

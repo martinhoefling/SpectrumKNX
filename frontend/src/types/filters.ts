@@ -25,7 +25,7 @@ export interface ActiveFilters {
   sources: string[];       // source_address values
   targets: string[];       // target_address values
   types: string[];         // simplified_type values (Write/Read/Response)
-  dpts: number[];          // dpt_main numbers
+  dpts: string[];          // DPT keys: "1.001" for one subtype, bare "1" for all subtypes of a major DPT
   /** ms before a matching telegram to also include (0 = disabled) */
   deltaBeforeMs: number;
   /** ms after a matching telegram to also include (0 = disabled) */
@@ -64,6 +64,21 @@ export interface FilterableTelegram {
   target_address: string;
   simplified_type?: string | null;
   dpt_main?: number | null;
+  dpt_sub?: number | null;
+}
+
+/**
+ * Canonical DPT filter key: "1.001" with the sub, bare "1" without.
+ * Matches the grammar of the backend's dpt_main query parameter.
+ */
+export function dptKey(main: number, sub?: number | null): string {
+  return sub != null ? `${main}.${String(sub).padStart(3, '0')}` : `${main}`;
+}
+
+/** True if the telegram's DPT matches any key ("1" matches every 1.x). */
+export function matchesDpt(keys: string[], main?: number | null, sub?: number | null): boolean {
+  if (main == null) return false;
+  return keys.some(k => k === `${main}` || k === dptKey(main, sub));
 }
 
 /**
@@ -76,7 +91,7 @@ export function matchesTelegram(t: FilterableTelegram, f: ActiveFilters): boolea
   const srcOk = f.sources.length === 0 || srcMatch;
   const tgtOk = f.targets.length === 0 || tgtMatch;
   const typeOk = f.types.length === 0 || f.types.includes(t.simplified_type ?? '');
-  const dptOk = f.dpts.length === 0 || (t.dpt_main != null && f.dpts.includes(t.dpt_main));
+  const dptOk = f.dpts.length === 0 || matchesDpt(f.dpts, t.dpt_main, t.dpt_sub);
 
   const srcTgtOk = f.sources.length > 0 && f.targets.length > 0
     ? (f.sourceTargetRelation === 'OR' ? (srcMatch || tgtMatch) : (srcOk && tgtOk))
@@ -98,5 +113,5 @@ export interface FilterCounts {
   sources: Record<string, number>;
   targets: Record<string, number>;
   types: Record<string, number>;
-  dpts: Record<number, number>;
+  dpts: Record<string, number>;
 }

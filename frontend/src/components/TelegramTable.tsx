@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
-import type { ActiveFilters } from '../types/filters';
+import { dptKey, type ActiveFilters } from '../types/filters';
 import { getCookie, setCookie } from '../utils/cookies';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
@@ -329,8 +329,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <div title={getDPTLabel(t.dpt_main)} style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
                 <span title={t.dpt_name ?? undefined} style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
                 <button
-                  className={`quick-filter-btn ${activeFilters.dpts.includes(t.dpt_main) ? 'active' : ''}`}
-                  onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', t.dpt_main); }}
+                  className={`quick-filter-btn ${activeFilters.dpts.includes(dptKey(t.dpt_main, t.dpt_sub)) ? 'active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', dptKey(t.dpt_main, t.dpt_sub)); }}
                   title="Toggle DPT filter"
                 >
                   <Filter className="filter-icon" size={12} />

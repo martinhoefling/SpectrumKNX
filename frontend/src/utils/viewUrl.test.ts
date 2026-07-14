@@ -15,14 +15,14 @@ describe('parseViewUrl', () => {
   });
 
   test('parses a relative view with filters', () => {
-    const v = parseViewUrl('?view=viz&plot=1/2/3,1/2/4&src=1.1.5&tgt=1/2/3&type=Write&dpt=1,9&before=500&after=1000&rel=24h&limit=5000');
+    const v = parseViewUrl('?view=viz&plot=1/2/3,1/2/4&src=1.1.5&tgt=1/2/3&type=Write&dpt=1.001,9&before=500&after=1000&rel=24h&limit=5000');
     expect(v).not.toBeNull();
     expect(v!.plot).toEqual(['1/2/3', '1/2/4']);
     expect(v!.range).toEqual({ kind: 'relative', seconds: 86400 });
     expect(v!.filters.sources).toEqual(['1.1.5']);
     expect(v!.filters.targets).toEqual(['1/2/3']);
     expect(v!.filters.types).toEqual(['Write']);
-    expect(v!.filters.dpts).toEqual([1, 9]);
+    expect(v!.filters.dpts).toEqual(['1.001', '9']);
     expect(v!.filters.deltaBeforeMs).toBe(500);
     expect(v!.filters.deltaAfterMs).toBe(1000);
     expect(v!.limit).toBe(5000);
@@ -52,7 +52,7 @@ describe('buildViewUrl', () => {
         sources: ['1.1.5'],
         targets: ['1/2/3'],
         types: ['Write', 'Response'],
-        dpts: [9],
+        dpts: ['9.001'],
         deltaBeforeMs: 250,
         deltaAfterMs: 0,
         sourceTargetRelation: 'OR' as const,

@@ -170,7 +170,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       (wasFiltered(atLoad.sources) && nowHasFewer(activeFilters.sources, atLoad.sources)) ||
       (wasFiltered(atLoad.targets) && nowHasFewer(activeFilters.targets, atLoad.targets)) ||
       (wasFiltered(atLoad.types)   && nowHasFewer(activeFilters.types,   atLoad.types))   ||
-      (wasFiltered(atLoad.dpts)    && nowHasFewer(activeFilters.dpts,    atLoad.dpts as number[]))
+      (wasFiltered(atLoad.dpts)    && nowHasFewer(activeFilters.dpts,    atLoad.dpts))
     );
   }, [activeFilters, filtersAtLoad, telegrams.length]);
 

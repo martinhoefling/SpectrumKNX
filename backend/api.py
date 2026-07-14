@@ -126,14 +126,22 @@ async def get_telegrams(
     # Map simplified types to technical names
     type_map_reverse = {"Write": "GroupValueWrite", "Read": "GroupValueRead", "Response": "GroupValueResponse"}
     type_list_db = [type_map_reverse.get(t, t) for t in type_list]
-    dpt_main_list = [int(d.strip()) for d in dpt_main.split(",") if d.strip().isdigit()] if dpt_main else []
+
+    # DPT entries are "main.sub" for one subtype or a bare "main" for all
+    # subtypes of a major DPT (#180)
+    dpt_pairs: list[tuple[int, int | None]] = []
+    if dpt_main:
+        for entry in dpt_main.split(","):
+            main_str, sep, sub_str = entry.strip().partition(".")
+            if main_str.isdigit() and (not sep or sub_str.isdigit()):
+                dpt_pairs.append((int(main_str), int(sub_str) if sep else None))
 
     # Build the library query
     query = TelegramQuery(
         sources=source_list,
         destinations=target_list,
         telegram_types=type_list_db,
-        dpt_mains=dpt_main_list,
+        dpts=dpt_pairs,
         start_time=start_time,
         end_time=end_time,
         delta_before_ms=delta_before_ms,

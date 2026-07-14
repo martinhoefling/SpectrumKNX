@@ -24,6 +24,7 @@ import { UpdateNotification } from './components/UpdateNotification';
 import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
   DEFAULT_FILTERS,
+  dptKey,
   hasActiveFilters,
   matchesTelegram,
   type ActiveFilters,
@@ -495,13 +496,18 @@ function App() {
     const sources: Record<string, number> = {};
     const targets: Record<string, number> = {};
     const types: Record<string, number> = {};
-    const dpts: Record<number, number> = {};
+    const dpts: Record<string, number> = {};
 
     for (const t of sortedLiveTelegrams) {
       sources[t.source_address] = (sources[t.source_address] ?? 0) + 1;
       targets[t.target_address] = (targets[t.target_address] ?? 0) + 1;
       if (t.simplified_type) types[t.simplified_type] = (types[t.simplified_type] ?? 0) + 1;
-      if (t.dpt_main != null) dpts[t.dpt_main] = (dpts[t.dpt_main] ?? 0) + 1;
+      if (t.dpt_main != null) {
+        const key = dptKey(t.dpt_main, t.dpt_sub);
+        dpts[key] = (dpts[key] ?? 0) + 1;
+        // A bare-main option ("all 1.x") counts every subtype
+        if (t.dpt_sub != null) dpts[`${t.dpt_main}`] = (dpts[`${t.dpt_main}`] ?? 0) + 1;
+      }
     }
     return { sources, targets, types, dpts };
   }, [sortedLiveTelegrams]);

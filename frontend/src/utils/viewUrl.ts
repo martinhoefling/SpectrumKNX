@@ -60,7 +60,7 @@ export function parseViewUrl(search: string): VizViewState | null {
     sources: list(p.get('src')),
     targets: list(p.get('tgt')),
     types: list(p.get('type')),
-    dpts: list(p.get('dpt')).map(Number).filter(n => Number.isFinite(n)),
+    dpts: list(p.get('dpt')).filter(d => /^\d+(\.\d+)?$/.test(d)),
     deltaBeforeMs: Math.max(0, Number(p.get('before')) || 0),
     deltaAfterMs: Math.max(0, Number(p.get('after')) || 0),
     sourceTargetRelation: p.get('rel_st') === 'OR' ? 'OR' : 'AND',

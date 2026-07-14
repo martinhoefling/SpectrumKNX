@@ -243,6 +243,19 @@ def test_get_telegrams(mock_query):
     assert data["telegrams"][0]["raw_data"] == "01"
 
 
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_dpt_filter_pairs(mock_query):
+    """DPT entries map to (main, sub) pairs; bare mains match all subtypes (#180)."""
+    mock_query.return_value = TelegramQueryResult(telegrams=[], total_count=0, limit_reached=False)
+
+    response = client.get("/api/telegrams?dpt_main=1.001,9.001,5,junk,2.xyz")
+    assert response.status_code == 200
+
+    query = mock_query.call_args.args[0]
+    assert query.dpts == [(1, 1), (9, 1), (5, None)]
+    assert query.dpt_mains == []
+
+
 def _stored_telegram(destination: str, value: float) -> StoredTelegram:
     return StoredTelegram(
         timestamp=datetime(2023, 1, 1),
