@@ -105,7 +105,7 @@ def _build_telegram_response(telegrams: list) -> list:
 
 @router.get("/api/telegrams")
 async def get_telegrams(
-    limit: int = 25000,
+    limit: int = 100000,
     offset: int = 0,
     # Multi-value: comma-separated strings
     source_address: str | None = None,

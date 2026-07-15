@@ -7,7 +7,7 @@ import { wsUrl } from '../utils/basePath';
 import type { VizViewState } from '../utils/viewUrl';
 
 const DEFAULT_REFRESH_SECONDS = 300;
-const DEFAULT_LIMIT = 25000;
+const DEFAULT_LIMIT = 100000;
 
 /**
  * Chart-only rendering of a shared view (#150) for iframes / dashboard cards
