@@ -168,7 +168,7 @@ function App() {
   const [serverConfig, setServerConfig] = useState<any>(null);
 
   // ── Settings & Persistence ──────────────────────────────────────────────────
-  const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 25000));
+  const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 100000));
   const [visibleColumns, setVisibleColumns] = useState<{ [key: string]: boolean }>(() => {
     try {
       const cookie = getCookie('visibleColumns');
@@ -189,6 +189,7 @@ function App() {
   // ── Live State ──────────────────────────────────────────────────────────────
   const [liveTelegrams, setLiveTelegrams] = useState<Telegram[]>([]);
   const [isPaused, setIsPaused] = useState(false);
+  const PAUSE_BUFFER_CAP = 10000;
   const bufferRef = useRef<Telegram[]>([]);
   const [bufferedCount, setBufferedCount] = useState(0);
 
@@ -311,8 +312,9 @@ function App() {
       });
     } else {
       bufferRef.current.push(t);
-      // Cap at the table limit — older overflow would be cut on resume anyway.
-      if (bufferRef.current.length > loadLimit) bufferRef.current.shift();
+      // Cap the pause buffer so a forgotten pause can't grow memory unbounded;
+      // the oldest telegrams are dropped first.
+      if (bufferRef.current.length > PAUSE_BUFFER_CAP) bufferRef.current.shift();
       setBufferedCount(prev => prev + 1);
     }
   }, [isPaused, loadLimit]);
