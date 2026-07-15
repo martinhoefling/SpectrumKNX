@@ -72,3 +72,19 @@ Live output is observable on `ws://localhost:<port>/ws/telegrams`.
   renders them via `new Date(ts)`, i.e. shifted to local time. App-wide behavior.
 - `ruff check backend` has 3 pre-existing I001 import-order errors on main
   (api.py, knx_daemon.py, tests/test_api.py) — not a regression signal.
+
+## Driving live telegrams without a bus (frontend-only verification)
+
+Playwright's `ctx.routeWebSocket(/\/ws\/telegrams/, ws => { wsConn = ws })`
+lets you inject "live" telegrams as JSON frames (shape = `Telegram` in
+`useWebSocket.ts`; direction values are `Incoming`/`Outgoing`). Combined with
+route stubs, no backend state is needed at all:
+
+- `**/api/server/config` → `{ mode: 'standalone', status: { connected: true, write_enabled: true } }`
+  (gates the send bar and send/read buttons)
+- `**/api/filter-options` → targets incl. `main`/`sub` prefill the send-bar DPT
+- `**/api/knx/send` + `**/api/knx/send/scheduled/status` → stub for send-bar flows
+
+Gotcha: `page.click('text="Write"')` hits the *filter panel's* Write type
+option, not the send-bar button — scope to the bar, e.g.
+`page.locator('div', { has: page.locator('text=Send to bus') }).last().locator('button:text-is("Write")')`.
