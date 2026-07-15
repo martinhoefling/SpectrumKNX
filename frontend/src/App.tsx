@@ -311,6 +311,8 @@ function App() {
       });
     } else {
       bufferRef.current.push(t);
+      // Cap at the table limit — older overflow would be cut on resume anyway.
+      if (bufferRef.current.length > loadLimit) bufferRef.current.shift();
       setBufferedCount(prev => prev + 1);
     }
   }, [isPaused, loadLimit]);
@@ -359,12 +361,16 @@ function App() {
   // ── Pause / Resume ──────────────────────────────────────────────────────────
   const togglePause = () => {
     if (isPaused) {
-      setLiveTelegrams(prev => {
-        const next = [...bufferRef.current, ...prev];
-        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-      });
+      // Detach the buffer before scheduling the merge: the state updater runs
+      // after this handler, so reading bufferRef.current inside it would see
+      // the already-cleared array and drop every buffered telegram (#196).
+      const buffered = bufferRef.current.reverse(); // arrival order → newest-first
       bufferRef.current = [];
       setBufferedCount(0);
+      setLiveTelegrams(prev => {
+        const next = [...buffered, ...prev];
+        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
+      });
     }
     setIsPaused(!isPaused);
   };
