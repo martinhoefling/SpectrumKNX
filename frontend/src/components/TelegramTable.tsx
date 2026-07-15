@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -79,6 +79,14 @@ type TelegramRow = Telegram & { deltaStr: string | null };
 
 const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
+const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
+
+// Identity of a telegram for anchor tracking across list updates (#202).
+// No index fallback here — the same telegram must map to the same key in
+// consecutive lists even when its position shifts.
+const anchorKey = (t: Telegram) =>
+  `${t.timestamp}-${t.source_address}-${t.target_address}-${t.raw_hex ?? ''}`;
+
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, onQuickSend
 }) => {
@@ -157,7 +165,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const virtualizer = useVirtualizer({
     count: telegramRows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 85, // Better estimate for multi-line rows
+    estimateSize: () => ROW_ESTIMATE, // Better estimate for multi-line rows
     overscan: 10,
     getItemKey: (index) => {
       const t = telegramRows[index];
@@ -165,27 +173,167 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     },
   });
 
-  // Track if we are at the top to handle auto-scroll
-  const isAtTopRef = useRef(true);
-  const handleScroll = () => {
-    if (parentRef.current) {
-      // Small threshold to handle precision issues
-      isAtTopRef.current = parentRef.current.scrollTop < 20;
+  // ── ETS-style scroll anchoring (#202) ───────────────────────────────────────
+  // Auto-scroll only while the scrollbar sits at the live edge (top for
+  // newest-first, bottom for oldest-first). Scrolled away, the viewed rows are
+  // anchored — new telegrams keep filling the list and a pill offers the way
+  // back. Only meaningful for the timestamp sort, where the live edge exists.
+  //
+  // Rows are dynamically measured (ResizeObserver), so a new row enters the
+  // layout at the 85px estimate and later shrinks to its real height. Estimate-
+  // based math therefore can't keep an anchored row still. Instead we track a
+  // concrete anchor row by key and, after each update, correct scrollTop by the
+  // real pixel delta of that row's position — re-run on the next frame so the
+  // async re-measure of prepended rows is absorbed too.
+  const isTimeSort = sortConfig.key === 'timestamp';
+  const liveEdge = sortConfig.direction === 'desc' ? 'top' : 'bottom';
+  const atEdgeRef = useRef(true);
+  const [newSinceAnchor, setNewSinceAnchor] = useState(0);
+  // The row pinned to the top of the viewport while anchored, and its offset
+  // from the scroll-container top. Captured from user scrolls only.
+  const anchorRef = useRef<{ key: string; offset: number } | null>(null);
+  const programmaticScrollRef = useRef(false);
+
+  // Suppress edge/anchor tracking for scrolls we cause ourselves. Auto-clears on
+  // the next frame so a no-op programmatic scroll can't swallow a later real one.
+  const markProgrammatic = () => {
+    programmaticScrollRef.current = true;
+    requestAnimationFrame(() => { programmaticScrollRef.current = false; });
+  };
+
+  const rowOffset = (key: string): number | null => {
+    const el = parentRef.current;
+    if (!el) return null;
+    const row = el.querySelector<HTMLElement>(`[data-akey="${CSS.escape(key)}"]`);
+    if (!row) return null;
+    return row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  };
+
+  const checkAtEdge = () => {
+    const el = parentRef.current;
+    if (!el) return true;
+    // Small threshold to handle precision issues
+    return liveEdge === 'top'
+      ? el.scrollTop < 20
+      : el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+  };
+
+  // Record the top-most visible row so we can pin it across list updates.
+  const captureAnchor = () => {
+    const el = parentRef.current;
+    if (!el) return;
+    const cTop = el.getBoundingClientRect().top;
+    for (const row of el.querySelectorAll<HTMLElement>('.log-row')) {
+      const rr = row.getBoundingClientRect();
+      if (rr.bottom - cTop > 0) {
+        const key = row.getAttribute('data-akey');
+        if (key) anchorRef.current = { key, offset: rr.top - cTop };
+        return;
+      }
     }
   };
 
-  // Handle auto-scroll to top when new telegrams arrive
-  const lastFirstIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    const firstId = telegrams[0]?.timestamp + telegrams[0]?.source_address;
-    if (lastFirstIdRef.current && firstId !== lastFirstIdRef.current) {
-      if (isAtTopRef.current) {
-        // Use scrollToOffset(0) for a more reliable "jump" to top in virtualized lists
-        virtualizer.scrollToOffset(0);
-      }
+  const handleScroll = () => {
+    // Ignore the scrolls our own compensation triggers.
+    if (programmaticScrollRef.current) return;
+    const atEdge = checkAtEdge();
+    atEdgeRef.current = atEdge;
+    if (atEdge) {
+      setNewSinceAnchor(0);
+      anchorRef.current = null;
+    } else {
+      captureAnchor();
     }
-    lastFirstIdRef.current = firstId;
-  }, [telegrams, virtualizer]);
+  };
+
+  const scrollToEdge = () => {
+    markProgrammatic();
+    virtualizer.scrollToOffset(liveEdge === 'top' ? 0 : virtualizer.getTotalSize());
+  };
+
+  const jumpToLive = () => {
+    atEdgeRef.current = true;
+    anchorRef.current = null;
+    setNewSinceAnchor(0);
+    scrollToEdge();
+  };
+
+  // Correct scrollTop so the anchored row keeps its recorded viewport offset.
+  // Only the top (newest-first) edge needs this — bottom-appends don't move the
+  // content above the viewport.
+  const pinAnchor = () => {
+    const el = parentRef.current;
+    const anchor = anchorRef.current;
+    if (!el || !anchor || atEdgeRef.current || liveEdge !== 'top') return;
+    const now = rowOffset(anchor.key);
+    if (now == null) return;
+    const delta = now - anchor.offset;
+    if (Math.abs(delta) > 0.5) {
+      markProgrammatic();
+      el.scrollTop += delta;
+    }
+  };
+
+  // Changing sort moves (or removes) the live edge — drop the anchor state.
+  useEffect(() => {
+    setNewSinceAnchor(0);
+    anchorRef.current = null;
+    atEdgeRef.current = checkAtEdge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortConfig]);
+
+  // React to list updates before paint: follow the live edge, or pin the
+  // anchored row by correcting scrollTop by its real pixel shift.
+  const prevRowsRef = useRef<{ firstKey: string | null; lastKey: string | null; len: number }>({
+    firstKey: null, lastKey: null, len: 0,
+  });
+  useLayoutEffect(() => {
+    const rows = telegramRows;
+    const prev = prevRowsRef.current;
+    const firstKey = rows.length > 0 ? anchorKey(rows[0]) : null;
+    const lastKey = rows.length > 0 ? anchorKey(rows[rows.length - 1]) : null;
+    prevRowsRef.current = { firstKey, lastKey, len: rows.length };
+
+    if (!isTimeSort || prev.len === 0 || rows.length === 0) return;
+
+    const edgeKey = liveEdge === 'top' ? firstKey : lastKey;
+    const prevEdgeKey = liveEdge === 'top' ? prev.firstKey : prev.lastKey;
+    if (!prevEdgeKey || edgeKey === prevEdgeKey) return; // nothing new at the live edge
+
+    // How many rows appeared at the live edge (for the pill count).
+    let added = -1;
+    if (liveEdge === 'top') {
+      for (let i = 0; i < rows.length; i++) if (anchorKey(rows[i]) === prevEdgeKey) { added = i; break; }
+    } else {
+      for (let i = rows.length - 1; i >= 0; i--) if (anchorKey(rows[i]) === prevEdgeKey) { added = rows.length - 1 - i; break; }
+    }
+
+    if (added <= 0) {
+      // Previous edge vanished: list replaced (clear / filter / history load).
+      anchorRef.current = null;
+      setNewSinceAnchor(0);
+      return;
+    }
+
+    if (atEdgeRef.current) {
+      scrollToEdge();
+      return;
+    }
+
+    setNewSinceAnchor(n => n + added);
+    pinAnchor(); // pre-paint; the total-size effect re-pins after re-measure
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telegramRows]);
+
+  // Re-pin whenever the measured content size changes. Prepended rows enter at
+  // the 85px estimate and shrink to their real height a frame later (async
+  // ResizeObserver), shifting everything below; this fires on that re-measure
+  // and cancels the shift, so the anchored row stays put across variable heights.
+  const totalSize = virtualizer.getTotalSize();
+  useLayoutEffect(() => {
+    pinAnchor();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalSize]);
 
   // Visible columns in order, and the matching CSS grid template.
   // The delta column is only meaningful when sorting by time, so hide it otherwise.
@@ -421,11 +569,33 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         ))}
       </div>
 
+      {/* Body area — relative wrapper so the jump-to-live pill (#202) anchors
+          below the header, not over it. */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* Jump-to-live pill — shown while anchored away from the edge (#202) */}
+      {isTimeSort && newSinceAnchor > 0 && (
+        <button
+          onClick={jumpToLive}
+          className="jump-to-live-pill"
+          style={{
+            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+            [liveEdge]: '1rem', zIndex: 20,
+          }}
+          title="Jump back to the live edge"
+        >
+          {liveEdge === 'top' ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {newSinceAnchor.toLocaleString()} new telegram{newSinceAnchor === 1 ? '' : 's'}
+        </button>
+      )}
+
       {/* Virtualized Body */}
       <div
         ref={parentRef}
         onScroll={handleScroll}
-        style={{ flex: 1, overflowY: 'auto', position: 'relative' }}
+        // overflow-anchor off: we compensate scrollTop manually on prepend (#202),
+        // so the browser's native anchoring must not also move the viewport.
+        style={{ flex: 1, overflowY: 'auto', position: 'relative', overflowAnchor: 'none' }}
         className="custom-scrollbar"
       >
         {telegramRows.length === 0 ? (
@@ -446,6 +616,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <div
                   key={virtualRow.key}
                   data-index={virtualRow.index}
+                  data-akey={anchorKey(t)}
                   ref={virtualizer.measureElement}
                   style={{
                     position: 'absolute',
@@ -471,6 +642,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
             })}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
@@ -532,6 +704,27 @@ style.textContent = `
 
   .quick-last-seen-btn:hover {
     color: var(--accent-primary);
+  }
+
+  .jump-to-live-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.85rem;
+    border: 1px solid var(--accent-primary);
+    border-radius: 999px;
+    background: var(--accent-primary);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.15s, filter 0.15s;
+  }
+
+  .jump-to-live-pill:hover {
+    filter: brightness(1.08);
+    transform: translateX(-50%) scale(1.03);
   }
 
   .col-resize-handle {
