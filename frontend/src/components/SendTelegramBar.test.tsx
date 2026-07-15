@@ -25,6 +25,7 @@ function mockFetch(routes: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal('fetch', mockFetch({ '/api/knx/send/scheduled/status': IDLE }));
 });
 
@@ -71,6 +72,25 @@ test('starts a scheduled job when an interval is set and shows the cancel row', 
   const body = JSON.parse((scheduledCall![1] as RequestInit).body as string);
   expect(body.interval_seconds).toBe(5);
   expect(body.delay_seconds).toBe(0);
+});
+
+test('boolean On/Off sends are recorded in the recent GAs (#190)', async () => {
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/knx/send': { status: 'sent' },
+  }));
+
+  render(
+    <SendTelegramBar
+      targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]}
+      onClose={() => {}}
+    />
+  );
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '12/0/0' } });
+  fireEvent.click(screen.getByText('On'));
+
+  await waitFor(() => expect(screen.getByText(/Sent on to 12\/0\/0/)).toBeInTheDocument());
+  expect(JSON.parse(localStorage.getItem('spectrumknx-recent-send-gas')!)).toEqual(['12/0/0']);
 });
 
 test('picks up an already-running job on mount', async () => {

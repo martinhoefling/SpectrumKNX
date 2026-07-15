@@ -8,7 +8,7 @@ interface Props {
   /** Called on every change. `option` is set only when picked from the list. */
   onChange: (address: string, option?: FilterOption) => void;
   options: FilterOption[];
-  /** Recently used addresses, newest first — listed on top while the input is empty (#187). */
+  /** Recently used addresses, newest first — the only suggestions while the input is empty (#187, #190). */
   recentAddresses?: string[];
   placeholder?: string;
   width?: number | string;
@@ -32,12 +32,11 @@ export function GaCombobox({ value, onChange, options, recentAddresses, placehol
       );
       return { matches: list.slice(0, 100), recentCount: 0 };
     }
-    // Empty input: recently sent addresses first (with project names when known)
+    // Empty input: only the recently used addresses, newest first (#190) —
+    // the full project list appears once the user starts typing.
     const byAddress = new Map(options.filter(o => o.address).map(o => [o.address!, o]));
     const recent = (recentAddresses ?? []).map(a => byAddress.get(a) ?? ({ address: a } as FilterOption));
-    const recentSet = new Set(recent.map(r => r.address));
-    const rest = options.filter(o => !recentSet.has(o.address));
-    return { matches: [...recent, ...rest].slice(0, 100), recentCount: recent.length };
+    return { matches: recent, recentCount: recent.length };
   }, [value, options, recentAddresses]);
 
   useEffect(() => {

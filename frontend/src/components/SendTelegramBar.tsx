@@ -222,6 +222,7 @@ export function SendTelegramBar({ targets, initialAddress, onClose }: Props) {
         await sendTelegram(address.trim(), on, dpt.trim() || undefined);
         setFeedback({ ok: true, msg: `Sent ${on ? 'on' : 'off'} to ${address.trim()}` });
       }
+      setRecentGas(pushRecentGa(address.trim()));
     } catch (err) {
       setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Request failed' });
     } finally {
