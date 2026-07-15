@@ -4,6 +4,8 @@ import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
+import { seriesColor } from '../utils/seriesColors';
+import { isSeriesHidden, setSeriesHidden } from '../utils/legendVisibility';
 
 interface MixedChartProps {
   bucket: ChartBucket;
@@ -11,17 +13,6 @@ interface MixedChartProps {
   maxTime: number | null;
   stepped: boolean;
 }
-
-// Generate simple distinct colors for series
-const COLORS = [
-  '#3b82f6', // blue
-  '#ef4444', // red
-  '#eab308', // yellow
-  '#22c55e', // green
-  '#a855f7', // purple
-  '#f97316', // orange
-  '#14b8a6', // teal
-];
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
@@ -73,6 +64,14 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
       width,
       height: isBinary ? Math.max(150, series.length * 50) : 300,
       cursor: { sync: { key: syncCursor.key } },
+      hooks: {
+        // Record legend show/hide toggles so they survive chart recreation (#192).
+        setSeries: [(u, idx, opts) => {
+          if (idx == null || idx === 0 || !('show' in opts)) return;
+          const addr = series[idx - 1]?.address;
+          if (addr) setSeriesHidden(addr, !u.series[idx].show);
+        }]
+      },
       scales: {
         x: { time: true },
         y: scaleConfig
@@ -99,13 +98,14 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
         {
           value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
         },
-        ...series.map((s, idx) => ({
+        ...series.map((s) => ({
           label: s.name,
-          stroke: COLORS[idx % COLORS.length],
+          show: !isSeriesHidden(s.address),
+          stroke: seriesColor(s.address),
           width: 2,
           spanGaps: true,
           paths: (isBinary || stepped) ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
-          fill: isBinary ? COLORS[idx % COLORS.length] + '33' : undefined,
+          fill: isBinary ? seriesColor(s.address) + '33' : undefined,
           points: { show: false },
           value: (_u: uPlot, v: number | null) => {
             if (v === null) return '-';
