@@ -468,6 +468,7 @@ function App() {
       f.sources.length === 0 &&
       f.targets.length === 0 &&
       f.types.length === 0 &&
+      f.directions.length === 0 &&
       f.dpts.length === 0;
 
     // Step 1: mark each row as matching / not-matching
@@ -502,12 +503,14 @@ function App() {
     const sources: Record<string, number> = {};
     const targets: Record<string, number> = {};
     const types: Record<string, number> = {};
+    const directions: Record<string, number> = {};
     const dpts: Record<string, number> = {};
 
     for (const t of sortedLiveTelegrams) {
       sources[t.source_address] = (sources[t.source_address] ?? 0) + 1;
       targets[t.target_address] = (targets[t.target_address] ?? 0) + 1;
       if (t.simplified_type) types[t.simplified_type] = (types[t.simplified_type] ?? 0) + 1;
+      if (t.direction) directions[t.direction] = (directions[t.direction] ?? 0) + 1;
       if (t.dpt_main != null) {
         const key = dptKey(t.dpt_main, t.dpt_sub);
         dpts[key] = (dpts[key] ?? 0) + 1;
@@ -515,11 +518,11 @@ function App() {
         if (t.dpt_sub != null) dpts[`${t.dpt_main}`] = (dpts[`${t.dpt_main}`] ?? 0) + 1;
       }
     }
-    return { sources, targets, types, dpts };
+    return { sources, targets, types, directions, dpts };
   }, [sortedLiveTelegrams]);
 
   const activeFilterCount = hasActiveFilters(activeFilters)
-    ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
+    ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.directions.length + activeFilters.dpts.length
     : 0;
 
   return (

@@ -50,3 +50,25 @@ describe('matchesTelegram DPT filtering', () => {
     expect(matchesTelegram(telegram, { ...DEFAULT_FILTERS, dpts: ['1'] })).toBe(true);
   });
 });
+
+describe('matchesTelegram direction filtering (#194)', () => {
+  const incoming = { source_address: '1.1.1', target_address: '1/2/3', simplified_type: 'Write', direction: 'Incoming' };
+  const outgoing = { ...incoming, direction: 'Outgoing' };
+  const undirected = { ...incoming, direction: null };
+
+  test('filters by direction', () => {
+    expect(matchesTelegram(incoming, { ...DEFAULT_FILTERS, directions: ['Outgoing'] })).toBe(false);
+    expect(matchesTelegram(outgoing, { ...DEFAULT_FILTERS, directions: ['Outgoing'] })).toBe(true);
+    expect(matchesTelegram(incoming, { ...DEFAULT_FILTERS, directions: ['Incoming', 'Outgoing'] })).toBe(true);
+  });
+
+  test('is orthogonal to the type filter', () => {
+    expect(matchesTelegram(outgoing, { ...DEFAULT_FILTERS, types: ['Write'], directions: ['Outgoing'] })).toBe(true);
+    expect(matchesTelegram(outgoing, { ...DEFAULT_FILTERS, types: ['Read'], directions: ['Outgoing'] })).toBe(false);
+  });
+
+  test('telegrams without a direction pass only when unfiltered', () => {
+    expect(matchesTelegram(undirected, DEFAULT_FILTERS)).toBe(true);
+    expect(matchesTelegram(undirected, { ...DEFAULT_FILTERS, directions: ['Incoming'] })).toBe(false);
+  });
+});

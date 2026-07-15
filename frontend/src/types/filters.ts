@@ -25,6 +25,7 @@ export interface ActiveFilters {
   sources: string[];       // source_address values
   targets: string[];       // target_address values
   types: string[];         // simplified_type values (Write/Read/Response)
+  directions: string[];    // telegram direction values (Incoming/Outgoing), orthogonal to types (#194)
   dpts: string[];          // DPT keys: "1.001" for one subtype, bare "1" for all subtypes of a major DPT
   /** ms before a matching telegram to also include (0 = disabled) */
   deltaBeforeMs: number;
@@ -48,10 +49,14 @@ export interface ActiveFilters {
   sourceTargetRelation: 'AND' | 'OR';
 }
 
+/** The two telegram direction values, as set by the backend daemon. */
+export const DIRECTIONS = ['Incoming', 'Outgoing'];
+
 export const DEFAULT_FILTERS: ActiveFilters = {
   sources: [],
   targets: [],
   types: [],
+  directions: [],
   dpts: [],
   deltaBeforeMs: 0,
   deltaAfterMs: 0,
@@ -63,6 +68,7 @@ export interface FilterableTelegram {
   source_address: string;
   target_address: string;
   simplified_type?: string | null;
+  direction?: string | null;
   dpt_main?: number | null;
   dpt_sub?: number | null;
 }
@@ -91,13 +97,15 @@ export function matchesTelegram(t: FilterableTelegram, f: ActiveFilters): boolea
   const srcOk = f.sources.length === 0 || srcMatch;
   const tgtOk = f.targets.length === 0 || tgtMatch;
   const typeOk = f.types.length === 0 || f.types.includes(t.simplified_type ?? '');
+  // Telegrams without a direction (older stored data) only pass when unfiltered.
+  const dirOk = f.directions.length === 0 || f.directions.includes(t.direction ?? '');
   const dptOk = f.dpts.length === 0 || matchesDpt(f.dpts, t.dpt_main, t.dpt_sub);
 
   const srcTgtOk = f.sources.length > 0 && f.targets.length > 0
     ? (f.sourceTargetRelation === 'OR' ? (srcMatch || tgtMatch) : (srcOk && tgtOk))
     : (srcOk && tgtOk);
 
-  return srcTgtOk && typeOk && dptOk;
+  return srcTgtOk && typeOk && dirOk && dptOk;
 }
 
 export function hasActiveFilters(f: ActiveFilters): boolean {
@@ -105,6 +113,7 @@ export function hasActiveFilters(f: ActiveFilters): boolean {
     f.sources.length > 0 ||
     f.targets.length > 0 ||
     f.types.length > 0 ||
+    f.directions.length > 0 ||
     f.dpts.length > 0
   );
 }
@@ -113,5 +122,6 @@ export interface FilterCounts {
   sources: Record<string, number>;
   targets: Record<string, number>;
   types: Record<string, number>;
+  directions: Record<string, number>;
   dpts: Record<string, number>;
 }

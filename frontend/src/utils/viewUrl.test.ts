@@ -15,13 +15,14 @@ describe('parseViewUrl', () => {
   });
 
   test('parses a relative view with filters', () => {
-    const v = parseViewUrl('?view=viz&plot=1/2/3,1/2/4&src=1.1.5&tgt=1/2/3&type=Write&dpt=1.001,9&before=500&after=1000&rel=24h&limit=5000');
+    const v = parseViewUrl('?view=viz&plot=1/2/3,1/2/4&src=1.1.5&tgt=1/2/3&type=Write&dir=Outgoing,bogus&dpt=1.001,9&before=500&after=1000&rel=24h&limit=5000');
     expect(v).not.toBeNull();
     expect(v!.plot).toEqual(['1/2/3', '1/2/4']);
     expect(v!.range).toEqual({ kind: 'relative', seconds: 86400 });
     expect(v!.filters.sources).toEqual(['1.1.5']);
     expect(v!.filters.targets).toEqual(['1/2/3']);
     expect(v!.filters.types).toEqual(['Write']);
+    expect(v!.filters.directions).toEqual(['Outgoing']);
     expect(v!.filters.dpts).toEqual(['1.001', '9']);
     expect(v!.filters.deltaBeforeMs).toBe(500);
     expect(v!.filters.deltaAfterMs).toBe(1000);
@@ -52,6 +53,7 @@ describe('buildViewUrl', () => {
         sources: ['1.1.5'],
         targets: ['1/2/3'],
         types: ['Write', 'Response'],
+        directions: ['Incoming'],
         dpts: ['9.001'],
         deltaBeforeMs: 250,
         deltaAfterMs: 0,
@@ -78,6 +80,7 @@ describe('buildViewUrl', () => {
     expect(url).toContain('view=viz');
     expect(url).toContain('rel=1h');
     expect(url).not.toContain('src=');
+    expect(url).not.toContain('dir=');
     expect(url).not.toContain('before=');
     expect(url).not.toContain('limit=');
     expect(url).not.toContain('rel_st=');

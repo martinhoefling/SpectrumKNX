@@ -1,4 +1,4 @@
-import { DEFAULT_FILTERS, type ActiveFilters } from '../types/filters';
+import { DEFAULT_FILTERS, DIRECTIONS, type ActiveFilters } from '../types/filters';
 import type { LoadedRange } from './historyLoad';
 import { getBasePath } from './basePath';
 
@@ -60,6 +60,7 @@ export function parseViewUrl(search: string): VizViewState | null {
     sources: list(p.get('src')),
     targets: list(p.get('tgt')),
     types: list(p.get('type')),
+    directions: list(p.get('dir')).filter(d => DIRECTIONS.includes(d)),
     dpts: list(p.get('dpt')).filter(d => /^\d+(\.\d+)?$/.test(d)),
     deltaBeforeMs: Math.max(0, Number(p.get('before')) || 0),
     deltaAfterMs: Math.max(0, Number(p.get('after')) || 0),
@@ -96,6 +97,7 @@ export function buildViewUrl(state: {
   if (f.sources.length > 0) p.set('src', f.sources.join(','));
   if (f.targets.length > 0) p.set('tgt', f.targets.join(','));
   if (f.types.length > 0) p.set('type', f.types.join(','));
+  if (f.directions.length > 0) p.set('dir', f.directions.join(','));
   if (f.dpts.length > 0) p.set('dpt', f.dpts.join(','));
   if (f.deltaBeforeMs > 0) p.set('before', String(f.deltaBeforeMs));
   if (f.deltaAfterMs > 0) p.set('after', String(f.deltaAfterMs));

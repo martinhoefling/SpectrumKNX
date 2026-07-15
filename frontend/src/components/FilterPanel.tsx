@@ -5,6 +5,7 @@ import {
   type ActiveFilters,
   type FilterCounts,
   DEFAULT_FILTERS,
+  DIRECTIONS,
   dptKey
 } from '../types/filters';
 import { compareKnxAddress } from '../utils/knxAddress';
@@ -183,6 +184,9 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   const filteredTypes = useMemo(() =>
     options.types.filter(t => !q || t.toLowerCase().includes(q)), [options.types, q]);
 
+  const filteredDirections = useMemo(() =>
+    DIRECTIONS.filter(d => !q || d.toLowerCase().includes(q)), [q]);
+
   const filteredDpts = useMemo(() =>
     options.dpts.filter(d =>
       !q || d.label?.toLowerCase().includes(q)
@@ -198,6 +202,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
     activeFilters.sources.length +
     activeFilters.targets.length +
     activeFilters.types.length +
+    activeFilters.directions.length +
     activeFilters.dpts.length;
 
   return (
@@ -304,6 +309,16 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               count={mode === 'live' ? (counts?.types[t] ?? 0) : undefined}
               onToggle={() => update({ types: activeFilters.types.filter(v => v !== t) })}
               onRemove={() => update({ types: activeFilters.types.filter(v => v !== t) })}
+            />
+          ))}
+          {activeFilters.directions.map(d => (
+            <OptionRow
+              key={`active-dir-${d}`}
+              label={d}
+              checked={true}
+              count={mode === 'live' ? (counts?.directions[d] ?? 0) : undefined}
+              onToggle={() => update({ directions: activeFilters.directions.filter(v => v !== d) })}
+              onRemove={() => update({ directions: activeFilters.directions.filter(v => v !== d) })}
             />
           ))}
           {activeFilters.dpts.map(d => {
@@ -461,6 +476,21 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 checked={activeFilters.types.includes(t)}
                 count={mode === 'live' ? (counts?.types[t] ?? 0) : undefined}
                 onToggle={() => update({ types: toggle(activeFilters.types, t) })}
+              />
+            ))}
+          </Section>
+        )}
+
+        {/* Direction — orthogonal to Type: incoming bus traffic vs. self-sent telegrams (#194) */}
+        {filteredDirections.length > 0 && (
+          <Section title="Direction" defaultOpen>
+            {filteredDirections.map(d => (
+              <OptionRow
+                key={d}
+                label={d}
+                checked={activeFilters.directions.includes(d)}
+                count={mode === 'live' ? (counts?.directions[d] ?? 0) : undefined}
+                onToggle={() => update({ directions: toggle(activeFilters.directions, d) })}
               />
             ))}
           </Section>
