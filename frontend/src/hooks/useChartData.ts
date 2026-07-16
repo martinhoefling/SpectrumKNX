@@ -26,12 +26,26 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
       return { buckets: [], minTime: null, maxTime: null };
     }
 
+    // A GA whose DPT is known from the project produces decoded telegrams
+    // (dpt_main set). Telegrams received *before* a project import stay
+    // undecoded (dpt_main null, only a raw payload), so plotting both puts the
+    // same GA in an "unknown" bucket next to its real-unit bucket — two graphs
+    // for one address (#206). Once a GA has any decoded telegram, ignore its
+    // undecoded ones so it collapses to a single, correctly-scaled series.
+    const decodedGas = new Set(
+      telegrams
+        .filter(t => t.target_address && selectedTargets.includes(t.target_address) && t.dpt_main != null)
+        .map(t => t.target_address)
+    );
+
     // 1. Filter out only relevant telegrams and parse timestamps
     const relevant = telegrams
       .filter(t => t.target_address && selectedTargets.includes(t.target_address))
       // Filter out reads/responses if they don't have a value (to keep plot clean), usually we plot values.
       // Easiest is to ensure value_numeric or value_json is != null
       .filter(t => t.value_numeric !== null || t.value_json !== null)
+      // Drop pre-import undecoded rows for GAs that are decoded elsewhere (#206).
+      .filter(t => t.dpt_main != null || !decodedGas.has(t.target_address))
       .map(t => ({
         ...t,
         ts: new Date(t.timestamp).getTime()
