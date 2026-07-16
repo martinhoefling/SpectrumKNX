@@ -41,6 +41,15 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
     ...series.map(s => s.data)
   ];
 
+  // Only the chart's *structure* (size, theme, series identity, unit) should
+  // rebuild `options`; a new telegram changes `data`, not `options`, so
+  // uplot-react updates via setData instead of destroying and recreating the
+  // chart — which would drop the cursor/hover on every telegram (#207).
+  const structureKey = [
+    width, isBinary, unit, stepped, themeTick,
+    series.map(s => `${s.address}~${s.name}`).join('|'),
+  ].join('§');
+
   const options: uPlot.Options = useMemo(() => {
     const style = getComputedStyle(document.documentElement);
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
@@ -116,7 +125,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
       ]
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, bucket, stepped, themeTick]);
+  }, [structureKey]);
 
   return (
     <div style={{ marginBottom: '2rem', background: 'var(--bg-inset)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>

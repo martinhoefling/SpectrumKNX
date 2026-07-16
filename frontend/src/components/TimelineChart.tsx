@@ -37,6 +37,14 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
   const rowGap = 4;
   const chartHeight = series.length * (rowHeight + rowGap) + 60;
 
+  // Rebuild `options` only on structural changes (size, theme, series identity),
+  // never on data — so a new telegram updates the chart via setData rather than
+  // recreating it, keeping the cursor/hover alive (#207). The draw plugin below
+  // therefore reads timestamps/values from `u.data`, not from this closure.
+  const structureKey = [
+    width, themeTick, series.map(s => s.name).join('|'),
+  ].join('§');
+
   const options: uPlot.Options = useMemo(() => {
     const style = getComputedStyle(document.documentElement);
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
@@ -54,18 +62,23 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
           ctx.rect(left, top, width, height);
           ctx.clip();
 
-          series.forEach((_, sIdx) => {
+          // Read x (seconds) and y from the live uPlot data, not the closure,
+          // so the plugin stays correct while `options` is kept stable (#207).
+          const xs = u.data[0];
+          const seriesCount = u.data.length - 1;
+
+          for (let sIdx = 0; sIdx < seriesCount; sIdx++) {
             const yData = u.data[sIdx + 1];
             const yTop = top + sIdx * (rowHeight + rowGap) + rowGap;
 
-            for (let i = 0; i < timestamps.length; i++) {
+            for (let i = 0; i < xs.length; i++) {
               const val = yData[i];
               if (val === null) continue;
 
-              const xStart = u.valToPos(timestamps[i] / 1000, 'x', true);
+              const xStart = u.valToPos(xs[i], 'x', true);
               let xEnd;
-              if (i < timestamps.length - 1) {
-                xEnd = u.valToPos(timestamps[i + 1] / 1000, 'x', true);
+              if (i < xs.length - 1) {
+                xEnd = u.valToPos(xs[i + 1], 'x', true);
               } else {
                 xEnd = left + width;
               }
@@ -84,18 +97,19 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
                 ctx.fillText(isOn ? 'On' : 'Off', xStart + (xEnd - xStart) / 2, yTop + rowHeight / 2);
               }
             }
-          });
+          }
 
           ctx.restore();
 
-          series.forEach((s, sIdx) => {
+          // Series labels (structural: names come from the closure, count from data).
+          for (let sIdx = 0; sIdx < seriesCount; sIdx++) {
             const yTop = top + sIdx * (rowHeight + rowGap) + rowGap;
             ctx.fillStyle = accentPrimary;
             ctx.font = '600 12px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(s.name, left + width + 15, yTop + rowHeight / 2);
-          });
+            ctx.fillText(series[sIdx]?.name ?? '', left + width + 15, yTop + rowHeight / 2);
+          }
         }]
       }
     });
@@ -138,7 +152,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
       ]
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, bucket, themeTick]);
+  }, [structureKey]);
 
   return (
     <div style={{ marginBottom: '2rem', background: 'var(--bg-inset)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', overflow: 'visible' }}>
