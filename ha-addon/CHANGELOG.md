@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.13.3
+
+### Fixed
+
+- **Chart hover survives live telegrams**: the synced crosshair and value legend across stacked graphs are no longer reset every time a telegram arrives — charts now update in place instead of being recreated, which also preserves zoom and legend visibility toggles (#207).
+- **No duplicate graph per group address after import**: telegrams received before a project import (undecoded, no DPT) no longer produce a separate "unknown metric" graph next to the decoded one for the same GA; the address collapses to a single, correctly-scaled series (#206).
+
 ## 1.13.2
 
 ### Added
