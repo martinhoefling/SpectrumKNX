@@ -98,8 +98,18 @@ def test_get_building_with_project():
                         "name": "Ground Floor",
                         "devices": ["1.1.1"],
                         "spaces": {},
+                        "functions": ["Func-1"],
                     }
                 },
+            }
+        },
+        "functions": {
+            "Func-1": {
+                "name": "Dimming Light",
+                "function_type": "Dimming",
+                "group_addresses": {
+                    "1/2/3": {"name": "Light On/Off", "role": "Switch"}
+                }
             }
         },
         "devices": {
@@ -148,6 +158,14 @@ def test_get_building_with_project():
     assert building["type"] == "Building"
     floor = building["spaces"][0]
     assert floor["name"] == "Ground Floor"
+
+    # Assert functions are parsed correctly
+    assert len(floor["functions"]) == 1
+    func = floor["functions"][0]
+    assert func["id"] == "Func-1"
+    assert func["name"] == "Dimming Light"
+    assert func["type"] == "Dimming"
+    assert func["group_addresses"] == [{"address": "1/2/3", "name": "Light On/Off", "role": "Switch"}]
 
     device = floor["devices"][0]
     assert device["address"] == "1.1.1"

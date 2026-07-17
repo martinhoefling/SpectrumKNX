@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock, Activity,
+  X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock, Activity, Sparkles,
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import { useExpanded } from '../utils/buildingExpansion';
@@ -36,12 +36,26 @@ export interface DeviceNode {
   kos: Ko[];
 }
 
+export interface FunctionGA {
+  address: string;
+  name: string;
+  role: string;
+}
+
+export interface FunctionNode {
+  id: string;
+  name: string;
+  type: string;
+  group_addresses: FunctionGA[];
+}
+
 interface SpaceNode {
   kind: 'space';
   type: string;
   name: string;
   spaces: SpaceNode[];
   devices: DeviceNode[];
+  functions?: FunctionNode[];
 }
 
 interface BuildingData {
@@ -105,11 +119,19 @@ const deviceMatches = (d: DeviceNode, q: string): boolean =>
   d.channels.some(c => c.name.toLowerCase().includes(q) || c.kos.some(k => koMatches(k, q))) ||
   d.kos.some(k => koMatches(k, q));
 
+const functionMatches = (func: FunctionNode, q: string): boolean =>
+  (func.name ?? '').toLowerCase().includes(q) ||
+  (func.type ?? '').toLowerCase().includes(q) ||
+  func.group_addresses.some(g =>
+    g.address.toLowerCase().includes(q) || (g.name ?? '').toLowerCase().includes(q)
+  );
+
 const spaceMatches = (s: SpaceNode, q: string): boolean =>
   s.name.toLowerCase().includes(q) ||
   s.type.toLowerCase().includes(q) ||
   s.spaces.some(sub => spaceMatches(sub, q)) ||
-  s.devices.some(d => deviceMatches(d, q));
+  s.devices.some(d => deviceMatches(d, q)) ||
+  (s.functions ? s.functions.some(f => functionMatches(f, q)) : false);
 
 const formatDpt = (
   dpts: { main: number; sub: number | null; name?: string | null }[]
@@ -388,6 +410,132 @@ const ChannelRow: React.FC<{
   );
 };
 
+// ── Function nodes ──────────────────────────────────────────────────────────────
+
+const FunctionGaRow: React.FC<{
+  ga: FunctionGA;
+  depth: number;
+  onFilterGAs: (addresses: string[]) => void;
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ ga, depth, onFilterGAs, onLastSeen }) => {
+  return (
+    <div
+      style={{ ...rowStyle(depth) }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    >
+      <Caret open={false} hasChildren={false} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem',
+            padding: '0.05rem 0.3rem', borderRadius: '3px',
+            background: 'rgba(99,102,241,0.1)', color: 'var(--accent-primary)',
+            border: '1px solid rgba(99,102,241,0.25)',
+          }}>{ga.address}</span>
+          {ga.role && (
+            <span style={{
+              fontSize: '0.62rem', fontWeight: 600, color: 'var(--text-dim)',
+              textTransform: 'uppercase', background: 'var(--bg-tag)',
+              padding: '0.05rem 0.25rem', borderRadius: '3px'
+            }}>{ga.role}</span>
+          )}
+        </div>
+        {ga.name && (
+          <div title={ga.name} style={{
+            fontSize: '0.78rem', color: 'var(--text-dim)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            marginTop: '0.15rem'
+          }}>{ga.name}</div>
+        )}
+      </div>
+      <button
+        style={iconBtnStyle}
+        title="Filter by this group address"
+        onClick={e => { e.stopPropagation(); onFilterGAs([ga.address]); }}
+        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+      >
+        <Filter size={12} />
+      </button>
+      <button
+        style={iconBtnStyle}
+        title="Show last seen values"
+        onClick={e => { e.stopPropagation(); onLastSeen([ga.address], 'ga'); }}
+        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+      >
+        <Clock size={12} />
+      </button>
+    </div>
+  );
+};
+
+const FunctionRow: React.FC<{
+  func: FunctionNode;
+  depth: number;
+  query: string;
+  onFilterGAs: (addresses: string[]) => void;
+  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ func, depth, query, onFilterGAs, onLastSeen }) => {
+  const [open, toggle] = useExpanded(`func:${func.id}`, false);
+  const effectiveOpen = open || !!query;
+  const allGAs = useMemo(() => func.group_addresses.map(g => g.address), [func]);
+
+  return (
+    <div>
+      <div
+        style={{ ...rowStyle(depth), cursor: 'pointer' }}
+        onClick={() => toggle()}
+        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+      >
+        <Caret open={effectiveOpen} hasChildren={true} />
+        <Sparkles size={12} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 0, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {func.name || 'Function'}
+        </span>
+        {func.type && (
+          <span style={{
+            fontSize: '0.65rem', color: 'var(--text-dim)', flexShrink: 0,
+            background: 'var(--bg-tag)', padding: '0.1rem 0.3rem', borderRadius: 4, marginRight: '0.3rem'
+          }}>
+            {func.type}
+          </span>
+        )}
+        <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', flexShrink: 0 }}>
+          {func.group_addresses.length} GA{func.group_addresses.length !== 1 ? 's' : ''}
+        </span>
+        {allGAs.length > 0 && (
+          <>
+            <button
+              style={iconBtnStyle}
+              title={`Filter all ${allGAs.length} group address${allGAs.length > 1 ? 'es' : ''} of this function`}
+              onClick={e => { e.stopPropagation(); onFilterGAs(allGAs); }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+            >
+              <ListFilter size={12} />
+            </button>
+            <button
+              style={iconBtnStyle}
+              title={`Show last seen values of all ${allGAs.length} group address${allGAs.length > 1 ? 'es' : ''} of this function`}
+              onClick={e => { e.stopPropagation(); onLastSeen(allGAs, 'ga'); }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+            >
+              <Clock size={12} />
+            </button>
+          </>
+        )}
+      </div>
+      {effectiveOpen && func.group_addresses.map((ga, i) => (
+        <FunctionGaRow key={`${ga.address}-${i}`} ga={ga} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} />
+      ))}
+    </div>
+  );
+};
+
 // ── Space node ──────────────────────────────────────────────────────────────────
 
 const SpaceRow: React.FC<{
@@ -403,8 +551,9 @@ const SpaceRow: React.FC<{
   const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
   if (query && !spaceMatches(space, query)) return null;
   const effectiveOpen = open || !!query;
-  const hasChildren = space.spaces.length > 0 || space.devices.length > 0;
+  const hasChildren = space.spaces.length > 0 || space.devices.length > 0 || !!(space.functions && space.functions.length > 0);
   const visibleDevices = query ? space.devices.filter(d => deviceMatches(d, query)) : space.devices;
+  const visibleFunctions = space.functions ? (query ? space.functions.filter(f => functionMatches(f, query)) : space.functions) : [];
 
   return (
     <div>
@@ -431,6 +580,12 @@ const SpaceRow: React.FC<{
             <SpaceRow
               key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
+            />
+          ))}
+          {visibleFunctions.map((func, i) => (
+            <FunctionRow
+              key={`${func.id}-${i}`} func={func} depth={depth + 1} query={query}
+              onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
             />
           ))}
           {visibleDevices.map(device => (

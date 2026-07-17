@@ -587,20 +587,40 @@ def _build_device(addr: str, device: dict, cos: dict, gas: dict) -> dict:
     }
 
 
-def _build_space(space: dict, devices: dict, cos: dict, gas: dict) -> dict:
-    """Recursively serialize a building space with nested spaces and devices."""
-    child_spaces = [_build_space(sub, devices, cos, gas) for sub in (space.get("spaces") or {}).values()]
+def _build_space(space: dict, devices: dict, cos: dict, gas: dict, functions_dict: dict) -> dict:
+    """Recursively serialize a building space with nested spaces, devices, and functions."""
+    child_spaces = [_build_space(sub, devices, cos, gas, functions_dict) for sub in (space.get("spaces") or {}).values()]
     device_nodes = [
         _build_device(dev_addr, devices[dev_addr], cos, gas)
         for dev_addr in space.get("devices") or []
         if dev_addr in devices
     ]
+
+    space_functions = []
+    for func_id in space.get("functions") or []:
+        func = functions_dict.get(func_id)
+        if func:
+            group_addresses = []
+            for ga_addr, ga_ref in func.get("group_addresses", {}).items():
+                group_addresses.append({
+                    "address": ga_addr,
+                    "name": ga_ref.get("name", ""),
+                    "role": ga_ref.get("role", "")
+                })
+            space_functions.append({
+                "id": func_id,
+                "name": func.get("name", ""),
+                "type": func.get("function_type", ""),
+                "group_addresses": group_addresses
+            })
+
     return {
         "kind": "space",
         "type": space.get("type", ""),
         "name": space.get("name", ""),
         "spaces": child_spaces,
         "devices": device_nodes,
+        "functions": space_functions,
     }
 
 
@@ -620,8 +640,9 @@ async def get_building():
     cos = proj.get("communication_objects", {})
     gas = proj.get("group_addresses", {})
     locations = proj.get("locations", {})
+    functions_dict = proj.get("functions", {})
 
-    tree = [_build_space(space, devices, cos, gas) for space in locations.values()]
+    tree = [_build_space(space, devices, cos, gas, functions_dict) for space in locations.values()]
 
     placed: set[str] = set()
 
