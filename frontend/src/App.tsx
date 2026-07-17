@@ -19,7 +19,7 @@ import { LastSeenOverlay } from './components/LastSeenOverlay';
 import { StatisticsOverlay } from './components/StatisticsOverlay';
 import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
-import { SendTelegramBar } from './components/SendTelegramBar';
+import { WriteToBusPanel } from './components/WriteToBusPanel';
 import { UpdateNotification } from './components/UpdateNotification';
 import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
@@ -917,7 +917,7 @@ function App() {
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 {isSendOpen && serverConfig?.status?.write_enabled && (
-                  <SendTelegramBar
+                  <WriteToBusPanel
                     targets={filterOptions.targets}
                     onClose={() => setIsSendOpen(false)}
                   />
