@@ -83,6 +83,15 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
       // Get all unique timestamps for this bucket
       const tsSet = new Set<number>();
       rows.forEach(r => tsSet.add(r.ts));
+      // Extend every series' last segment to the newest telegram across all
+      // plotted GAs, so a state still held after its last telegram is drawn as
+      // a visible segment out to the right edge instead of a zero-width sliver
+      // (#208): the per-series forward-fill below carries the last value into
+      // this appended column. Anchoring on the newest telegram rather than
+      // wall-clock "now" keeps it correct for loaded history and needs no
+      // ticking redraw. (The single newest series still ends at its own
+      // telegram — advancing past it is left to the time-axis brush, #193.)
+      tsSet.add(maxTime);
       const timestamps = Array.from(tsSet).sort((a, b) => a - b);
 
       // Find all unique targets within this bucket
