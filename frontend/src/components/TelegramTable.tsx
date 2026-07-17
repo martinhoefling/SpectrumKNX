@@ -2,8 +2,9 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock, Send } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
+import { SendToGaPopover } from './SendToGaPopover';
 import { getCookie, setCookie } from '../utils/cookies';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
@@ -22,8 +23,8 @@ interface TelegramTableProps {
   onQuickFilter: (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => void;
   onQuickVisualize: (targetAddress: string) => void;
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
-  /** Copies the row's GA into the send bar; only passed when the bus is writable (#187). */
-  onQuickSend?: (targetAddress: string) => void;
+  /** Enables the per-row "Send to this GA" quick popover; true only when the bus is writable (#214). */
+  canSend?: boolean;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -88,7 +89,7 @@ const anchorKey = (t: Telegram) =>
   `${t.timestamp}-${t.source_address}-${t.target_address}-${t.raw_hex ?? ''}`;
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
-  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, onQuickSend
+  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -442,14 +443,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   <Clock size={12} />
                 </button>
               )}
-              {onQuickSend && (
-                <button
-                  className="quick-send-btn"
-                  onClick={(e) => { e.stopPropagation(); onQuickSend(t.target_address); }}
-                  title="Send to this GA"
-                >
-                  <Send size={12} />
-                </button>
+              {canSend && (
+                <SendToGaPopover
+                  address={t.target_address}
+                  name={t.target_name}
+                  dptMain={t.dpt_main}
+                  dptSub={t.dpt_sub}
+                  buttonClassName="quick-send-btn"
+                />
               )}
             </div>
             {visibleColumns.targetName && (

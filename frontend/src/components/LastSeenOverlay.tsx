@@ -6,6 +6,7 @@ import type { FilterOptions } from '../types/filters';
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
 import { WriteControls } from './WriteControls';
+import { SendToGaPopover } from './SendToGaPopover';
 
 const LIMITS = [10, 20, 50, 100] as const;
 
@@ -219,12 +220,11 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
           ) : filteredAddresses.map(addr => {
             const isSelected = selectedAddresses.includes(addr.address ?? '');
             return (
-              <button
+              <div
                 key={addr.address}
-                onClick={() => setSelectedAddresses([addr.address ?? ''])}
+                className="last-seen-addr-row"
                 style={{
-                  width: '100%', textAlign: 'left', padding: '0.45rem 0.75rem',
-                  border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '0.35rem',
                   background: isSelected ? 'rgba(99,102,241,0.15)' : 'transparent',
                   borderLeft: `2px solid ${isSelected ? 'var(--accent-primary)' : 'transparent'}`,
                   transition: 'background 0.1s',
@@ -232,21 +232,40 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                 onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'; }}
                 onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
               >
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem',
-                  color: isSelected ? 'var(--accent-primary)' : 'var(--text-main)',
-                }}>
-                  {addr.address}
-                </div>
-                {addr.name && (
+                <button
+                  onClick={() => setSelectedAddresses([addr.address ?? ''])}
+                  style={{
+                    flex: 1, minWidth: 0, textAlign: 'left', padding: '0.45rem 0.75rem',
+                    border: 'none', background: 'transparent', cursor: 'pointer',
+                  }}
+                >
                   <div style={{
-                    fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.1rem',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem',
+                    color: isSelected ? 'var(--accent-primary)' : 'var(--text-main)',
                   }}>
-                    {addr.name}
+                    {addr.address}
+                  </div>
+                  {addr.name && (
+                    <div style={{
+                      fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.1rem',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {addr.name}
+                    </div>
+                  )}
+                </button>
+                {writeEnabled && mode === 'ga' && addr.address && (
+                  <div style={{ paddingRight: '0.5rem', flexShrink: 0 }}>
+                    <SendToGaPopover
+                      address={addr.address}
+                      name={addr.name}
+                      dptMain={addr.main}
+                      dptSub={addr.sub}
+                      buttonClassName="quick-send-btn"
+                    />
                   </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
