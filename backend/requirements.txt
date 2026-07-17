@@ -2,12 +2,12 @@
 # Direct dependencies are declared in pyproject.toml — update both together.
 annotated-doc==0.0.4
 annotated-types==0.7.0
-anyio==4.14.1
+anyio==4.14.2
 asyncpg==0.31.0
 cffi==2.1.0
 click==8.4.2
 cryptography==49.0.0
-fastapi==0.139.0
+fastapi==0.139.2
 greenlet==3.5.3
 h11==0.16.0
 idna==3.18
@@ -32,11 +32,11 @@ striprtf==0.0.32
 typing-inspection==0.4.2
 typing_extensions==4.16.0
 uvicorn==0.51.0
-websockets==16.1
+websockets==16.1.1
 xknx==3.16.0
 xknxproject==3.9.0
 httpx==0.28.1
-ruff==0.15.21
+ruff==0.15.22
 pytest-asyncio==1.4.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
