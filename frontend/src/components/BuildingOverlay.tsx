@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import { useExpanded } from '../utils/buildingExpansion';
+import { SendToGaPopover } from './SendToGaPopover';
 
 // ── Types (mirror /api/building response) ──────────────────────────────────────
 
@@ -60,6 +61,7 @@ interface BuildingOverlayProps {
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   /** Open the live KO status view for a device (#153). */
   onDeviceStatus: (device: DeviceNode) => void;
+  writeEnabled?: boolean;
 }
 
 // ── Group-address collection helpers ─────────────────────────────────────────────
@@ -154,7 +156,8 @@ const KoRow: React.FC<{
   depth: number;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ ko, depth, onFilterGAs, onLastSeen }) => {
+  writeEnabled?: boolean;
+}> = ({ ko, depth, onFilterGAs, onLastSeen, writeEnabled }) => {
   const dpt = formatDpt(ko.dpts);
   const gaAddresses = ko.group_addresses.map(g => g.address);
   const nameText = ko.text || ko.name;
@@ -205,7 +208,7 @@ const KoRow: React.FC<{
           </span>
           {dpt.name && (
             <span style={{
-              fontSize: '0.6rem', color: 'var(--text-dim)', opacity: 0.75,
+              fontSize: '0.65rem', color: 'var(--text-dim)', opacity: 0.75,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
             }}>
               {dpt.name}
@@ -215,6 +218,17 @@ const KoRow: React.FC<{
       )}
       {gaAddresses.length > 0 && (
         <>
+          {writeEnabled && gaAddresses.length === 1 && (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <SendToGaPopover
+                address={gaAddresses[0]}
+                name={ko.group_addresses[0].name}
+                dptMain={ko.dpts[0]?.main}
+                dptSub={ko.dpts[0]?.sub}
+                buttonStyle={iconBtnStyle}
+              />
+            </div>
+          )}
           <button
             style={iconBtnStyle}
             title={`Filter by connected group address${gaAddresses.length > 1 ? 'es' : ''}`}
@@ -249,7 +263,8 @@ const DeviceRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onDeviceStatus: (device: DeviceNode) => void;
-}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus }) => {
+  writeEnabled?: boolean;
+}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled }) => {
   const [open, toggle] = useExpanded(`dev:${device.address}`, false);
   const koCount = device.channels.reduce((s, c) => s + c.kos.length, 0) + device.kos.length;
   const hasChildren = koCount > 0;
@@ -328,12 +343,12 @@ const DeviceRow: React.FC<{
             return (
               <ChannelRow
                 key={ch.id} channel={ch} deviceAddress={device.address} visibleKos={visibleKos} depth={depth + 1}
-                query={query} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+                query={query} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled}
               />
             );
           })}
           {sortKos(query ? device.kos.filter(k => koMatches(k, query)) : device.kos).map((ko, i) => (
-            <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} />
+            <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled} />
           ))}
         </div>
       )}
@@ -349,7 +364,8 @@ const ChannelRow: React.FC<{
   query: string;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen }) => {
+  writeEnabled?: boolean;
+}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen, writeEnabled }) => {
   const [open, toggle] = useExpanded(`ch:${deviceAddress}:${channel.id}`, false);
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => channelGAs(channel), [channel]);
@@ -382,7 +398,7 @@ const ChannelRow: React.FC<{
         )}
       </div>
       {effectiveOpen && visibleKos.map((ko, i) => (
-        <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} />
+        <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled} />
       ))}
     </div>
   );
@@ -399,7 +415,8 @@ const SpaceRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onDeviceStatus: (device: DeviceNode) => void;
-}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus }) => {
+  writeEnabled?: boolean;
+}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled }) => {
   const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
   if (query && !spaceMatches(space, query)) return null;
   const effectiveOpen = open || !!query;
@@ -431,12 +448,14 @@ const SpaceRow: React.FC<{
             <SpaceRow
               key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
+              writeEnabled={writeEnabled}
             />
           ))}
           {visibleDevices.map(device => (
             <DeviceRow
               key={device.address} device={device} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
+              writeEnabled={writeEnabled}
             />
           ))}
         </div>
@@ -448,7 +467,7 @@ const SpaceRow: React.FC<{
 // ── Main overlay ────────────────────────────────────────────────────────────────
 
 export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
-  onClose, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus,
+  onClose, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled,
 }) => {
   const [data, setData] = useState<BuildingData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -523,6 +542,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
             <SpaceRow
               key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
+              writeEnabled={writeEnabled}
             />
           ))}
 
@@ -535,6 +555,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
                 <DeviceRow
                   key={device.address} device={device} depth={1} query={query}
                   onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
+                  writeEnabled={writeEnabled}
                 />
               ))}
             </div>

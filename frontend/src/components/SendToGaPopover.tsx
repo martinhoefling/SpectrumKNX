@@ -16,6 +16,8 @@ interface Props {
   title?: string;
   /** Extra className for the trigger button (to match host styling). */
   buttonClassName?: string;
+  /** Inline style for the trigger button. */
+  buttonStyle?: React.CSSProperties;
 }
 
 /**
@@ -26,8 +28,9 @@ interface Props {
  * portalled to <body> and fixed-positioned so it is never clipped by scroll
  * containers (e.g. the virtualized telegram table).
  */
-export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send to this GA', buttonClassName }: Props) {
+export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send to this GA', buttonClassName, buttonStyle }: Props) {
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -128,6 +131,12 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
       <button
         ref={btnRef}
         className={buttonClassName}
+        style={{
+          ...buttonStyle,
+          color: hovered ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         onClick={e => { e.stopPropagation(); toggle(); }}
         title={title}
       >

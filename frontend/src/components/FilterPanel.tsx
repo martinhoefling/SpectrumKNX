@@ -30,6 +30,7 @@ interface FilterPanelProps {
   projectLoaded?: boolean;
   /** Opens the project upload flow (Settings). Enables the notice's CTA button. */
   onUploadProject?: () => void;
+  writeEnabled?: boolean;
 }
 
 interface SectionProps {
@@ -160,6 +161,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   onQuickLastSeen,
   projectLoaded,
   onUploadProject,
+  writeEnabled,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -420,6 +422,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               mode={mode}
               searchQuery={q}
               onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'pa') : undefined}
+              writeEnabled={writeEnabled}
             />
           </Section>
         )}
@@ -462,6 +465,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               mode={mode}
               searchQuery={q}
               onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'ga') : undefined}
+              writeEnabled={writeEnabled}
             />
           </Section>
         )}

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
+import { SendToGaPopover } from './SendToGaPopover';
 import type { FilterOption } from '../types/filters';
 
 interface KnxAddressTreeProps {
@@ -14,6 +15,7 @@ interface KnxAddressTreeProps {
   mode: 'live' | 'history';
   searchQuery: string;
   onLastSeen?: (address: string) => void;
+  writeEnabled?: boolean;
 }
 
 type CheckState = 'checked' | 'partial' | 'unchecked';
@@ -55,14 +57,20 @@ const TriCheckbox: React.FC<TriCheckboxProps> = ({ state, onClick }) => (
 interface LeafRowProps {
   address: string;
   name: string;
+  dptMain?: number | null;
+  dptSub?: number | null;
   checked: boolean;
   count?: number;
   mode: 'live' | 'history';
   onToggle: () => void;
   onLastSeen?: () => void;
+  isGA?: boolean;
+  writeEnabled?: boolean;
 }
 
-const LeafRow: React.FC<LeafRowProps> = ({ address, name, checked, count, mode, onToggle, onLastSeen }) => {
+const LeafRow: React.FC<LeafRowProps> = ({
+  address, name, dptMain, dptSub, checked, count, mode, onToggle, onLastSeen, isGA, writeEnabled,
+}) => {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -88,6 +96,32 @@ const LeafRow: React.FC<LeafRowProps> = ({ address, name, checked, count, mode, 
           }}>{name}</div>
         )}
       </div>
+      {writeEnabled && isGA && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            opacity: hovered ? 0.8 : 0,
+            transition: 'opacity 0.15s',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = hovered ? '0.8' : '0'; }}
+        >
+          <SendToGaPopover
+            address={address}
+            name={name}
+            dptMain={dptMain}
+            dptSub={dptSub}
+            buttonStyle={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--text-dim)', padding: '0.15rem', borderRadius: '3px',
+              display: 'flex', alignItems: 'center',
+            }}
+          />
+        </div>
+      )}
       {onLastSeen && (
         <button
           onClick={e => { e.stopPropagation(); onLastSeen(); }}
@@ -168,7 +202,7 @@ const GroupNode: React.FC<GroupNodeProps> = ({ label, sublabel, leafAddresses, s
 };
 
 export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
-  entries, selected, groupNames, separator, onToggle, counts, mode, searchQuery, onLastSeen,
+  entries, selected, groupNames, separator, onToggle, counts, mode, searchQuery, onLastSeen, writeEnabled,
 }) => {
   const q = searchQuery.toLowerCase();
 
@@ -226,9 +260,11 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
             >
               {leaves.map(e => (
                 <LeafRow key={e.address} address={e.address!} name={e.name ?? ''} checked={selected.includes(e.address!)}
+                  dptMain={e.main} dptSub={e.sub}
                   count={counts?.[e.address!]} mode={mode}
                   onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
                   onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
+                  isGA={separator === '/'} writeEnabled={writeEnabled}
                 />
               ))}
             </GroupNode>
@@ -275,8 +311,11 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
                 >
                   {visibleLeaves.map(e => (
                     <LeafRow key={e.address} address={e.address!} name={e.name ?? ''} checked={selected.includes(e.address!)}
+                      dptMain={e.main} dptSub={e.sub}
                       count={counts?.[e.address!]} mode={mode}
                       onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
+                      onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
+                      isGA={separator === '/'} writeEnabled={writeEnabled}
                     />
                   ))}
                 </GroupNode>

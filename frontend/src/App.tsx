@@ -910,6 +910,7 @@ function App() {
                     mode="live"
                     projectLoaded={projectStatus?.project_loaded}
                     onUploadProject={() => setIsSettingsOpen(true)}
+                    writeEnabled={serverConfig?.status?.write_enabled}
                   />
                 </div>
               </div>
@@ -955,6 +956,7 @@ function App() {
                     onFilterGAs={handleFilterGAs}
                     onLastSeen={handleQuickLastSeen}
                     onDeviceStatus={setStatusDevice}
+                    writeEnabled={serverConfig?.status?.write_enabled}
                   />
                 ) : isDatabaseOpen ? (
                   <DatabaseOverlay onClose={() => setIsDatabaseOpen(false)} />
