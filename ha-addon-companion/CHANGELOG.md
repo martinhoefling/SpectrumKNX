@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.13.4
+
+### Fixed
+
+- **Consistent write controls in "Last Seen Values"**: the write row now uses the same DPT-aware controls as the send bar — On/Off buttons for switch (DPT-1) group addresses — instead of a single free-text field that rejected values like `21` with a conversion error (#213).
+- **Exact group-address match ranked first**: typing a full group address (e.g. `2/4/1`) into a group-address dropdown now puts the exact match at the top and preselects it, instead of leaving a longer infix match (e.g. `12/4/1`) selected (#217).
+- **Reliable graph legend toggles**: clicking a series in a graph legend no longer occasionally needs a second click to take effect, and a series hidden via the legend becomes visible again when its target is deselected and reselected (#205).
+
 ## 1.13.3
 
 ### Fixed
