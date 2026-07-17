@@ -4,7 +4,8 @@ import { format, formatDistanceToNowStrict } from 'date-fns';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { FilterOptions } from '../types/filters';
 import { apiUrl } from '../utils/basePath';
-import { coerceValue, formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import { WriteControls } from './WriteControls';
 
 const LIMITS = [10, 20, 50, 100] as const;
 
@@ -117,11 +118,11 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     }
   };
 
-  const handleWrite = async (dpt: string) => {
+  const handleWrite = async (payload: boolean | number | string, dpt: string) => {
     setBusy(true);
     setSendError(null);
     try {
-      await sendTelegram(selectedAddresses[0], coerceValue(writeValue), dpt || undefined);
+      await sendTelegram(selectedAddresses[0], payload, dpt || undefined);
       refreshSoon();
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Write failed');
@@ -353,30 +354,16 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
               <Send size={14} /> Write
             </span>
-            <input
-              className="glass-input"
-              placeholder="Value (e.g. 50, 21.5, on)"
+            <WriteControls
+              dptMain={selectedInfo?.main}
               value={writeValue}
-              onChange={e => { setWriteValue(e.target.value); setSendError(null); }}
-              onKeyDown={e => { if (e.key === 'Enter' && writeValue.trim() && !busy) handleWrite(formatDpt(selectedInfo?.main, selectedInfo?.sub)); }}
-              style={{ width: 200 }}
+              onValueChange={v => { setWriteValue(v); setSendError(null); }}
+              onWrite={payload => void handleWrite(payload, formatDpt(selectedInfo?.main, selectedInfo?.sub))}
+              disabled={busy}
             />
             <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>
               DPT {formatDpt(selectedInfo?.main, selectedInfo?.sub) || '—'}
             </span>
-            <button
-              onClick={() => handleWrite(formatDpt(selectedInfo?.main, selectedInfo?.sub))}
-              disabled={busy || writeValue.trim() === ''}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.3rem',
-                padding: '0.3rem 0.75rem', fontSize: '0.76rem', fontWeight: 600,
-                background: 'var(--accent-primary)', color: 'white', border: 'none', borderRadius: 6,
-                cursor: busy || writeValue.trim() === '' ? 'not-allowed' : 'pointer',
-                opacity: busy || writeValue.trim() === '' ? 0.5 : 1,
-              }}
-            >
-              <Send size={13} /> Send
-            </button>
             {sendError && <span style={{ fontSize: '0.72rem', color: 'var(--error)' }}>{sendError}</span>}
           </div>
         )}

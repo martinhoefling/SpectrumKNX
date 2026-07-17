@@ -3,7 +3,6 @@ import { Send, Radio, X, AlertTriangle, CheckCircle2, Timer } from 'lucide-react
 
 import type { FilterOption } from '../types/filters';
 import {
-  coerceValue,
   formatDpt,
   readTelegram,
   sendTelegram,
@@ -13,6 +12,8 @@ import {
   type ScheduledSendStatus,
 } from '../utils/knxSend';
 import { GaCombobox } from './GaCombobox';
+import { WriteControls } from './WriteControls';
+import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
 
 interface Props {
@@ -80,19 +81,31 @@ export function SendTelegramBar({ targets, initialAddress, onClose }: Props) {
     if (match && match.main != null) setDpt(formatDpt(match.main, match.sub));
   };
 
-  const run = async (action: 'send' | 'read') => {
+  const write = async (payload: boolean | number | string) => {
     setBusy(true);
     setFeedback(null);
     try {
-      if (action === 'read') {
-        await readTelegram(address.trim());
-        setFeedback({ ok: true, msg: `Read request sent to ${address.trim()}` });
-      } else if (isScheduled) {
-        await startScheduled(coerceValue(value));
+      if (isScheduled) {
+        await startScheduled(payload);
       } else {
-        await sendTelegram(address.trim(), coerceValue(value), dpt.trim() || undefined);
-        setFeedback({ ok: true, msg: `Sent ${value || '(raw)'} to ${address.trim()}` });
+        await sendTelegram(address.trim(), payload, dpt.trim() || undefined);
+        const shown = typeof payload === 'boolean' ? (payload ? 'on' : 'off') : value || '(raw)';
+        setFeedback({ ok: true, msg: `Sent ${shown} to ${address.trim()}` });
       }
+      setRecentGas(pushRecentGa(address.trim()));
+    } catch (err) {
+      setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Request failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const read = async () => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      await readTelegram(address.trim());
+      setFeedback({ ok: true, msg: `Read request sent to ${address.trim()}` });
       setRecentGas(pushRecentGa(address.trim()));
     } catch (err) {
       setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Request failed' });
@@ -132,20 +145,13 @@ export function SendTelegramBar({ targets, initialAddress, onClose }: Props) {
           style={{ width: 110, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem' }}
         />
 
-        {dptMain === 1 ? (
-          <div style={{ display: 'flex', gap: '0.3rem' }}>
-            <button disabled={sendDisabled} onClick={() => void sendBoolean(true)} style={boolBtn(sendDisabled)}>On</button>
-            <button disabled={sendDisabled} onClick={() => void sendBoolean(false)} style={boolBtn(sendDisabled)}>Off</button>
-          </div>
-        ) : (
-          <input
-            className="glass-input"
-            placeholder="Value (e.g. 50, 21.5, on)"
-            value={value}
-            onChange={e => { setValue(e.target.value); setFeedback(null); }}
-            style={{ width: 170 }}
-          />
-        )}
+        <WriteControls
+          dptMain={dptMain}
+          value={value}
+          onValueChange={v => { setValue(v); setFeedback(null); }}
+          onWrite={payload => void write(payload)}
+          disabled={sendDisabled}
+        />
 
         <input
           className="glass-input"
@@ -165,18 +171,8 @@ export function SendTelegramBar({ targets, initialAddress, onClose }: Props) {
           style={{ width: 70 }}
         />
 
-        {dptMain !== 1 && (
-          <button
-            onClick={() => run('send')}
-            disabled={sendDisabled || value.trim() === ''}
-            style={primaryBtn(sendDisabled || value.trim() === '')}
-          >
-            <Send size={14} /> Write
-          </button>
-        )}
-
         <button
-          onClick={() => run('read')}
+          onClick={() => void read()}
           disabled={busy || !addressValid}
           style={secondaryBtn(busy || !addressValid)}
           title="Send a GroupValueRead; the response updates the last value"
@@ -211,24 +207,6 @@ export function SendTelegramBar({ targets, initialAddress, onClose }: Props) {
       )}
     </div>
   );
-
-  async function sendBoolean(on: boolean) {
-    setBusy(true);
-    setFeedback(null);
-    try {
-      if (isScheduled) {
-        await startScheduled(on);
-      } else {
-        await sendTelegram(address.trim(), on, dpt.trim() || undefined);
-        setFeedback({ ok: true, msg: `Sent ${on ? 'on' : 'off'} to ${address.trim()}` });
-      }
-      setRecentGas(pushRecentGa(address.trim()));
-    } catch (err) {
-      setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Request failed' });
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function startScheduled(payload: unknown) {
     if (intervalSeconds > 0 && intervalSeconds < 1) {
@@ -305,31 +283,3 @@ function describeJob(job: ScheduledSendStatus): string {
   return `Sending to ${job.address}…`;
 }
 
-function boolBtn(disabled: boolean): React.CSSProperties {
-  return {
-    padding: '0.35rem 0.85rem', fontSize: '0.78rem', fontWeight: 600,
-    background: 'var(--bg-tag)', color: 'var(--text-main)',
-    border: '1px solid var(--border-color)', borderRadius: '6px',
-    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-  };
-}
-
-function primaryBtn(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'flex', alignItems: 'center', gap: '0.35rem',
-    padding: '0.35rem 0.8rem', fontSize: '0.78rem', fontWeight: 600,
-    background: 'var(--accent-primary)', color: 'white',
-    border: 'none', borderRadius: '6px',
-    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-  };
-}
-
-function secondaryBtn(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'flex', alignItems: 'center', gap: '0.35rem',
-    padding: '0.35rem 0.8rem', fontSize: '0.78rem', fontWeight: 600,
-    background: 'transparent', color: 'var(--accent-primary)',
-    border: '1px solid var(--accent-primary)', borderRadius: '6px',
-    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-  };
-}
