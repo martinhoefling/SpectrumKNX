@@ -174,6 +174,8 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
 
               <WriteControls
                 dptMain={dptMain}
+                dptKey={row.dpt || null}
+                address={row.address || null}
                 value={row.value}
                 onValueChange={v => updateRow(row.id, { value: v, feedback: null })}
                 onWrite={payload => void write(row, payload)}

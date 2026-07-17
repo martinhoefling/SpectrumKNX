@@ -160,6 +160,8 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
             <WriteControls
               dptMain={dptMain}
+              dptKey={dpt}
+              address={address}
               value={value}
               onValueChange={v => { setValue(v); setFeedback(null); }}
               onWrite={payload => void write(payload)}

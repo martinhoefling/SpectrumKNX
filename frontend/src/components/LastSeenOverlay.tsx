@@ -375,6 +375,8 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
             </span>
             <WriteControls
               dptMain={selectedInfo?.main}
+              dptKey={formatDpt(selectedInfo?.main, selectedInfo?.sub)}
+              address={selectedAddresses[0]}
               value={writeValue}
               onValueChange={v => { setWriteValue(v); setSendError(null); }}
               onWrite={payload => void handleWrite(payload, formatDpt(selectedInfo?.main, selectedInfo?.sub))}

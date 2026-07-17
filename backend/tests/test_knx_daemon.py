@@ -300,6 +300,9 @@ async def test_knx_startup_db_failure(mock_store_init, mock_check_conn):
         (21.5, "9.001", "DPTArray", (0x0C, 0x33)),
         (1, None, "DPTBinary", 1),
         ([0x0C, 0x22], None, "DPTArray", (0x0C, 0x22)),
+        ("12:30:00", "10.001", "DPTArray", (12, 30, 0)),
+        ("2026-07-18", "11.001", "DPTArray", (18, 7, 26)),
+        ("2026-07-18T12:30:00", "19.001", "DPTArray", (126, 7, 18, 12, 30, 0, 36, 0)),
     ],
 )
 def test_encode_payload(payload, dpt, expected_type, expected_value):

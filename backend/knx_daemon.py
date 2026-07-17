@@ -423,6 +423,52 @@ def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
     """Encode a value into a KNX payload. With a DPT the value is transcoded;
     without one the payload is treated as raw bytes (int -> DPTBinary)."""
     if dpt is not None:
+        if isinstance(payload, str):
+            payload_str = payload.strip()
+            if dpt.startswith("10"):
+                parts = payload_str.split(":")
+                if len(parts) >= 2:
+                    try:
+                        hour = int(parts[0])
+                        minutes = int(parts[1])
+                        seconds = int(parts[2]) if len(parts) > 2 else 0
+                        payload = {"hour": hour, "minutes": minutes, "seconds": seconds}
+                    except ValueError:
+                        pass
+            elif dpt.startswith("11"):
+                parts = payload_str.split("-")
+                if len(parts) == 3:
+                    try:
+                        year = int(parts[0])
+                        month = int(parts[1])
+                        day = int(parts[2])
+                        payload = {"year": year, "month": month, "day": day}
+                    except ValueError:
+                        pass
+            elif dpt.startswith("19"):
+                if "T" in payload_str:
+                    date_part, time_part = payload_str.split("T", 1)
+                    date_parts = date_part.split("-")
+                    time_parts = time_part.split(":")
+                    if len(date_parts) == 3 and len(time_parts) >= 2:
+                        try:
+                            year = int(date_parts[0])
+                            month = int(date_parts[1])
+                            day = int(date_parts[2])
+                            hour = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            seconds = int(time_parts[2]) if len(time_parts) > 2 else 0
+                            payload = {
+                                "year": year,
+                                "month": month,
+                                "day": day,
+                                "hour": hour,
+                                "minutes": minutes,
+                                "seconds": seconds,
+                            }
+                        except ValueError:
+                            pass
+
         transcoder = DPTBase.parse_transcoder(dpt)
         if transcoder is None:
             raise ValueError(f"Unknown DPT type: {dpt}")

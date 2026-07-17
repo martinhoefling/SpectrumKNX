@@ -33,3 +33,40 @@ test('Write is disabled while the value is empty', () => {
   render(<WriteControls dptMain={5} value="   " onValueChange={() => {}} onWrite={() => {}} />);
   expect(screen.getByRole('button', { name: /Write/ })).toBeDisabled();
 });
+
+test('DPT 10 renders a time input field and handles write', () => {
+  const onWrite = vi.fn();
+  const onValueChange = vi.fn();
+  const { container } = render(<WriteControls dptMain={10} value="12:30:00" onValueChange={onValueChange} onWrite={onWrite} />);
+
+  const input = container.querySelector('input[type="time"]');
+  expect(input).toBeInTheDocument();
+  expect(input).toHaveValue('12:30:00');
+
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(onWrite).toHaveBeenCalledWith('12:30:00');
+});
+
+test('DPT 11 renders a date input field and handles write', () => {
+  const onWrite = vi.fn();
+  const { container } = render(<WriteControls dptMain={11} value="2026-07-18" onValueChange={() => {}} onWrite={onWrite} />);
+
+  const input = container.querySelector('input[type="date"]');
+  expect(input).toBeInTheDocument();
+  expect(input).toHaveValue('2026-07-18');
+
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(onWrite).toHaveBeenCalledWith('2026-07-18');
+});
+
+test('DPT 19 renders a datetime-local input field and handles write', () => {
+  const onWrite = vi.fn();
+  const { container } = render(<WriteControls dptMain={19} value="2026-07-18T12:30" onValueChange={() => {}} onWrite={onWrite} />);
+
+  const input = container.querySelector('input[type="datetime-local"]');
+  expect(input).toBeInTheDocument();
+  expect(input).toHaveValue('2026-07-18T12:30');
+
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(onWrite).toHaveBeenCalledWith('2026-07-18T12:30');
+});
