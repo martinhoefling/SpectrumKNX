@@ -12,3 +12,9 @@ export function setSeriesHidden(address: string, value: boolean): void {
   if (value) hidden.add(address);
   else hidden.delete(address);
 }
+
+/** Clear the hidden flag for the given addresses. Called when a target is
+ * deselected so that reselecting it shows the series again (#205). */
+export function clearSeriesHidden(addresses: Iterable<string>): void {
+  for (const a of addresses) hidden.delete(a);
+}

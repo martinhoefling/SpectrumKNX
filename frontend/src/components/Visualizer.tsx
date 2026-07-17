@@ -6,6 +6,7 @@ import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
 import { Download, Link2, Check } from 'lucide-react';
 import { getCookie, setCookie } from '../utils/cookies';
+import { clearSeriesHidden } from '../utils/legendVisibility';
 
 interface VisualizerProps {
   telegrams: Telegram[];
@@ -26,6 +27,14 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
   const [stepped, setStepped] = useState(() => getCookie('chartStepped') !== 'false');
   const [linkCopied, setLinkCopied] = useState(false);
+
+  // Deselecting a target clears any legend-hide on it, so reselecting the same
+  // target shows its series again instead of staying invisible (#205).
+  const handleTargetsChange = (next: string[]) => {
+    const removed = selectedTargets.filter(a => !next.includes(a));
+    if (removed.length > 0) clearSeriesHidden(removed);
+    onTargetsChange(next);
+  };
 
   const toggleStepped = () => {
     setStepped(s => {
@@ -90,7 +99,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
         <VisualizerSidebar
           telegrams={telegrams}
           selectedTargets={selectedTargets}
-          onTargetsChange={onTargetsChange}
+          onTargetsChange={handleTargetsChange}
           onClose={onClose}
         />
 

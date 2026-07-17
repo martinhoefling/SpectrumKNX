@@ -75,10 +75,14 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
       cursor: { sync: { key: syncCursor.key } },
       hooks: {
         // Record legend show/hide toggles so they survive chart recreation (#192).
-        setSeries: [(u, idx, opts) => {
+        // Use the requested value from `opts.show` rather than reading it back
+        // off `u.series[idx].show`, which uPlot only commits after this hook —
+        // reading the stale value lagged the store by one click and made the
+        // legend appear to need a second click to stick (#205).
+        setSeries: [(_u, idx, opts) => {
           if (idx == null || idx === 0 || !('show' in opts)) return;
           const addr = series[idx - 1]?.address;
-          if (addr) setSeriesHidden(addr, !u.series[idx].show);
+          if (addr) setSeriesHidden(addr, !opts.show);
         }]
       },
       scales: {
