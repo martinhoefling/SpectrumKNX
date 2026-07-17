@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { X, RefreshCw, Activity, Layers, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import type { Telegram } from '../hooks/useWebSocket';
-import type { DeviceNode, Ko } from './BuildingOverlay';
+import type { DeviceNode, Ko, Channel } from './BuildingOverlay';
 
 interface DeviceStatusOverlayProps {
   device: DeviceNode;
@@ -192,7 +192,7 @@ const KoItem: React.FC<{
 };
 
 const ChannelRow: React.FC<{
-  channel: any;
+  channel: Channel;
   depth: number;
   valuesByGA: Record<string, Telegram>;
   onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
@@ -227,7 +227,7 @@ const ChannelRow: React.FC<{
       </div>
       {open && (
         <div style={{ borderLeft: '1px solid var(--border-subtle)', marginLeft: `${1.1 + depth * 1.25}rem` }}>
-          {channel.kos.map((ko: any, idx: number) => (
+          {channel.kos.map((ko: Ko, idx: number) => (
             <KoItem key={`${ko.number}-${idx}`} ko={ko} depth={0} valuesByGA={valuesByGA} onLastSeen={onLastSeen} />
           ))}
         </div>
