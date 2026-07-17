@@ -12,12 +12,14 @@ interface MixedChartProps {
   minTime: number | null;
   maxTime: number | null;
   stepped: boolean;
+  /** Draw a dot at each telegram timestamp so cyclic repeats are visible (#195). */
+  showDots: boolean;
 }
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
+export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped, showDots }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -46,9 +48,20 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
   // uplot-react updates via setData instead of destroying and recreating the
   // chart — which would drop the cursor/hover on every telegram (#207).
   const structureKey = [
-    width, isBinary, unit, stepped, themeTick,
+    width, isBinary, unit, stepped, showDots, themeTick,
     series.map(s => `${s.address}~${s.name}`).join('|'),
   ].join('§');
+
+  // Indices (per series) where an actual telegram was received, so dots mark
+  // real receipts rather than every forward-filled column (#195). Held in a ref
+  // that is refreshed every render, so the points.filter (kept in the stable
+  // memoized options for #207) reads live data instead of a stale snapshot.
+  const realIndicesRef = useRef<number[][]>([]);
+  // Written in render (not an effect) so it is fresh before uPlot's child draw
+  // effect runs on this commit; only ever read inside the imperative points
+  // filter, never during React render.
+  // eslint-disable-next-line react-hooks/refs
+  realIndicesRef.current = series.map(s => s.real.flatMap((r, i) => (r ? [i] : [])));
 
   const options: uPlot.Options = useMemo(() => {
     const style = getComputedStyle(document.documentElement);
@@ -111,7 +124,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
         {
           value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
         },
-        ...series.map((s) => ({
+        ...series.map((s, sIdx) => ({
           label: s.name,
           show: !isSeriesHidden(s.address),
           stroke: seriesColor(s.address),
@@ -119,7 +132,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped }) => {
           spanGaps: true,
           paths: (isBinary || stepped) ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
           fill: isBinary ? seriesColor(s.address) + '33' : undefined,
-          points: { show: false },
+          points: showDots
+            ? { show: true, size: 5, space: 0, filter: () => realIndicesRef.current[sIdx] ?? null }
+            : { show: false },
           value: (_u: uPlot, v: number | null) => {
             if (v === null) return '-';
             if (isBinary) return v === 1 ? 'On' : 'Off';

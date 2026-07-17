@@ -5,6 +5,10 @@ export interface ChartSeries {
   address: string;
   name: string;
   data: (number | null)[]; // y-values corresponding to the shared timestamps array
+  /** Per-column flag: true where this series actually received a telegram (vs a
+   * forward-filled hold). Drives the telegram dots (#195), so cyclic repeats of
+   * the same value are visible instead of hidden inside a flat segment. */
+  real: boolean[];
 }
 
 export interface ChartBucket {
@@ -103,9 +107,11 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
 
         // Map timestamps to values
         let lastVal: number | null = null;
+        const real: boolean[] = [];
         const data = timestamps.map(ts => {
           // Find if there's a telegram for this exact target at this exact timestamp
           const match = rows.find(r => r.target_address === addr && r.ts === ts);
+          real.push(!!match);
           if (match) {
             let val = match.value_numeric;
             if (val === null && typeof match.value_json === 'boolean') {
@@ -118,7 +124,7 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
           return lastVal;
         });
 
-        return { address: addr, name, data };
+        return { address: addr, name, data, real };
       });
 
       buckets.push({

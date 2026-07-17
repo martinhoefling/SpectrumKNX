@@ -63,6 +63,34 @@ describe('useChartData — extend last segment to newest telegram (#208)', () =>
     expect(series.data[series.data.length - 1]).toBe(1);
   });
 
+  test('marks each real telegram column so cyclic same-value repeats are dotted (#195)', () => {
+    const telegrams = [
+      // A cyclic "alive" GA sending the same value 1 three times.
+      at(1, { target_address: '1/1/1', dpt_main: 1, dpt_sub: 11, value_numeric: 1 }),
+      at(3, { target_address: '1/1/1', dpt_main: 1, dpt_sub: 11, value_numeric: 1 }),
+      at(5, { target_address: '1/1/1', dpt_main: 1, dpt_sub: 11, value_numeric: 1 }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1']));
+    const series = result.current.buckets[0].series[0];
+    // Every telegram is a real receipt even though the value never changes.
+    expect(series.real).toEqual([true, true, true]);
+    expect(series.data).toEqual([1, 1, 1]);
+  });
+
+  test('forward-filled columns from another GA are not marked real (#195)', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', dpt_main: 9, dpt_sub: 1, unit: '°C', value_numeric: 20 }),
+      // A second GA in the same bucket adds a timestamp column at t=3; GA 1/1/1
+      // holds its value there (forward-fill) but did not receive a telegram.
+      at(3, { target_address: '2/2/2', dpt_main: 9, dpt_sub: 1, unit: '°C', value_numeric: 30 }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1', '2/2/2']));
+    const s1 = result.current.buckets[0].series.find(s => s.address === '1/1/1')!;
+    // Column order is [t1, t3]; 1/1/1 is real only at t1.
+    expect(s1.real).toEqual([true, false]);
+    expect(s1.data).toEqual([20, 20]);
+  });
+
   test('does not add spurious columns when a bucket already ends at the newest telegram', () => {
     const telegrams = [
       at(1, { target_address: '1/1/1', dpt_main: 9, dpt_sub: 1, unit: '°C', value_numeric: 20 }),

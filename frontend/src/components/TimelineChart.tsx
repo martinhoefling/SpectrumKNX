@@ -9,14 +9,24 @@ interface TimelineChartProps {
   bucket: ChartBucket;
   minTime: number | null;
   maxTime: number | null;
+  /** Draw a tick at each telegram timestamp so cyclic repeats are visible (#195). */
+  showDots: boolean;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, showDots }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
+
+  // Per-series real-telegram flags, refreshed every render and read from the
+  // (stable, memoized) draw plugin so dots stay correct on live updates (#195/#207).
+  // Written in render so it is fresh before uPlot's child draw effect on this
+  // commit; only ever read inside the imperative draw plugin, never in render.
+  const realRef = useRef<boolean[][]>([]);
+  // eslint-disable-next-line react-hooks/refs
+  realRef.current = bucket.series.map(s => s.real);
 
   useLayoutEffect(() => {
     if (!containerRef.current) return;
@@ -42,7 +52,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
   // recreating it, keeping the cursor/hover alive (#207). The draw plugin below
   // therefore reads timestamps/values from `u.data`, not from this closure.
   const structureKey = [
-    width, themeTick, series.map(s => s.name).join('|'),
+    width, themeTick, showDots, series.map(s => s.name).join('|'),
   ].join('§');
 
   const options: uPlot.Options = useMemo(() => {
@@ -95,6 +105,26 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket }) => {
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(isOn ? 'On' : 'Off', xStart + (xEnd - xStart) / 2, yTop + rowHeight / 2);
+              }
+            }
+
+            // Telegram dots: mark each actual receipt (not forward-filled holds),
+            // so cyclic same-value repeats — e.g. a 90 s "server alive" — are
+            // visible as ticks along the bar (#195). `real` is read from the ref
+            // so it tracks live data while `options` stay stable (#207).
+            if (showDots) {
+              const real = realRef.current[sIdx];
+              const yMid = yTop + rowHeight / 2;
+              for (let i = 0; i < xs.length; i++) {
+                if (!real?.[i] || yData[i] === null) continue;
+                const x = u.valToPos(xs[i], 'x', true);
+                ctx.beginPath();
+                ctx.arc(x, yMid, 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.fill();
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+                ctx.stroke();
               }
             }
           }

@@ -26,6 +26,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
   const [stepped, setStepped] = useState(() => getCookie('chartStepped') !== 'false');
+  const [showDots, setShowDots] = useState(() => getCookie('chartDots') !== 'false');
   const [linkCopied, setLinkCopied] = useState(false);
 
   // Deselecting a target clears any legend-hide on it, so reselecting the same
@@ -40,6 +41,14 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     setStepped(s => {
       const next = !s;
       setCookie('chartStepped', String(next));
+      return next;
+    });
+  };
+
+  const toggleDots = () => {
+    setShowDots(d => {
+      const next = !d;
+      setCookie('chartDots', String(next));
       return next;
     });
   };
@@ -70,9 +79,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {buckets.map(b => (
         b.isBinary ? (
-          <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+          <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} showDots={showDots} />
         ) : (
-          <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} stepped={stepped} />
+          <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} stepped={stepped} showDots={showDots} />
         )
       ))}
 
@@ -129,6 +138,19 @@ export const Visualizer: React.FC<VisualizerProps> = ({
                   }}
                 >
                   {stepped ? 'Stepped' : 'Linear'}
+                </button>
+                <button
+                  onClick={toggleDots}
+                  title={showDots ? 'Hide telegram dots' : 'Show a dot at each telegram (makes cyclic repeats visible)'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    padding: '0.4rem 0.85rem', border: '1px solid var(--border-color)',
+                    borderRadius: '7px', fontSize: '0.8125rem', cursor: 'pointer',
+                    background: showDots ? 'rgba(99,102,241,0.15)' : 'transparent',
+                    color: showDots ? 'var(--accent-primary)' : 'var(--text-dim)',
+                  }}
+                >
+                  Dots
                 </button>
                 {getShareLink && (
                   <button
