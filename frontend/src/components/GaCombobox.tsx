@@ -27,9 +27,18 @@ export function GaCombobox({ value, onChange, options, recentAddresses, placehol
   const { matches, recentCount } = useMemo(() => {
     const q = value.trim().toLowerCase();
     if (q !== '') {
-      const list = options.filter(
-        o => (o.address ?? '').toLowerCase().includes(q) || (o.name ?? '').toLowerCase().includes(q)
-      );
+      // Rank so the exact match is on top and preselected, ahead of prefix and
+      // infix matches — typing "2/4/1" must not leave "12/4/1" as the top hit (#217).
+      const rank = (o: FilterOption) => {
+        const addr = (o.address ?? '').toLowerCase();
+        const name = (o.name ?? '').toLowerCase();
+        if (addr === q || name === q) return 0;
+        if (addr.startsWith(q) || name.startsWith(q)) return 1;
+        return 2;
+      };
+      const list = options
+        .filter(o => (o.address ?? '').toLowerCase().includes(q) || (o.name ?? '').toLowerCase().includes(q))
+        .sort((a, b) => rank(a) - rank(b));
       return { matches: list.slice(0, 100), recentCount: 0 };
     }
     // Empty input: only the recently used addresses, newest first (#190) —
