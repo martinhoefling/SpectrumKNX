@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { X, RefreshCw, Activity, Layers } from 'lucide-react';
+import { X, RefreshCw, Activity, Layers, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { DeviceNode, Ko } from './BuildingOverlay';
@@ -9,22 +9,21 @@ interface DeviceStatusOverlayProps {
   /** Newest telegram from the live websocket feed; used to update values in place. */
   latestTelegram: Telegram | null;
   onClose: () => void;
+  onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
 }
 
-const thStyle: React.CSSProperties = {
-  padding: '0.5rem 0.75rem',
-  textAlign: 'left',
-  fontWeight: 600,
-  fontSize: '0.7rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
+const iconBtnStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
   color: 'var(--text-dim)',
-  whiteSpace: 'nowrap',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '0.45rem 0.75rem',
-  verticalAlign: 'middle',
+  padding: '0.2rem',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: '4px',
+  transition: 'color 0.15s, background-color 0.15s',
+  flexShrink: 0,
 };
 
 const mono: React.CSSProperties = { fontFamily: "'JetBrains Mono', monospace" };
@@ -37,14 +36,208 @@ function ageOf(timestamp: string): string {
   return `${Math.round(diffMs / 86_400_000)}d ago`;
 }
 
-/**
- * Device-centric live status view (#153): every communication object of a
- * device with the current value of its linked group address(es), regardless
- * of which device wrote it. Values load from /api/telegrams/last (latest
- * telegram per GA) and update live from the websocket feed.
- */
+const Caret: React.FC<{ open: boolean; hasChildren: boolean; onClick?: () => void }> = ({ open, hasChildren, onClick }) => {
+  if (!hasChildren) return <div style={{ width: 14 }} />;
+  const Icon = open ? ChevronDown : ChevronRight;
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14, cursor: 'pointer', color: 'var(--text-dim)',
+      }}
+    >
+      <Icon size={12} />
+    </div>
+  );
+};
+
+const rowStyle = (depth: number): React.CSSProperties => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  padding: '0.4rem 0.75rem',
+  paddingLeft: `${0.75 + depth * 1.25}rem`,
+  borderRadius: '6px',
+  transition: 'background 0.15s, color 0.15s',
+  fontSize: '0.8rem',
+  userSelect: 'none',
+  minHeight: '2rem',
+});
+
+const GaItem: React.FC<{
+  ga: { address: string; name?: string | null };
+  depth: number;
+  valuesByGA: Record<string, Telegram>;
+  onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ ga, depth, valuesByGA, onLastSeen }) => {
+  const t = valuesByGA[ga.address];
+  const [hovered, setHovered] = useState(false);
+
+  const tooltipText = t
+    ? `Last updated: ${new Date(t.timestamp).toLocaleString()}\nby ${t.source_address}${t.source_name ? ` (${t.source_name})` : ''}`
+    : 'Never updated';
+
+  return (
+    <div
+      style={{
+        ...rowStyle(depth),
+        background: hovered ? 'var(--bg-hover)' : 'transparent',
+        fontSize: '0.75rem',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Caret open={false} hasChildren={false} />
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent-primary)' }}>{ga.address}</span>
+        {ga.name && (
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '0.05rem' }}>
+            {ga.name}
+          </span>
+        )}
+      </div>
+
+      <div
+        title={tooltipText}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          flexShrink: 0,
+          cursor: 'help',
+        }}
+      >
+        <span style={{ fontWeight: 600, color: t ? 'var(--text-main)' : 'var(--text-dim)' }}>
+          {t ? (
+            <>
+              {t.value_formatted ?? t.value_numeric ?? '—'}
+              {t.unit && <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}> {t.unit}</span>}
+            </>
+          ) : 'never seen'}
+        </span>
+        {t && (
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+            ({ageOf(t.timestamp)})
+          </span>
+        )}
+      </div>
+
+      {onLastSeen && (
+        <button
+          style={{
+            ...iconBtnStyle,
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 0.1s',
+          }}
+          title="Show history log"
+          onClick={e => { e.stopPropagation(); onLastSeen(ga.address, 'ga'); }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+        >
+          <Clock size={12} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+const KoItem: React.FC<{
+  ko: Ko;
+  depth: number;
+  valuesByGA: Record<string, Telegram>;
+  onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ ko, depth, valuesByGA, onLastSeen }) => {
+  const dptText = ko.dpts.map(d => d.name || `DPT ${d.main}`).join(', ') || '—';
+  const hasGAs = ko.group_addresses.length > 0;
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: hasGAs ? '0.25rem' : 0 }}>
+      <div
+        style={{
+          ...rowStyle(depth),
+          background: 'transparent',
+          fontWeight: 500,
+          color: 'var(--text-main)',
+        }}
+      >
+        <Caret open={false} hasChildren={false} />
+        {ko.number != null && (
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: '0.65rem', fontWeight: 600,
+            minWidth: '1.5rem', textAlign: 'center', padding: '0.1rem 0.35rem', borderRadius: '4px',
+            background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-subtle)',
+            flexShrink: 0,
+          }}>{ko.number}</span>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {ko.text || ko.name || '—'}
+            {ko.function_text && <span style={{ color: 'var(--text-dim)' }}> — {ko.function_text}</span>}
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '0.1rem' }}>
+            {dptText}
+          </div>
+        </div>
+      </div>
+      {hasGAs && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+          {ko.group_addresses.map(ga => (
+            <GaItem key={ga.address} ga={ga} depth={depth + 1} valuesByGA={valuesByGA} onLastSeen={onLastSeen} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ChannelRow: React.FC<{
+  channel: any;
+  depth: number;
+  valuesByGA: Record<string, Telegram>;
+  onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
+}> = ({ channel, depth, valuesByGA, onLastSeen }) => {
+  const [open, setOpen] = useState(true);
+  const koCount = channel.kos.length;
+  if (koCount === 0) return null;
+
+  return (
+    <div>
+      <div
+        style={{
+          ...rowStyle(depth),
+          cursor: 'pointer',
+          fontWeight: 600,
+          background: 'var(--bg-subtle)',
+          borderBottom: '1px solid var(--border-subtle)',
+          color: 'var(--text-main)',
+        }}
+        onClick={() => setOpen(o => !o)}
+        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+        onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
+      >
+        <Caret open={open} hasChildren={true} />
+        <Layers size={13} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          {channel.name || `Channel ${channel.id}`}
+        </span>
+        <span style={{ fontSize: '0.68rem', color: 'var(--text-dim)', fontWeight: 400 }}>
+          {koCount} KO{koCount !== 1 ? 's' : ''}
+        </span>
+      </div>
+      {open && (
+        <div style={{ borderLeft: '1px solid var(--border-subtle)', marginLeft: `${1.1 + depth * 1.25}rem` }}>
+          {channel.kos.map((ko: any, idx: number) => (
+            <KoItem key={`${ko.number}-${idx}`} ko={ko} depth={0} valuesByGA={valuesByGA} onLastSeen={onLastSeen} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const DeviceStatusOverlay: React.FC<DeviceStatusOverlayProps> = ({
-  device, latestTelegram, onClose,
+  device, latestTelegram, onClose, onLastSeen,
 }) => {
   const [valuesByGA, setValuesByGA] = useState<Record<string, Telegram>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -90,59 +283,6 @@ export const DeviceStatusOverlay: React.FC<DeviceStatusOverlayProps> = ({
 
   const koCount = device.channels.reduce((s, c) => s + c.kos.length, 0) + device.kos.length;
 
-  const renderKoRows = (kos: Ko[]) =>
-    kos.flatMap((ko, koIdx) =>
-      ko.group_addresses.map((ga, gaIdx) => {
-        const t = valuesByGA[ga.address];
-        const first = gaIdx === 0;
-        return (
-          <tr key={`${ko.number}-${koIdx}-${ga.address}`} style={{ borderTop: first ? '1px solid var(--border-color)' : 'none' }}>
-            <td style={{ ...tdStyle, ...mono, fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-              {first && ko.number != null ? ko.number : ''}
-            </td>
-            <td style={{ ...tdStyle, fontSize: '0.78rem', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                title={first ? `${ko.text}${ko.function_text ? ` — ${ko.function_text}` : ''}` : undefined}>
-              {first && (
-                <>
-                  {ko.text || ko.name || '—'}
-                  {ko.function_text && <span style={{ color: 'var(--text-dim)' }}> — {ko.function_text}</span>}
-                </>
-              )}
-            </td>
-            <td style={{ ...tdStyle, fontSize: '0.73rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-              {first ? (ko.dpts.map(d => d.name || `DPT ${d.main}`).join(', ') || '—') : ''}
-            </td>
-            <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-              <span style={{ ...mono, fontSize: '0.75rem' }}>{ga.address}</span>
-              {ga.name && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}> {ga.name}</span>}
-            </td>
-            <td style={{ ...tdStyle, fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
-              {t ? (
-                <>
-                  {t.value_formatted ?? t.value_numeric ?? '—'}
-                  {t.unit && <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}> {t.unit}</span>}
-                </>
-              ) : (
-                <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>never seen</span>
-              )}
-            </td>
-            <td style={{ ...tdStyle, fontSize: '0.73rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}
-                title={t ? new Date(t.timestamp).toLocaleString() : undefined}>
-              {t ? ageOf(t.timestamp) : '—'}
-            </td>
-            <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-              {t ? (
-                <>
-                  <span style={{ ...mono, fontSize: '0.73rem' }}>{t.source_address}</span>
-                  {t.source_name && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}> {t.source_name}</span>}
-                </>
-              ) : '—'}
-            </td>
-          </tr>
-        );
-      })
-    );
-
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
@@ -179,42 +319,51 @@ export const DeviceStatusOverlay: React.FC<DeviceStatusOverlayProps> = ({
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
         {koCount === 0 ? (
           <div style={{ padding: '2rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
             This device has no communication objects linked to group addresses.
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                <th style={thStyle}>KO</th>
-                <th style={thStyle}>Object</th>
-                <th style={thStyle}>DPT</th>
-                <th style={thStyle}>Group Address</th>
-                <th style={thStyle}>Value</th>
-                <th style={thStyle}>Updated</th>
-                <th style={thStyle}>Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {device.channels.map(ch => (
-                <React.Fragment key={ch.id}>
-                  <tr>
-                    <td colSpan={7} style={{
-                      ...tdStyle, paddingTop: '0.7rem', fontSize: '0.7rem', fontWeight: 600,
-                      textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-dim)',
-                    }}>
-                      <Layers size={11} style={{ verticalAlign: '-1px', marginRight: '0.35rem' }} />
-                      {ch.name || ch.id}
-                    </td>
-                  </tr>
-                  {renderKoRows(ch.kos)}
-                </React.Fragment>
-              ))}
-              {renderKoRows(device.kos)}
-            </tbody>
-          </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {device.channels.map(ch => (
+              <ChannelRow
+                key={ch.id}
+                channel={ch}
+                depth={0}
+                valuesByGA={valuesByGA}
+                onLastSeen={onLastSeen}
+              />
+            ))}
+
+            {device.kos.length > 0 && (
+              <div>
+                <div style={{
+                  ...rowStyle(0),
+                  fontWeight: 600,
+                  background: 'var(--bg-subtle)',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  color: 'var(--text-dim)',
+                  textTransform: 'uppercase',
+                  fontSize: '0.7rem',
+                  letterSpacing: '0.05em',
+                }}>
+                  Unassigned Objects
+                </div>
+                <div style={{ borderLeft: '1px solid var(--border-subtle)', marginLeft: '1.1rem' }}>
+                  {device.kos.map((ko, idx) => (
+                    <KoItem
+                      key={`${ko.number}-${idx}`}
+                      ko={ko}
+                      depth={0}
+                      valuesByGA={valuesByGA}
+                      onLastSeen={onLastSeen}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

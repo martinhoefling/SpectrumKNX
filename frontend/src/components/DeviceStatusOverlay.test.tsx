@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import { DeviceStatusOverlay } from './DeviceStatusOverlay';
 import type { DeviceNode } from './BuildingOverlay';
@@ -98,4 +98,60 @@ test('updates a value live from the websocket feed', async () => {
     <DeviceStatusOverlay device={DEVICE} latestTelegram={telegram('9/9/9', 'Ignored')} onClose={() => {}} />
   );
   expect(screen.queryByText('Ignored')).not.toBeInTheDocument();
+});
+
+test('collapses channel when clicked, showing and hiding KOs', async () => {
+  const onLastSeenMock = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async () => (
+    { ok: true, json: async () => ({ telegrams: [telegram('1/2/3', 'On')] }) } as Response
+  )));
+
+  render(
+    <DeviceStatusOverlay
+      device={DEVICE}
+      latestTelegram={null}
+      onClose={() => {}}
+      onLastSeen={onLastSeenMock}
+    />
+  );
+
+  // Initially Channel A and KOs are visible
+  await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+  expect(screen.getByText('Channel A')).toBeInTheDocument();
+  expect(screen.getByText('Switch')).toBeInTheDocument();
+
+  // Click channel row to collapse it
+  fireEvent.click(screen.getByText('Channel A'));
+
+  // It should collapse, hiding the KO inside it
+  await waitFor(() => expect(screen.queryByText('Switch')).not.toBeInTheDocument());
+
+  // Click again to expand
+  fireEvent.click(screen.getByText('Channel A'));
+  await waitFor(() => expect(screen.getByText('Switch')).toBeInTheDocument());
+});
+
+test('calls onLastSeen when clock history button is clicked', async () => {
+  const onLastSeenMock = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async () => (
+    { ok: true, json: async () => ({ telegrams: [telegram('1/2/3', 'On')] }) } as Response
+  )));
+
+  render(
+    <DeviceStatusOverlay
+      device={DEVICE}
+      latestTelegram={null}
+      onClose={() => {}}
+      onLastSeen={onLastSeenMock}
+    />
+  );
+
+  await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+
+  const gaRow = screen.getByText('1/2/3').closest('div')?.parentElement;
+  expect(gaRow).toBeTruthy();
+  const historyBtn = within(gaRow!).getByTitle('Show history log');
+  fireEvent.click(historyBtn);
+
+  expect(onLastSeenMock).toHaveBeenCalledWith('1/2/3', 'ga');
 });
