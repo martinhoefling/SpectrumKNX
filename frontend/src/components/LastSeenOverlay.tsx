@@ -109,16 +109,18 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
       ? selectedAddresses.includes(latestTelegram.target_address)
       : selectedAddresses.includes(latestTelegram.source_address);
     if (match) {
-      setTelegrams(prev => {
-        const exists = prev.some(
-          t => t.timestamp === latestTelegram.timestamp &&
-               t.source_address === latestTelegram.source_address &&
-               t.target_address === latestTelegram.target_address
-        );
-        if (exists) return prev;
-        return [latestTelegram, ...prev].slice(0, limit);
+      queueMicrotask(() => {
+        setTelegrams(prev => {
+          const exists = prev.some(
+            t => t.timestamp === latestTelegram.timestamp &&
+                 t.source_address === latestTelegram.source_address &&
+                 t.target_address === latestTelegram.target_address
+          );
+          if (exists) return prev;
+          return [latestTelegram, ...prev].slice(0, limit);
+        });
+        setLastFetchedAt(new Date());
       });
-      setLastFetchedAt(new Date());
     }
   }, [latestTelegram, selectedAddresses, mode, limit]);
 
