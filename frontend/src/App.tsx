@@ -4,7 +4,7 @@ import { parseViewUrl } from './utils/viewUrl';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock } from 'lucide-react';
 import { getCookie, setCookie } from './utils/cookies';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
@@ -638,6 +638,14 @@ function App() {
                 </button>
                 <button
                   className="icon-button"
+                  onClick={() => { setIsLastSeenOpen(v => !v); setIsVisualizerOpen(false); setIsStatisticsOpen(false); setIsBuildingOpen(false); setIsDatabaseOpen(false); }}
+                  title="Last seen values"
+                  style={{ color: isLastSeenOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                >
+                  <Clock size={18} />
+                </button>
+                <button
+                  className="icon-button"
                   onClick={() => { setIsDatabaseOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsBuildingOpen(false); }}
                   title="Database maintenance"
                   style={{ color: isDatabaseOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
@@ -935,6 +943,7 @@ function App() {
                     initialAddresses={lastSeenAddresses}
                     initialMode={lastSeenMode}
                     writeEnabled={serverConfig?.status?.write_enabled}
+                    latestTelegram={latestTelegram}
                     onClose={() => setIsLastSeenOpen(false)}
                   />
                 ) : isStatisticsOpen ? (

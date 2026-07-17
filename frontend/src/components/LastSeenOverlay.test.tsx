@@ -80,3 +80,51 @@ test('write row keeps the value field and Write button for non-boolean DPTs', as
   expect(screen.getByText('Write', { selector: 'button' })).toBeInTheDocument();
   expect(screen.queryByText('On')).not.toBeInTheDocument();
 });
+
+test('renders instruction when no addresses are selected, and clicking a sidebar address selects it', async () => {
+  const fetchMock = mockFetch({
+    '/api/telegrams': {
+      telegrams: [
+        {
+          timestamp: '2026-07-18T10:00:00Z',
+          source_address: '1.1.1',
+          source_name: 'Btn',
+          target_address: '16/0/1',
+          target_name: 'SRV_Alive',
+          telegram_type: 'GroupValueWrite',
+          simplified_type: 'Write',
+          dpt: '1.011',
+          dpt_main: 1,
+          dpt_sub: 11,
+          value_numeric: 1,
+          value_formatted: 'On',
+          raw_data: '0x01',
+        },
+      ],
+    },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  render(
+    <LastSeenOverlay
+      filterOptions={FILTER_OPTIONS}
+      initialAddresses={[]}
+      initialMode="ga"
+      writeEnabled
+      onClose={() => {}}
+    />
+  );
+
+  // Verify empty instruction
+  expect(screen.getByText('Select one or more addresses on the left sidebar to view their last seen values.')).toBeInTheDocument();
+
+  // Click on the address in the sidebar
+  const sidebarBtn = screen.getByText('16/0/1');
+  fireEvent.click(sidebarBtn);
+
+  // It should select and fetch
+  await waitFor(() => {
+    expect(screen.getByText('SRV_Alive')).toBeInTheDocument();
+    expect(screen.getByText('On')).toBeInTheDocument();
+  });
+});

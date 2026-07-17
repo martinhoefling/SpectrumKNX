@@ -17,6 +17,7 @@ interface LastSeenOverlayProps {
   initialMode: 'ga' | 'pa';
   /** When true, offer GroupValueRead/Write controls (standalone mode with a live bus). */
   writeEnabled?: boolean;
+  latestTelegram?: Telegram | null;
   onClose: () => void;
 }
 
@@ -50,6 +51,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   initialAddresses,
   initialMode,
   writeEnabled = false,
+  latestTelegram,
   onClose,
 }) => {
   const [mode, setMode] = useState<'ga' | 'pa'>(initialMode);
@@ -100,6 +102,25 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [autoRefresh, fetchData]);
+
+  useEffect(() => {
+    if (!latestTelegram) return;
+    const match = mode === 'ga'
+      ? selectedAddresses.includes(latestTelegram.target_address)
+      : selectedAddresses.includes(latestTelegram.source_address);
+    if (match) {
+      setTelegrams(prev => {
+        const exists = prev.some(
+          t => t.timestamp === latestTelegram.timestamp &&
+               t.source_address === latestTelegram.source_address &&
+               t.target_address === latestTelegram.target_address
+        );
+        if (exists) return prev;
+        return [latestTelegram, ...prev].slice(0, limit);
+      });
+      setLastFetchedAt(new Date());
+    }
+  }, [latestTelegram, selectedAddresses, mode, limit]);
 
   // After sending, the response/echo lands as a telegram shortly after; refresh to reflect it.
   const refreshSoon = useCallback(() => {
@@ -389,7 +410,11 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
 
         {/* Table */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {!isLoading && telegrams.length === 0 ? (
+          {selectedAddresses.length === 0 ? (
+            <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.875rem' }}>
+              Select one or more addresses on the left sidebar to view their last seen values.
+            </div>
+          ) : !isLoading && telegrams.length === 0 ? (
             <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.875rem' }}>
               No telegrams found for <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)' }}>{selectedAddresses.join(', ')}</span>.
             </div>
