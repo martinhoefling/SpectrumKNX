@@ -30,7 +30,9 @@ const getRecentValues = (address?: string | null, dptKey?: string | null, dptMai
           list.push(...parsed);
         }
       }
-    } catch {}
+    } catch {
+      // ignore
+    }
   };
 
   if (address) {
@@ -53,7 +55,9 @@ const saveRecentValue = (val: string, address?: string | null, dptKey?: string |
       const cur: string[] = raw ? JSON.parse(raw) : [];
       const updated = [trimmed, ...cur.filter(v => v !== trimmed)].slice(0, 10);
       localStorage.setItem(storeKey, JSON.stringify(updated));
-    } catch {}
+    } catch {
+      // ignore
+    }
   };
 
   if (address) {
