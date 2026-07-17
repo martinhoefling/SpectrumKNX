@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { VisualizerSidebar } from './VisualizerSidebar';
 import { useChartData } from '../hooks/useChartData';
 import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
+import { TimeBrush } from './TimeBrush';
 import { Download, Link2, Check } from 'lucide-react';
 import { getCookie, setCookie } from '../utils/cookies';
 import { clearSeriesHidden } from '../utils/legendVisibility';
@@ -28,6 +29,19 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const [stepped, setStepped] = useState(() => getCookie('chartStepped') !== 'false');
   const [showDots, setShowDots] = useState(() => getCookie('chartDots') !== 'false');
   const [linkCopied, setLinkCopied] = useState(false);
+
+  const defaultRange = useMemo<[number, number]>(() => {
+    return [minTime ?? 0, maxTime ?? 0];
+  }, [minTime, maxTime]);
+
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
+
+  const activeRange = useMemo<[number, number]>(() => {
+    if (!zoomRange || minTime === null || maxTime === null) return defaultRange;
+    const left = Math.max(minTime, Math.min(maxTime, zoomRange[0]));
+    const right = Math.max(left, Math.min(maxTime, zoomRange[1]));
+    return [left, right];
+  }, [zoomRange, minTime, maxTime, defaultRange]);
 
   // Deselecting a target clears any legend-hide on it, so reselecting the same
   // target shows its series again instead of staying invisible (#205).
@@ -54,11 +68,6 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   };
 
   const exportPng = () => {
-    // A quick hack: uPlot naturally renders to canvas
-    // We can just grab all canvases in the chart wrapper and let the user save them.
-    // However, saving multiple canvases as one image is complex.
-    // For now, if there's at least one canvas, export the first one roughly to prove concept,
-    // or just trigger print.
     window.print();
   };
 
@@ -70,7 +79,6 @@ export const Visualizer: React.FC<VisualizerProps> = ({
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch {
-      // Clipboard unavailable (e.g. non-secure context) — show the URL instead.
       window.prompt('Copy this link:', absolute);
     }
   };
@@ -79,9 +87,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {buckets.map(b => (
         b.isBinary ? (
-          <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} showDots={showDots} />
+          <TimelineChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} />
         ) : (
-          <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} stepped={stepped} showDots={showDots} />
+          <MixedChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} stepped={stepped} showDots={showDots} />
         )
       ))}
 
@@ -97,6 +105,15 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-subtle)' }}>
         {charts}
+        {minTime !== null && maxTime !== null && minTime < maxTime && (
+          <TimeBrush
+            minTime={minTime}
+            maxTime={maxTime}
+            value={activeRange}
+            onChange={setZoomRange}
+            telegrams={telegrams}
+          />
+        )}
       </div>
     );
   }
@@ -179,6 +196,15 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           </div>
 
           {charts}
+          {minTime !== null && maxTime !== null && minTime < maxTime && (
+            <TimeBrush
+              minTime={minTime}
+              maxTime={maxTime}
+              value={activeRange}
+              onChange={setZoomRange}
+              telegrams={telegrams}
+            />
+          )}
         </div>
       </div>
     </div>

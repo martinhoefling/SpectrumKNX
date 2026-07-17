@@ -15,7 +15,7 @@ interface TimelineChartProps {
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, showDots }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -52,7 +52,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, showDots }
   // recreating it, keeping the cursor/hover alive (#207). The draw plugin below
   // therefore reads timestamps/values from `u.data`, not from this closure.
   const structureKey = [
-    width, themeTick, showDots, series.map(s => s.name).join('|'),
+    width, themeTick, showDots, minTime, maxTime, series.map(s => s.name).join('|'),
   ].join('§');
 
   const options: uPlot.Options = useMemo(() => {
@@ -151,7 +151,11 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, showDots }
       cursor: { sync: { key: syncCursor.key } },
       plugins: [timelinePlugin()],
       scales: {
-        x: { time: true },
+        x: {
+          time: true,
+          min: minTime ? minTime / 1000 : undefined,
+          max: maxTime ? maxTime / 1000 : undefined,
+        },
         y: { auto: false, range: [0, 1] }
       },
       axes: [

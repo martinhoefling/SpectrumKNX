@@ -19,7 +19,7 @@ interface MixedChartProps {
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped, showDots }) => {
+export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -49,6 +49,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped, showDot
   // chart — which would drop the cursor/hover on every telegram (#207).
   const structureKey = [
     width, isBinary, unit, stepped, showDots, themeTick,
+    minTime, maxTime,
     series.map(s => `${s.address}~${s.name}`).join('|'),
   ].join('§');
 
@@ -99,7 +100,11 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, stepped, showDot
         }]
       },
       scales: {
-        x: { time: true },
+        x: {
+          time: true,
+          min: minTime ? minTime / 1000 : undefined,
+          max: maxTime ? maxTime / 1000 : undefined,
+        },
         y: scaleConfig
       },
       axes: [
