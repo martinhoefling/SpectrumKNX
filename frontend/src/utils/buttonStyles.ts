@@ -1,11 +1,14 @@
 /** Shared button styles for the bus-write controls, kept out of component
  * files so React Fast Refresh only sees component exports. */
 
+/** DPT-1 On/Off send buttons. Styled as accent action buttons (like Write)
+ * rather than passive toggles, so it is obvious they trigger a bus write (#218). */
 export function boolBtn(disabled: boolean): React.CSSProperties {
   return {
-    padding: '0.35rem 0.85rem', fontSize: '0.78rem', fontWeight: 600,
-    background: 'var(--bg-tag)', color: 'var(--text-main)',
-    border: '1px solid var(--border-color)', borderRadius: '6px',
+    display: 'flex', alignItems: 'center', gap: '0.3rem',
+    padding: '0.35rem 0.7rem', fontSize: '0.78rem', fontWeight: 600,
+    background: 'var(--accent-primary)', color: 'white',
+    border: 'none', borderRadius: '6px',
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
   };
 }

@@ -24,8 +24,12 @@ export function WriteControls({ dptMain, value, onValueChange, onWrite, disabled
   if (dptMain === 1) {
     return (
       <div style={{ display: 'flex', gap: '0.3rem' }}>
-        <button disabled={disabled} onClick={() => onWrite(true)} style={boolBtn(disabled)}>On</button>
-        <button disabled={disabled} onClick={() => onWrite(false)} style={boolBtn(disabled)}>Off</button>
+        <button disabled={disabled} onClick={() => onWrite(true)} style={boolBtn(disabled)} title="Write ON (1) to the bus">
+          <Send size={13} /> On
+        </button>
+        <button disabled={disabled} onClick={() => onWrite(false)} style={boolBtn(disabled)} title="Write OFF (0) to the bus">
+          <Send size={13} /> Off
+        </button>
       </div>
     );
   }
