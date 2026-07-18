@@ -106,8 +106,7 @@ test('DPT-1 target renders On/Off and records the GA in recents', async () => {
 
   render(<WriteToBusPanel targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]} onClose={() => {}} />);
   fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '12/0/0' } });
-  const row = screen.getByPlaceholderText(/Group address/).closest('div')!.parentElement!;
-  fireEvent.click(within(row).getByRole('button', { name: /^On$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^On$/ }));
 
   await waitFor(() => expect(screen.getByText(/Sent on to 12\/0\/0/)).toBeInTheDocument());
   expect(JSON.parse(localStorage.getItem('spectrumknx-recent-send-gas')!)).toEqual(['12/0/0']);

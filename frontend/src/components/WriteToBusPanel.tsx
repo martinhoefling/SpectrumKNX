@@ -152,67 +152,81 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
         const addressValid = GA_RE.test(row.address.trim());
         const scheduledDisabled = row.busy || !addressValid;
         return (
-          <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-              <GaCombobox
-                value={row.address}
-                onChange={(next, option) => onAddressChange(row.id, next, option)}
-                options={targets}
-                recentAddresses={recentGas}
-                placeholder="Group address (e.g. 1/2/3)"
-                width={200}
-              />
+          <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', width: '100%' }}>
+              {/* Left Group: GA input + Resolved Name */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 auto', minWidth: '180px' }}>
+                <GaCombobox
+                  value={row.address}
+                  onChange={(next, option) => onAddressChange(row.id, next, option)}
+                  options={targets}
+                  recentAddresses={recentGas}
+                  placeholder="Group address (e.g. 1/2/3)"
+                  width={150}
+                />
+                {known?.name && (
+                  <span
+                    style={{ fontSize: '0.72rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}
+                    title={known.name}
+                  >
+                    — {known.name}
+                  </span>
+                )}
+              </div>
 
-              <WriteControls
-                dptMain={dptMain}
-                dptKey={row.dpt || null}
-                address={row.address || null}
-                value={row.value}
-                onValueChange={v => updateRow(row.id, { value: v, feedback: null })}
-                onWrite={payload => void write(row, payload)}
-                disabled={scheduledDisabled}
-              />
+              {/* Right Group: Action controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', flexShrink: 0 }}>
+                <WriteControls
+                  dptMain={dptMain}
+                  dptKey={row.dpt || null}
+                  address={row.address || null}
+                  value={row.value}
+                  onValueChange={v => updateRow(row.id, { value: v, feedback: null })}
+                  onWrite={payload => void write(row, payload)}
+                  disabled={scheduledDisabled}
+                />
 
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", minWidth: '70px', display: 'inline-block' }}>
-                DPT {row.dpt || '—'}
-              </span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", minWidth: '70px', display: 'inline-block' }}>
+                  DPT {row.dpt || '—'}
+                </span>
 
-              <input
-                className="glass-input"
-                placeholder="Delay s"
-                value={row.delay}
-                onChange={e => updateRow(row.id, { delay: e.target.value, feedback: null })}
-                title="Wait this many seconds before sending"
-                style={{ width: 70 }}
-              />
+                <input
+                  className="glass-input"
+                  placeholder="Delay s"
+                  value={row.delay}
+                  onChange={e => updateRow(row.id, { delay: e.target.value, feedback: null })}
+                  title="Wait this many seconds before sending"
+                  style={{ width: 70 }}
+                />
 
-              <input
-                className="glass-input"
-                placeholder="Every s"
-                value={row.every}
-                onChange={e => updateRow(row.id, { every: e.target.value, feedback: null })}
-                title="Repeat the send at this interval in seconds (min 1) until cancelled"
-                style={{ width: 70 }}
-              />
+                <input
+                  className="glass-input"
+                  placeholder="Every s"
+                  value={row.every}
+                  onChange={e => updateRow(row.id, { every: e.target.value, feedback: null })}
+                  title="Repeat the send at this interval in seconds (min 1) until cancelled"
+                  style={{ width: 70 }}
+                />
 
-              <button
-                onClick={() => void read(row)}
-                disabled={row.busy || !addressValid}
-                style={secondaryBtn(row.busy || !addressValid)}
-                title="Send a GroupValueRead; the response updates the last value"
-              >
-                <Radio size={14} /> Read
-              </button>
+                <button
+                  onClick={() => void read(row)}
+                  disabled={row.busy || !addressValid}
+                  style={secondaryBtn(row.busy || !addressValid)}
+                  title="Send a GroupValueRead; the response updates the last value"
+                >
+                  <Radio size={14} /> Read
+                </button>
 
-              <button
-                className="icon-button"
-                onClick={() => void removeRow(row.id)}
-                disabled={rows.length === 1}
-                title={rows.length === 1 ? 'At least one row is required' : 'Remove this row'}
-                style={{ color: 'var(--text-dim)', opacity: rows.length === 1 ? 0.4 : 1 }}
-              >
-                <X size={15} />
-              </button>
+                <button
+                  className="icon-button"
+                  onClick={() => void removeRow(row.id)}
+                  disabled={rows.length === 1}
+                  title={rows.length === 1 ? 'At least one row is required' : 'Remove this row'}
+                  style={{ color: 'var(--text-dim)', opacity: rows.length === 1 ? 0.4 : 1 }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
             </div>
 
             {row.feedback && (
