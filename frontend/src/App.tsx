@@ -1,6 +1,15 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, type Telegram, type ConnectionStateEvent } from './hooks/useWebSocket';
 import { parseViewUrl } from './utils/viewUrl';
+import {
+  isEmbedded,
+  loadWorkspace,
+  saveWorkspace,
+  parseMonitorSearch,
+  applyWorkspaceUrl,
+  type WorkspaceState,
+  type WorkspaceView,
+} from './utils/workspaceState';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
@@ -137,18 +146,26 @@ function App() {
   const [theme, setTheme] = useTheme();
   // A view shared via URL (#150) starts on the History tab with its filters applied.
   const [initialView] = useState(() => parseViewUrl(window.location.search));
-  const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>(initialView ? 'history' : 'live');
+  // Workspace restore (#211): a shared viz link wins; otherwise the HA
+  // dashboard iframe restores from localStorage and a regular tab from the
+  // view=monitor URL it maintains below.
+  const [initialWorkspace] = useState(() =>
+    initialView ? null : isEmbedded() ? loadWorkspace() : parseMonitorSearch(window.location.search),
+  );
+  const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>(
+    initialView ? 'history' : initialWorkspace?.tab ?? 'live',
+  );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isFilterOpen, setIsFilterOpen] = useState(true);
-  const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
-  const [isLastSeenOpen, setIsLastSeenOpen] = useState(false);
-  const [lastSeenAddresses, setLastSeenAddresses] = useState<string[]>([]);
-  const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>('ga');
-  const [isStatisticsOpen, setIsStatisticsOpen] = useState(false);
-  const [isBuildingOpen, setIsBuildingOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(initialWorkspace?.filterOpen ?? true);
+  const [isVisualizerOpen, setIsVisualizerOpen] = useState(initialWorkspace?.view === 'visualizer');
+  const [isLastSeenOpen, setIsLastSeenOpen] = useState(initialWorkspace?.view === 'lastseen');
+  const [lastSeenAddresses, setLastSeenAddresses] = useState<string[]>(initialWorkspace?.lastSeenAddresses ?? []);
+  const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>(initialWorkspace?.lastSeenMode ?? 'ga');
+  const [isStatisticsOpen, setIsStatisticsOpen] = useState(initialWorkspace?.view === 'statistics');
+  const [isBuildingOpen, setIsBuildingOpen] = useState(initialWorkspace?.view === 'building');
   const [statusDevice, setStatusDevice] = useState<DeviceNode | null>(null);
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
-  const [isDatabaseOpen, setIsDatabaseOpen] = useState(false);
+  const [isDatabaseOpen, setIsDatabaseOpen] = useState(initialWorkspace?.view === 'database');
   const [isSendOpen, setIsSendOpen] = useState(false);
   const hasActiveView = isStatisticsOpen || isBuildingOpen || isLastSeenOpen || isDatabaseOpen;
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
@@ -187,7 +204,9 @@ function App() {
   const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getPref('rateMode') as 's' | 'm' | 'h') || 's');
 
   const [isHistoryLoaderOpen, setIsHistoryLoaderOpen] = useState(false);
-  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(initialView?.plot ?? []);
+  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(
+    initialView?.plot ?? initialWorkspace?.plot ?? [],
+  );
 
   // ── Live State ──────────────────────────────────────────────────────────────
   // Buffer + IndexedDB cache + coverage bookkeeping (#246): cached telegrams
@@ -211,7 +230,9 @@ function App() {
 
   // ── Filter State ────────────────────────────────────────────────────────────
   const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
-  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(initialView?.filters ?? DEFAULT_FILTERS);
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(
+    initialView?.filters ?? initialWorkspace?.filters ?? DEFAULT_FILTERS,
+  );
 
   const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
     setActiveFilters((prevFilters) => {
@@ -353,6 +374,38 @@ function App() {
     setPref('visibleColumns', JSON.stringify(visibleColumns));
     setPref('rateMode', rateMode);
   }, [loadLimit, visibleColumns, rateMode]);
+
+  // ── Persist workspace (#211) ────────────────────────────────────────────────
+  const workspaceView: WorkspaceView = isVisualizerOpen
+    ? 'visualizer'
+    : isLastSeenOpen
+      ? 'lastseen'
+      : isStatisticsOpen
+        ? 'statistics'
+        : isBuildingOpen
+          ? 'building'
+          : isDatabaseOpen
+            ? 'database'
+            : 'none';
+  useEffect(() => {
+    // A shared viz link owns the URL for this session; don't overwrite it or
+    // persist its transient state as the workspace.
+    if (initialView) return;
+    const workspace: WorkspaceState = {
+      tab: activeTab,
+      view: workspaceView,
+      filterOpen: isFilterOpen,
+      filters: activeFilters,
+      plot: selectedVisualizationTargets,
+      lastSeenAddresses,
+      lastSeenMode,
+    };
+    const handle = setTimeout(() => {
+      if (isEmbedded()) saveWorkspace(workspace);
+      else applyWorkspaceUrl(workspace);
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [initialView, activeTab, workspaceView, isFilterOpen, activeFilters, selectedVisualizationTargets, lastSeenAddresses, lastSeenMode]);
 
   // ── Sync filter panel visibility with active views ───────────────────────────
   useEffect(() => {
