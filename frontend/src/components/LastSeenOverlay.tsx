@@ -7,6 +7,7 @@ import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
+import { secondaryBtn } from '../utils/buttonStyles';
 
 const LIMITS = [10, 20, 50, 100] as const;
 
@@ -109,18 +110,21 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
       ? selectedAddresses.includes(latestTelegram.target_address)
       : selectedAddresses.includes(latestTelegram.source_address);
     if (match) {
-      queueMicrotask(() => {
-        setTelegrams(prev => {
-          const exists = prev.some(
-            t => t.timestamp === latestTelegram.timestamp &&
-                 t.source_address === latestTelegram.source_address &&
-                 t.target_address === latestTelegram.target_address
-          );
-          if (exists) return prev;
-          return [latestTelegram, ...prev].slice(0, limit);
-        });
-        setLastFetchedAt(new Date());
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTelegrams(prev => {
+        const exists = prev.some(
+          t => {
+            const tTime = new Date(t.timestamp.endsWith('Z') || t.timestamp.includes('+') ? t.timestamp : t.timestamp + 'Z').getTime();
+            const ltTime = new Date(latestTelegram.timestamp.endsWith('Z') || latestTelegram.timestamp.includes('+') ? latestTelegram.timestamp : latestTelegram.timestamp + 'Z').getTime();
+            return Math.abs(tTime - ltTime) < 1000 &&
+                   t.source_address === latestTelegram.source_address &&
+                   t.target_address === latestTelegram.target_address;
+          }
+        );
+        if (exists) return prev;
+        return [latestTelegram, ...prev].slice(0, limit);
       });
+      setLastFetchedAt(new Date());
     }
   }, [latestTelegram, selectedAddresses, mode, limit]);
 
@@ -405,6 +409,14 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               onWrite={payload => void handleWrite(payload, formatDpt(selectedInfo?.main, selectedInfo?.sub))}
               disabled={busy}
             />
+            <button
+              onClick={() => void handleRead()}
+              disabled={busy}
+              style={secondaryBtn(busy)}
+              title="Send a GroupValueRead; the response updates the last value"
+            >
+              <Radio size={13} /> Read
+            </button>
             <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>
               DPT {formatDpt(selectedInfo?.main, selectedInfo?.sub) || '—'}
             </span>

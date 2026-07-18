@@ -93,7 +93,7 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
     updateRow(id, {
       address: next,
       feedback: null,
-      ...(match && match.main != null ? { dpt: formatDpt(match.main, match.sub) } : {}),
+      dpt: match && match.main != null ? formatDpt(match.main, match.sub) : '',
     });
   };
 
@@ -163,15 +163,6 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
                 width={200}
               />
 
-              <input
-                className="glass-input"
-                placeholder="DPT (e.g. 1.001)"
-                value={row.dpt}
-                onChange={e => updateRow(row.id, { dpt: e.target.value, feedback: null })}
-                title="Datapoint type used to encode the value. Prefilled from the project when known."
-                style={{ width: 110, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem' }}
-              />
-
               <WriteControls
                 dptMain={dptMain}
                 dptKey={row.dpt || null}
@@ -181,6 +172,10 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
                 onWrite={payload => void write(row, payload)}
                 disabled={scheduledDisabled}
               />
+
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", minWidth: '70px', display: 'inline-block' }}>
+                DPT {row.dpt || '—'}
+              </span>
 
               <input
                 className="glass-input"
