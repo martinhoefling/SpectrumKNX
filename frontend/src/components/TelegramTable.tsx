@@ -5,7 +5,7 @@ import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
-import { getCookie, setCookie } from '../utils/cookies';
+import { getPref, setPref } from '../utils/prefs';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
 
@@ -50,7 +50,7 @@ const COLUMNS: ColumnDef[] = [
   { id: 'value', label: 'VALUE', sortKey: 'value_numeric', defaultWidth: 220, minWidth: 120 },
 ];
 
-const COLUMN_WIDTHS_COOKIE = 'columnWidths';
+const COLUMN_WIDTHS_PREF = 'columnWidths';
 
 const getTypeColor = (type?: string | null) => {
   switch (type) {
@@ -93,15 +93,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
-  // ── Column widths (persisted to a cookie, shared across live & history views) ──
+  // ── Column widths (persisted, shared across live & history views) ──
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     const defaults: Record<string, number> = {};
     for (const c of COLUMNS) defaults[c.id] = c.defaultWidth;
     try {
-      const saved = getCookie(COLUMN_WIDTHS_COOKIE);
+      const saved = getPref(COLUMN_WIDTHS_PREF);
       if (saved) return { ...defaults, ...JSON.parse(saved) };
     } catch {
-      // Ignore malformed cookie
+      // Ignore malformed stored value
     }
     return defaults;
   });
@@ -112,7 +112,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   );
 
   const persistWidths = useCallback((widths: Record<string, number>) => {
-    setCookie(COLUMN_WIDTHS_COOKIE, JSON.stringify(widths));
+    setPref(COLUMN_WIDTHS_PREF, JSON.stringify(widths));
   }, []);
 
   const handleResizeStart = useCallback((e: React.MouseEvent, col: ColumnDef) => {

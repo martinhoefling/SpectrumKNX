@@ -3,9 +3,9 @@ import { useWebSocket, type Telegram, type ConnectionStateEvent } from './hooks/
 import { parseViewUrl } from './utils/viewUrl';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
-import { readSortConfigCookie, writeSortConfigCookie } from './utils/sortConfig';
+import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock } from 'lucide-react';
-import { getCookie, setCookie } from './utils/cookies';
+import { getPref, setPref } from './utils/prefs';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
@@ -36,7 +36,7 @@ declare const __APP_VERSION__: string;
 
 // Remembers the latest version the user already dismissed, so the popup shows
 // once per new release rather than on every load.
-const DISMISSED_UPDATE_COOKIE = 'dismissed_update_version';
+const DISMISSED_UPDATE_PREF = 'dismissed_update_version';
 
 const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [], ga_group_names: {}, pa_line_names: {} };
 
@@ -164,15 +164,15 @@ function App() {
   const [updateClosed, setUpdateClosed] = useState(false);
   // Version the user has already been shown, read once at mount. Kept in state
   // (not re-read) so persisting "seen" below doesn't retract the popup mid-view.
-  const [seenUpdateVersion] = useState(() => getCookie(DISMISSED_UPDATE_COOKIE));
+  const [seenUpdateVersion] = useState(() => getPref(DISMISSED_UPDATE_PREF));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [serverConfig, setServerConfig] = useState<any>(null);
 
   // ── Settings & Persistence ──────────────────────────────────────────────────
-  const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 100000));
+  const [loadLimit, setLoadLimit] = useState(Number(getPref('loadLimit') || 100000));
   const [visibleColumns, setVisibleColumns] = useState<{ [key: string]: boolean }>(() => {
     try {
-      const cookie = getCookie('visibleColumns');
+      const cookie = getPref('visibleColumns');
       if (cookie) return JSON.parse(cookie);
     } catch {
       // Ignore cookie parsing errors
@@ -182,7 +182,7 @@ function App() {
       target: true, targetName: true, type: true, dpt: true, data: true, value: true,
     };
   });
-  const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getCookie('rateMode') as 's' | 'm' | 'h') || 's');
+  const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getPref('rateMode') as 's' | 'm' | 'h') || 's');
 
   const [isHistoryLoaderOpen, setIsHistoryLoaderOpen] = useState(false);
   const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(initialView?.plot ?? []);
@@ -290,7 +290,7 @@ function App() {
   // only once across reloads even if the user navigates away without closing it.
   useEffect(() => {
     if (hasNewUpdate && updateInfo?.latest) {
-      setCookie(DISMISSED_UPDATE_COOKIE, updateInfo.latest);
+      setPref(DISMISSED_UPDATE_PREF, updateInfo.latest);
     }
   }, [hasNewUpdate, updateInfo?.latest]);
 
@@ -339,11 +339,11 @@ function App() {
   const wsEndpoint = wsUrl('/ws/telegrams');
   const { isConnected } = useWebSocket(wsEndpoint, handleTelegram, handleConnectionState);
 
-  // ── Persist settings to cookies ─────────────────────────────────────────────
+  // ── Persist settings ────────────────────────────────────────────────────────
   useEffect(() => {
-    setCookie('loadLimit', loadLimit.toString());
-    setCookie('visibleColumns', JSON.stringify(visibleColumns));
-    setCookie('rateMode', rateMode);
+    setPref('loadLimit', loadLimit.toString());
+    setPref('visibleColumns', JSON.stringify(visibleColumns));
+    setPref('rateMode', rateMode);
   }, [loadLimit, visibleColumns, rateMode]);
 
   // ── Sync filter panel visibility with active views ───────────────────────────
@@ -399,14 +399,14 @@ function App() {
   };
 
   // ── Sorting ─────────────────────────────────────────────────────────────────
-  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigCookie);
+  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   const handleSort = (key: SortKey) => {
     setSortConfig(prev => {
       const next: SortConfig = {
         key,
         direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
       };
-      writeSortConfigCookie(next);
+      writeSortConfigPref(next);
       return next;
     });
   };
@@ -1065,7 +1065,7 @@ function App() {
         <UpdateNotification
           info={updateInfo}
           onClose={() => {
-            if (updateInfo.latest) setCookie(DISMISSED_UPDATE_COOKIE, updateInfo.latest);
+            if (updateInfo.latest) setPref(DISMISSED_UPDATE_PREF, updateInfo.latest);
             setUpdateClosed(true);
             setIsUpdateOpen(false);
           }}

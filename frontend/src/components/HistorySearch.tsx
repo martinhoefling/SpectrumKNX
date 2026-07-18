@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
-import { readSortConfigCookie, writeSortConfigCookie } from '../utils/sortConfig';
+import { readSortConfigPref, writeSortConfigPref } from '../utils/sortConfig';
 import type { Telegram } from '../hooks/useWebSocket';
 import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
 import { HistoryLoader } from './HistoryLoader';
@@ -43,7 +43,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
   const [metadata, setMetadata] = useState<{ total_count: number; limit_reached: boolean } | null>(null);
-  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigCookie);
+  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
 
@@ -81,7 +81,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
         key,
         direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
       };
-      writeSortConfigCookie(next);
+      writeSortConfigPref(next);
       return next;
     });
   };

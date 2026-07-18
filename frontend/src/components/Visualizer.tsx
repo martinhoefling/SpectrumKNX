@@ -6,7 +6,7 @@ import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
 import { TimeBrush } from './TimeBrush';
 import { Download, Link2, Check } from 'lucide-react';
-import { getCookie, setCookie } from '../utils/cookies';
+import { getPref, setPref } from '../utils/prefs';
 import { clearSeriesHidden } from '../utils/legendVisibility';
 import { expandDegenerateRange } from '../utils/timeRange';
 
@@ -27,8 +27,8 @@ export const Visualizer: React.FC<VisualizerProps> = ({
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
-  const [stepped, setStepped] = useState(() => getCookie('chartStepped') !== 'false');
-  const [showDots, setShowDots] = useState(() => getCookie('chartDots') !== 'false');
+  const [stepped, setStepped] = useState(() => getPref('chartStepped') !== 'false');
+  const [showDots, setShowDots] = useState(() => getPref('chartDots') !== 'false');
   const [linkCopied, setLinkCopied] = useState(false);
 
   const defaultRange = useMemo<[number, number]>(() => {
@@ -57,7 +57,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const toggleStepped = () => {
     setStepped(s => {
       const next = !s;
-      setCookie('chartStepped', String(next));
+      setPref('chartStepped', String(next));
       return next;
     });
   };
@@ -65,7 +65,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const toggleDots = () => {
     setShowDots(d => {
       const next = !d;
-      setCookie('chartDots', String(next));
+      setPref('chartDots', String(next));
       return next;
     });
   };

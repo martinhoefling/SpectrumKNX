@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
-import { getCookie, setCookie } from '../utils/cookies';
+import { getPref, setPref } from '../utils/prefs';
 
 export type Theme = 'system' | 'dark' | 'light';
 
@@ -15,7 +15,7 @@ function applyTheme(theme: Theme) {
 
 export function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = getCookie('theme') as Theme | null;
+    const saved = getPref('theme') as Theme | null;
     return saved && VALID_THEMES.includes(saved) ? saved : 'system';
   });
 
@@ -25,7 +25,7 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 
   const setTheme = (t: Theme) => {
     setThemeState(t);
-    setCookie('theme', t);
+    setPref('theme', t);
   };
 
   return [theme, setTheme];
