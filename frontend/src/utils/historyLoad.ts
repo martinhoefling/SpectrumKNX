@@ -40,6 +40,17 @@ export function buildHistoryUrl(range: LoadedRange, limit: number): string {
   return url;
 }
 
+/** Resolves a LoadedRange to concrete epoch-ms bounds (open ends → 0 / now). */
+export function rangeToMs(range: LoadedRange, nowMs = Date.now()): { startMs: number; endMs: number } {
+  if (range.kind === 'relative') {
+    return { startMs: nowMs - range.seconds * 1000, endMs: nowMs };
+  }
+  return {
+    startMs: range.startTime ? Date.parse(range.startTime + ':00Z') : 0,
+    endMs: range.endTime ? Date.parse(range.endTime + ':00Z') : nowMs,
+  };
+}
+
 /**
  * Fetches history telegrams for a range with server-side filters applied.
  * OR source/target relation is handled with two queries merged client-side,

@@ -7,7 +7,10 @@ import { loadHistoryTelegrams, type HistoryMetadata, type LoadedRange } from '..
 
 interface HistoryLoaderProps {
   onClose: () => void;
-  onLoad: (telegrams: Telegram[], metadata?: HistoryMetadata, range?: LoadedRange) => void;
+  onLoad?: (telegrams: Telegram[], metadata?: HistoryMetadata, range?: LoadedRange) => void;
+  /** Fire-and-forget alternative to onLoad: the modal closes immediately and
+   * the caller loads the range in the background (Group Monitor, #222). */
+  onAsyncLoad?: (range: LoadedRange) => void;
   limit: number;
   /** 'monitor' = no date range pickers (Group Monitor); 'search' = full options (History Search) */
   mode?: 'monitor' | 'search';
@@ -27,7 +30,7 @@ const UNIT_TO_SECONDS: Record<Unit, number> = {
   days: 86400,
 };
 
-export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, limit, mode = 'search', filters, timeRange, onTimeRangeChange }) => {
+export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, onAsyncLoad, limit, mode = 'search', filters, timeRange, onTimeRangeChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
@@ -74,6 +77,13 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
   };
 
   const doFetch = useCallback(async (range: LoadedRange) => {
+    if (onAsyncLoad) {
+      // Background mode: hand the range off and close — progress is shown in
+      // the caller's status area instead of blocking this modal (#222).
+      onAsyncLoad(range);
+      onClose();
+      return;
+    }
     setIsLoading(true);
     setError(null);
     setStatus('loading');
@@ -82,7 +92,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
       const { telegrams, metadata } = await loadHistoryTelegrams(range, limit, filters);
       setResultMeta(metadata);
       setStatus('success');
-      onLoad(telegrams, metadata, range);
+      onLoad?.(telegrams, metadata, range);
       setTimeout(onClose, 1500);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
@@ -91,7 +101,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     } finally {
       setIsLoading(false);
     }
-  }, [filters, limit, onLoad, onClose]);
+  }, [filters, limit, onLoad, onAsyncLoad, onClose]);
 
   const handleLoadRelative = useCallback((seconds: number) => {
     doFetch({ kind: 'relative', seconds });
