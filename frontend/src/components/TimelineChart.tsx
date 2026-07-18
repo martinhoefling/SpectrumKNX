@@ -11,11 +11,12 @@ interface TimelineChartProps {
   maxTime: number | null;
   /** Draw a tick at each telegram timestamp so cyclic repeats are visible (#195). */
   showDots: boolean;
+  onZoomRangeChange?: (value: [number, number] | null) => void;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, onZoomRangeChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -148,7 +149,28 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
       width,
       height: chartHeight,
       padding: [0, 180, 0, 0],
-      cursor: { sync: { key: syncCursor.key } },
+      cursor: {
+        sync: { key: syncCursor.key },
+        drag: { x: true, y: false, setScale: false }
+      },
+      hooks: {
+        setSelect: [
+          (u) => {
+            if (u.select.width > 0) {
+              const min = u.posToVal(u.select.left, 'x');
+              const max = u.posToVal(u.select.left + u.select.width, 'x');
+              onZoomRangeChange?.([min * 1000, max * 1000]);
+            }
+          }
+        ],
+        ready: [
+          (u) => {
+            u.over.addEventListener('dblclick', () => {
+              onZoomRangeChange?.(null);
+            });
+          }
+        ]
+      },
       plugins: [timelinePlugin()],
       scales: {
         x: {

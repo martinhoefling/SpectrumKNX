@@ -14,12 +14,13 @@ interface MixedChartProps {
   stepped: boolean;
   /** Draw a dot at each telegram timestamp so cyclic repeats are visible (#195). */
   showDots: boolean;
+  onZoomRangeChange?: (value: [number, number] | null) => void;
 }
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots }) => {
+export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots, onZoomRangeChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -86,7 +87,10 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
     return {
       width,
       height: isBinary ? Math.max(150, series.length * 50) : 300,
-      cursor: { sync: { key: syncCursor.key } },
+      cursor: {
+        sync: { key: syncCursor.key },
+        drag: { x: true, y: false, setScale: false }
+      },
       hooks: {
         // Record legend show/hide toggles so they survive chart recreation (#192).
         // Use the requested value from `opts.show` rather than reading it back
@@ -97,7 +101,23 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
           if (idx == null || idx === 0 || !('show' in opts)) return;
           const addr = series[idx - 1]?.address;
           if (addr) setSeriesHidden(addr, !opts.show);
-        }]
+        }],
+        setSelect: [
+          (u) => {
+            if (u.select.width > 0) {
+              const min = u.posToVal(u.select.left, 'x');
+              const max = u.posToVal(u.select.left + u.select.width, 'x');
+              onZoomRangeChange?.([min * 1000, max * 1000]);
+            }
+          }
+        ],
+        ready: [
+          (u) => {
+            u.over.addEventListener('dblclick', () => {
+              onZoomRangeChange?.(null);
+            });
+          }
+        ]
       },
       scales: {
         x: {

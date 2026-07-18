@@ -90,9 +90,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {buckets.map(b => (
         b.isBinary ? (
-          <TimelineChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} />
+          <TimelineChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} onZoomRangeChange={setZoomRange} />
         ) : (
-          <MixedChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} stepped={stepped} showDots={showDots} />
+          <MixedChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} stepped={stepped} showDots={showDots} onZoomRangeChange={setZoomRange} />
         )
       ))}
 
