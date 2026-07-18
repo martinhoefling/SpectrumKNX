@@ -40,7 +40,7 @@ const DISMISSED_UPDATE_COOKIE = 'dismissed_update_version';
 
 const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [], ga_group_names: {}, pa_line_names: {} };
 
-const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: string, isSettingsOpen: boolean, onChange: (id: string) => void }) => {
+const NavDropdown = ({ activeTab, isSettingsOpen, isDatabaseOpen, onChange }: { activeTab: string, isSettingsOpen: boolean, isDatabaseOpen: boolean, onChange: (id: string) => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -58,10 +58,11 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
     { id: 'live', label: 'Group Monitor', icon: LayoutDashboard },
     { id: 'history', label: 'History Search', icon: History },
     { id: 'import', label: 'Import / Export', icon: FolderInput },
+    { id: 'database', label: 'Database Maintenance', icon: Database },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
-  const currentSelection = isSettingsOpen ? 'settings' : activeTab;
+  const currentSelection = isDatabaseOpen ? 'database' : isSettingsOpen ? 'settings' : activeTab;
   const activeItem = items.find(i => i.id === currentSelection) || items[0];
   const ActiveIcon = activeItem.icon;
 
@@ -147,6 +148,7 @@ function App() {
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(false);
   const [isSendOpen, setIsSendOpen] = useState(false);
+  const hasActiveView = isStatisticsOpen || isBuildingOpen || isLastSeenOpen || isDatabaseOpen;
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -344,6 +346,14 @@ function App() {
     setCookie('rateMode', rateMode);
   }, [loadLimit, visibleColumns, rateMode]);
 
+  // ── Sync filter panel visibility with active views ───────────────────────────
+  useEffect(() => {
+    if (hasActiveView) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsFilterOpen(false);
+    }
+  }, [hasActiveView]);
+
   // ── Rate Calculation Loop ───────────────────────────────────────────────────
   useEffect(() => {
     const interval = setInterval(() => {
@@ -540,12 +550,22 @@ function App() {
             <NavDropdown
               activeTab={activeTab}
               isSettingsOpen={isSettingsOpen}
+              isDatabaseOpen={isDatabaseOpen}
               onChange={(id) => {
                 if (id === 'settings') {
                   setIsSettingsOpen(true);
+                  setIsDatabaseOpen(false);
                   if (activeTab !== 'live') setActiveTab('live');
+                } else if (id === 'database') {
+                  setIsDatabaseOpen(true);
+                  setIsSettingsOpen(false);
+                  setIsVisualizerOpen(false);
+                  setIsLastSeenOpen(false);
+                  setIsStatisticsOpen(false);
+                  setIsBuildingOpen(false);
                 } else {
                   setIsSettingsOpen(false);
+                  setIsDatabaseOpen(false);
                   setActiveTab(id as 'live' | 'history' | 'import');
                 }
               }}
@@ -597,9 +617,15 @@ function App() {
 
                 <button
                   className="icon-button"
+                  disabled={hasActiveView}
                   onClick={() => setIsFilterOpen(o => { const next = !o; if (next) setIsVisualizerOpen(false); return next; })}
-                  title="Toggle filter panel"
-                  style={{ position: 'relative', color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                  title={hasActiveView ? "Filters are not applicable for this view" : "Toggle filter panel"}
+                  style={{
+                    position: 'relative',
+                    color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)',
+                    opacity: hasActiveView ? 0.4 : 1,
+                    cursor: hasActiveView ? 'not-allowed' : 'pointer',
+                  }}
                 >
                   <SlidersHorizontal size={18} />
                   {activeFilterCount > 0 && (
@@ -611,6 +637,18 @@ function App() {
                     }}>{activeFilterCount}</span>
                   )}
                 </button>
+                {serverConfig?.status?.write_enabled && (
+                  <button
+                    className="icon-button"
+                    onClick={() => setIsSendOpen(o => !o)}
+                    title="Send / read telegrams"
+                    style={{ color: isSendOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                  >
+                    <Send size={18} />
+                  </button>
+                )}
+
+                <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
 
                 <button
                   className="icon-button"
@@ -644,25 +682,6 @@ function App() {
                 >
                   <Clock size={18} />
                 </button>
-                <button
-                  className="icon-button"
-                  onClick={() => { setIsDatabaseOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsBuildingOpen(false); }}
-                  title="Database maintenance"
-                  style={{ color: isDatabaseOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <Database size={18} />
-                </button>
-                {serverConfig?.status?.write_enabled && (
-                  <button
-                    className="icon-button"
-                    onClick={() => setIsSendOpen(o => !o)}
-                    title="Send / read telegrams"
-                    style={{ color: isSendOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                  >
-                    <Send size={18} />
-                  </button>
-                )}
-                <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
 
                 <button className="icon-button" onClick={togglePause} title={isPaused ? 'Resume' : 'Pause'}>
                   {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
