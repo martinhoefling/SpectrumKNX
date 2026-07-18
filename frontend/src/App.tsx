@@ -9,6 +9,8 @@ import { getPref, setPref } from './utils/prefs';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
+import { useTelegramCache } from './hooks/useTelegramCache';
+import { rangeToMs } from './utils/historyLoad';
 import { HistorySearch } from './components/HistorySearch';
 import { ImportExportView } from './components/ImportExportView';
 import { Visualizer } from './components/Visualizer';
@@ -188,11 +190,20 @@ function App() {
   const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(initialView?.plot ?? []);
 
   // ── Live State ──────────────────────────────────────────────────────────────
-  const [liveTelegrams, setLiveTelegrams] = useState<Telegram[]>([]);
+  // Buffer + IndexedDB cache + coverage bookkeeping (#246): cached telegrams
+  // reappear instantly after a reload and only the gaps are fetched (#211).
+  const {
+    telegrams: liveTelegrams,
+    addLive,
+    setConnected: setCacheConnected,
+    setPaused: setCachePaused,
+    pausedCount,
+    loadRange,
+    isLoading: isHistoryLoading,
+    loadError: historyLoadError,
+    clear: clearTelegrams,
+  } = useTelegramCache(loadLimit);
   const [isPaused, setIsPaused] = useState(false);
-  const PAUSE_BUFFER_CAP = 10000;
-  const bufferRef = useRef<Telegram[]>([]);
-  const [bufferedCount, setBufferedCount] = useState(0);
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -306,19 +317,10 @@ function App() {
       arrivalTimesRef.current.shift();
     }
 
-    if (!isPaused) {
-      setLiveTelegrams(prev => {
-        const next = [t, ...prev];
-        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-      });
-    } else {
-      bufferRef.current.push(t);
-      // Cap the pause buffer so a forgotten pause can't grow memory unbounded;
-      // the oldest telegrams are dropped first.
-      if (bufferRef.current.length > PAUSE_BUFFER_CAP) bufferRef.current.shift();
-      setBufferedCount(prev => prev + 1);
-    }
-  }, [isPaused, loadLimit]);
+    // The cache keeps ingesting while paused; only the snapshot is frozen, so
+    // nothing is lost and resume simply reveals what arrived in between.
+    addLive(t);
+  }, [addLive]);
 
   const handleConnectionState = useCallback((e: ConnectionStateEvent) => {
     // Flip the badge immediately, then refetch for authoritative state
@@ -338,6 +340,12 @@ function App() {
 
   const wsEndpoint = wsUrl('/ws/telegrams');
   const { isConnected } = useWebSocket(wsEndpoint, handleTelegram, handleConnectionState);
+
+  // Mirror the WS state into the cache so offline windows become coverage
+  // gaps that are automatically re-fetched on reconnect.
+  useEffect(() => {
+    setCacheConnected(isConnected);
+  }, [isConnected, setCacheConnected]);
 
   // ── Persist settings ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -371,32 +379,13 @@ function App() {
 
   // ── Pause / Resume ──────────────────────────────────────────────────────────
   const togglePause = () => {
-    if (isPaused) {
-      // Detach the buffer before scheduling the merge: the state updater runs
-      // after this handler, so reading bufferRef.current inside it would see
-      // the already-cleared array and drop every buffered telegram (#196).
-      const buffered = bufferRef.current.reverse(); // arrival order → newest-first
-      bufferRef.current = [];
-      setBufferedCount(0);
-      setLiveTelegrams(prev => {
-        const next = [...buffered, ...prev];
-        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-      });
-    }
-    setIsPaused(!isPaused);
+    const next = !isPaused;
+    setCachePaused(next);
+    setIsPaused(next);
   };
 
   const toggleColumn = (col: string) =>
     setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }));
-
-  const handleHistoricalLoad = (newTelegrams: Telegram[]) => {
-    setLiveTelegrams(prev => {
-      const existingTs = new Set(prev.map(t => t.timestamp));
-      const deduped = newTelegrams.filter(t => !existingTs.has(t.timestamp));
-      const next = [...deduped, ...prev];
-      return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-    });
-  };
 
   // ── Sorting ─────────────────────────────────────────────────────────────────
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
@@ -598,12 +587,26 @@ function App() {
                   </span>
                   {isPaused && (
                     <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24' }}>
-                      Paused: <span style={{ fontWeight: 600 }}>{bufferedCount}</span>
+                      Paused: <span style={{ fontWeight: 600 }}>{pausedCount}</span>
                     </span>
                   )}
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     WS: <span style={{ color: isConnected ? 'var(--success)' : 'var(--error)', fontWeight: 500 }}>{isConnected ? 'Active' : 'Offline'}</span>
                   </span>
+                  {/* Background history reads run without blocking the UI (#222) */}
+                  {isHistoryLoading && (
+                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-primary)' }}>
+                      <span className="chip-spinner" /> History: loading…
+                    </span>
+                  )}
+                  {!isHistoryLoading && historyLoadError && (
+                    <span
+                      title={historyLoadError}
+                      style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--error)' }}
+                    >
+                      <AlertTriangle size={13} /> History: failed
+                    </span>
+                  )}
                   {filteredLiveTelegrams.length >= loadLimit && (
                     <span
                       style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#fbbf24', cursor: 'pointer' }}
@@ -686,11 +689,16 @@ function App() {
                 <button className="icon-button" onClick={togglePause} title={isPaused ? 'Resume' : 'Pause'}>
                   {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
                 </button>
-                <button className="icon-button" onClick={() => setIsHistoryLoaderOpen(true)} title="Load history">
+                <button
+                  className="icon-button"
+                  onClick={() => setIsHistoryLoaderOpen(true)}
+                  title={isHistoryLoading ? 'History read in progress…' : 'Load history'}
+                  style={{ color: isHistoryLoading ? 'var(--accent-primary)' : undefined }}
+                >
                   <Download size={18} />
                 </button>
                 <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
-                <button className="icon-button" onClick={() => { setLiveTelegrams([]); bufferRef.current = []; setBufferedCount(0); }} title="Clear" style={{ color: 'var(--text-dim)' }}>
+                <button className="icon-button" onClick={() => { void clearTelegrams(); }} title="Clear (also wipes the local telegram cache)" style={{ color: 'var(--text-dim)' }}>
                   <Trash2 size={18} />
                 </button>
               </>
@@ -1026,7 +1034,12 @@ function App() {
       {isHistoryLoaderOpen && (
         <HistoryLoader
           onClose={() => setIsHistoryLoaderOpen(false)}
-          onLoad={handleHistoricalLoad}
+          onAsyncLoad={(range) => {
+            // Fire-and-forget: the modal closes and the header chip shows
+            // progress; cached sub-ranges appear instantly (#222).
+            const { startMs, endMs } = rangeToMs(range);
+            void loadRange(startMs, endMs);
+          }}
           limit={loadLimit}
           mode="monitor"
         />
@@ -1077,6 +1090,8 @@ function App() {
         .nav-item:hover { background: var(--bg-hover); color: var(--text-main); }
         .nav-item.active { background: rgba(99,102,241,0.1); color: var(--accent-primary); }
         .icon-button { background: transparent; border: none; cursor: pointer; color: var(--text-dim); transition: all 0.2s; }
+        .chip-spinner { width: 12px; height: 12px; border: 2px solid rgba(99,102,241,0.2); border-top-color: var(--accent-primary); border-radius: 50%; animation: chip-spin 0.8s linear infinite; display: inline-block; }
+        @keyframes chip-spin { to { transform: rotate(360deg); } }
         .icon-button:hover { color: var(--text-main); transform: scale(1.1); }
         .setting-item { display: flex; align-items: center; gap: 0.6rem; background: transparent; border: none; color: var(--text-main); cursor: pointer; width: 100%; padding: 0.35rem 0; text-align: left; }
         .checkbox.checked { background: var(--accent-primary); border-color: var(--accent-primary); }
