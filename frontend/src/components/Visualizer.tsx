@@ -8,6 +8,7 @@ import { TimeBrush } from './TimeBrush';
 import { Download, Link2, Check } from 'lucide-react';
 import { getCookie, setCookie } from '../utils/cookies';
 import { clearSeriesHidden } from '../utils/legendVisibility';
+import { expandDegenerateRange } from '../utils/timeRange';
 
 interface VisualizerProps {
   telegrams: Telegram[];
@@ -31,7 +32,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const [linkCopied, setLinkCopied] = useState(false);
 
   const defaultRange = useMemo<[number, number]>(() => {
-    return [minTime ?? 0, maxTime ?? 0];
+    // Pad a zero-width extent (a single telegram, or several at the same instant)
+    // so the time axis renders real times instead of collapsing to 00:00 (#239).
+    return expandDegenerateRange(minTime ?? 0, maxTime ?? 0);
   }, [minTime, maxTime]);
 
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
