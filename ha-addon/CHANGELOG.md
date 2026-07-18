@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.14.0
+
+### Added
+
+- **Write to bus panel**: the single send bar is now a multi-row panel — send to several group addresses at once, each row with its own GA, DPT, value, Write/Read and optional delay/cyclic scheduling, plus add/remove row controls (#215).
+- **Quick "send to this GA" popover**: a send icon on group addresses across the app (group monitor rows, Last Seen Values, building tree, filter panel) opens a compact popover showing the last value with a DPT-aware write and a read — no need to open the full panel (#214).
+- **Last Seen Values is now a top-level panel** reachable from the toolbar like Visualization, Traffic Statistics and Building Structure, and updates live as telegrams arrive (#212).
+- **DPT-aware value entry**: calendar/time pickers for date & time DPTs (10, 11, 19), enumerated dropdowns for switch/step DPTs, and a dropdown of recently sent values (#191).
+- **Telegram dots on graphs**: an optional dot at each telegram timestamp makes cyclic same-value repeats (e.g. a DPT 1.011 "alive" bit) visible; toggle in the visualization header (#195).
+- **Time-axis pan & zoom**: a scrollbar/brush under the graphs — drag to pan through time, drag the edges to zoom, double-click to reset (#193).
+- **Functions in the building structure**: ETS functions are shown with their group addresses, so all GAs of a function can be selected at once (#216).
+- **Collapsible per-channel GA tree** in the device status view, with recent values shown inline (KNX-Lens style) (#220).
+- **On/Off send buttons** for switch DPTs are now styled as clear accent action buttons, consistent with the Write button (#218).
+
+### Changed
+
+- Graphs extend each series' last state/value to the newest telegram, so a state still held (e.g. a presence sensor left on) is drawn out to the right edge instead of a barely-visible sliver (#208).
+
+### Fixed
+
+- **Single-telegram graphs**: a group address with exactly one received telegram no longer collapses the time axis to 00:00 — the axis now shows real times centered on the telegram (#239).
+
 ## 1.13.4
 
 ### Fixed
