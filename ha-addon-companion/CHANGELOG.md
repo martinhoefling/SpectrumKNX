@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.15.0
+
+### Added
+
+- **Telegram caching in the Group Monitor**: telegrams now persist in the browser (IndexedDB). After a reload or Home Assistant dashboard switch the buffer reappears instantly and only the missing time ranges are fetched from the backend — the workspace comes back "up to now" without any manual reload (#211, #246).
+- **Workspace persistence**: the active tab, filters, open panel and visualization targets survive a reload or dashboard switch — stored in the browser in the Home Assistant iframe, reflected into a shareable `view=monitor` URL in a regular tab (#211).
+- **Asynchronous history loads**: the Load History dialog closes immediately and the read runs in the background — a spinner chip next to the WS status shows progress while cached ranges appear instantly (#222).
+- **Send & last-seen shortcuts on active filter rows**: the quick send-to-GA popover and the last-seen shortcut are now also available directly on the Active Filters entries — where the values being filtered on are changed most often (#214).
+- **Last-value timestamp in the send popover**: the quick-send popover shows when the last value was received, making it easy to judge whether it is current or stale (#255).
+
+### Changed
+
+- **Pause is now loss-free**: pausing freezes the view while telegrams keep being recorded in the background — resuming reveals everything, with no 10k pause-buffer cap dropping telegrams anymore.
+- **UI preferences moved from cookies to localStorage** (theme, columns, sort, chart toggles, load limit); existing settings migrate automatically (#246).
+- **Clear also wipes the local telegram cache**, so cleared telegrams do not resurface after a reload.
+- Toolbar cleanup: Database Maintenance moved into the main navigation dropdown, and the filter panel visibility now syncs with the active view (#241).
+- Send rows use the full panel width and display the resolved group-address name (#252).
+
+### Fixed
+
+- **Write-to-bus panel keeps its rows** (GA, DPT, value, delay, interval) when the panel is toggled off and on — and across reloads (#254).
+- Bus writes sent from the app appear in the live view again; write UI and Read action controls cleaned up (#251).
+- The pan & zoom timeline updates when a chart range is selected (#250).
+
 ## 1.14.0
 
 ### Added
