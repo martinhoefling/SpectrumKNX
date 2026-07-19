@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.15.1
+
+### Fixed
+
+- Bump knx-telegram-store to 0.10.2: the legacy-data probe run at startup no longer scans the whole telegrams table once recovery is recorded — store initialization time no longer grows with database size.
+
 ## 1.15.0
 
 ### Added
