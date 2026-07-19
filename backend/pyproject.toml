@@ -6,7 +6,7 @@ version = "0.0.0"
 description = "A professional KNX bus monitor and analyzer"
 readme = "../README.md"
 license = "MIT"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 # Direct runtime dependencies. requirements.txt is the pinned lock (including
 # transitive deps) used by the Docker image and the HA add-on — keep both in
 # sync when adding a dependency.
@@ -36,7 +36,7 @@ dev = [
 
 [tool.ruff]
 # Target Python version (minimum supported, see requires-python)
-target-version = "py313"
+target-version = "py312"
 # Max line length for auto-format or other rules
 line-length = 120
 # Exclude common directories

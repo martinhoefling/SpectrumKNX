@@ -33,6 +33,12 @@ unset — **both packages must set `KNX_PROJECT_PATH`** to a writable location.
 - [x] Add Python 3.13 to the CI test matrix so compatibility is enforced
       (`ci.yml` now tests 3.13 and 3.14).
 
+> The baseline was later lowered to 3.12 for the FreeBSD port
+> ([#274](https://github.com/martinhoefling/SpectrumKNX/issues/274)):
+> `requires-python = ">=3.12"`, ruff `target-version = "py312"`, and 3.12 in
+> the CI matrix. The Debian package is unaffected — it is built against
+> trixie's 3.13 and keeps `Depends: python3 (>= 3.13)`.
+
 ## Step 1 — Packaging metadata (`backend/pyproject.toml`)
 
 - [x] Add a `[project]` table: name `spectrum-knx`, `requires-python = ">=3.13"`,

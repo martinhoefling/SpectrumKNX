@@ -85,7 +85,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for installation and configuration of both.
 See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
 
 ## 🛠 Tech Stack
-- **Backend:** Python 3.13+, FastAPI, `xknx`, WebSocket Streaming
+- **Backend:** Python 3.12+, FastAPI, `xknx`, WebSocket Streaming
 - **Database:** PostgreSQL (with optional TimescaleDB acceleration), or SQLite (via `aiosqlite`)
 - **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
 
