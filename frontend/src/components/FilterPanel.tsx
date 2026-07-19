@@ -10,6 +10,25 @@ import {
 } from '../types/filters';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { KnxAddressTree } from './KnxAddressTree';
+import { SendToGaPopover } from './SendToGaPopover';
+
+const rowActionBtnStyle: React.CSSProperties = {
+  background: 'transparent', border: 'none', cursor: 'pointer',
+  color: 'var(--text-dim)', padding: '0.15rem', borderRadius: '3px',
+  display: 'flex', alignItems: 'center',
+};
+
+const LastSeenButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+  <button
+    onClick={onClick}
+    title="Show last seen values"
+    style={rowActionBtnStyle}
+    onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+  >
+    <Clock size={12} />
+  </button>
+);
 
 // ─── FilterPanel component ────────────────────────────────────────────────────
 
@@ -67,16 +86,20 @@ interface OptionRowProps {
   count?: number;
   onToggle: () => void;
   onRemove?: () => void;
+  /** Hover-revealed quick actions (send-to-GA / last-seen), as on tree rows (#214). */
+  actions?: React.ReactNode;
 }
 
-export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove }) => (
+export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove, actions }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
   <div style={{
     display: 'flex', alignItems: 'center', gap: '0.4rem',
     borderRadius: '6px', transition: 'background 0.15s',
     paddingRight: '0.25rem'
   }}
-    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; setHovered(true); }}
+    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; setHovered(false); }}
   >
     <label
       onClick={(e) => { e.preventDefault(); onToggle(); }}
@@ -134,6 +157,18 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
       )}
     </label>
 
+    {actions && (
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          display: 'flex', alignItems: 'center', flexShrink: 0,
+          opacity: hovered ? 0.9 : 0, transition: 'opacity 0.15s',
+        }}
+      >
+        {actions}
+      </div>
+    )}
+
     {onRemove && (
       <button
         onClick={onRemove}
@@ -150,7 +185,8 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
       </button>
     )}
   </div>
-);
+  );
+};
 
 export const FilterPanel: React.FC<FilterPanelProps> = ({
   options,
@@ -269,6 +305,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 count={mode === 'live' ? (counts?.sources[s] ?? 0) : undefined}
                 onToggle={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
                 onRemove={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
+                actions={onQuickLastSeen && <LastSeenButton onClick={() => onQuickLastSeen(s, 'pa')} />}
               />
             );
           })}
@@ -290,16 +327,30 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             </div>
           )}
           {activeFilters.targets.map(t => {
-            const name = options.targets.find(opt => opt.address === t)?.name;
+            const opt = options.targets.find(o => o.address === t);
             return (
               <OptionRow
                 key={`active-t-${t}`}
                 label={t}
-                sublabel={name || undefined}
+                sublabel={opt?.name || undefined}
                 checked={true}
                 count={mode === 'live' ? (counts?.targets[t] ?? 0) : undefined}
                 onToggle={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
                 onRemove={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
+                actions={(writeEnabled || onQuickLastSeen) && (
+                  <>
+                    {writeEnabled && (
+                      <SendToGaPopover
+                        address={t}
+                        name={opt?.name}
+                        dptMain={opt?.main}
+                        dptSub={opt?.sub}
+                        buttonStyle={rowActionBtnStyle}
+                      />
+                    )}
+                    {onQuickLastSeen && <LastSeenButton onClick={() => onQuickLastSeen(t, 'ga')} />}
+                  </>
+                )}
               />
             );
           })}
