@@ -98,6 +98,55 @@ test('picks up an already-running job on mount', async () => {
   await waitFor(() => expect(screen.getByText(/Cyclic send to 1\/2\/3/)).toBeInTheDocument());
 });
 
+// ── Row persistence across panel toggling (#254) ─────────────────────────────
+
+const ROWS_KEY = 'spectrumknx-write-panel-rows';
+
+test('restores persisted rows on mount (#254)', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '9.001', value: '21.5', delay: '', every: '' },
+    { address: '4/5/6', dpt: '', value: '1', delay: '2', every: '10' },
+  ]));
+
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+
+  const gaInputs = screen.getAllByPlaceholderText(/Group address/);
+  expect(gaInputs).toHaveLength(2);
+  expect(gaInputs[0]).toHaveValue('1/2/3');
+  expect(gaInputs[1]).toHaveValue('4/5/6');
+  expect(screen.getAllByPlaceholderText(/Value/)[0]).toHaveValue('21.5');
+  expect(screen.getByDisplayValue('10')).toBeInTheDocument(); // "Every s" of row 2
+  expect(screen.getByText('DPT 9.001')).toBeInTheDocument();
+});
+
+test('persists row edits so toggling the panel keeps them (#254)', async () => {
+  const { unmount } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '7/0/1' } });
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '42' } });
+  fireEvent.change(screen.getByPlaceholderText('Delay s'), { target: { value: '3' } });
+
+  await waitFor(() => {
+    expect(JSON.parse(localStorage.getItem(ROWS_KEY)!)).toEqual([
+      { address: '7/0/1', dpt: '', value: '42', delay: '3', every: '' },
+    ]);
+  });
+
+  // Simulate the visibility toggle: unmount and mount a fresh panel.
+  unmount();
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  expect(screen.getByPlaceholderText(/Group address/)).toHaveValue('7/0/1');
+  expect(screen.getByPlaceholderText(/Value/)).toHaveValue('42');
+  expect(screen.getByPlaceholderText('Delay s')).toHaveValue('3');
+});
+
+test('falls back to a single empty row on malformed storage', () => {
+  localStorage.setItem(ROWS_KEY, '{broken');
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const gaInputs = screen.getAllByPlaceholderText(/Group address/);
+  expect(gaInputs).toHaveLength(1);
+  expect(gaInputs[0]).toHaveValue('');
+});
+
 test('DPT-1 target renders On/Off and records the GA in recents', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,

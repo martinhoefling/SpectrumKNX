@@ -41,6 +41,50 @@ const newRow = (): Row => ({
   id: `row-${rowSeq++}`, address: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
 });
 
+// ── Row persistence (#254) ───────────────────────────────────────────────────
+// The panel unmounts when toggled off; without this every configured row would
+// be lost. Only the durable inputs are stored — busy/feedback are transient,
+// and scheduled jobs live server-side (re-attached via the status poll).
+
+const ROWS_STORAGE_KEY = 'spectrumknx-write-panel-rows';
+const MAX_STORED_ROWS = 20;
+
+type StoredRow = Pick<Row, 'address' | 'dpt' | 'value' | 'delay' | 'every'>;
+
+function loadStoredRows(): Row[] | null {
+  try {
+    const raw = localStorage.getItem(ROWS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    return parsed.slice(0, MAX_STORED_ROWS).map(p => {
+      const s = p as Partial<StoredRow> | null;
+      return {
+        ...newRow(),
+        address: str(s?.address),
+        dpt: str(s?.dpt),
+        value: str(s?.value),
+        delay: str(s?.delay),
+        every: str(s?.every),
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+function saveRows(rows: Row[]): void {
+  try {
+    const stored: StoredRow[] = rows.map(({ address, dpt, value, delay, every }) => ({
+      address, dpt, value, delay, every,
+    }));
+    localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // Storage unavailable — the rows just won't survive the next toggle.
+  }
+}
+
 /**
  * "Write to bus" panel: send to several group addresses from stacked rows,
  * each with its own GA/DPT/value/Write/Read and optional delay/cyclic
@@ -49,9 +93,11 @@ const newRow = (): Row => ({
  * The backend runs a single scheduled (delayed/cyclic) job at a time, so at
  * most one row can have an active timer; immediate writes/reads work on any
  * row regardless. Removing the row that owns the active job cancels it first.
+ *
+ * Rows persist to localStorage so toggling the panel keeps its state (#254).
  */
 export function WriteToBusPanel({ targets, onClose }: Props) {
-  const [rows, setRows] = useState<Row[]>(() => [newRow()]);
+  const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
   const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
   const [job, setJob] = useState<ScheduledSendStatus | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -71,6 +117,10 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
     return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    saveRows(rows);
+  }, [rows]);
 
   const updateRow = (id: string, patch: Partial<Row>) =>
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
