@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Send, Radio, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { format } from 'date-fns';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -164,6 +165,11 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
             Last value:{' '}
             <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{last ? last.value : '—'}</span>
+            {last && (
+              <span style={{ marginLeft: '0.4rem', color: 'var(--text-dim)', fontSize: '0.68rem' }}>
+                ({format(new Date(last.at), 'yyyy-MM-dd HH:mm:ss')})
+              </span>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>

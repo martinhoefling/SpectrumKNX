@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { format } from 'date-fns';
 import { SendToGaPopover } from './SendToGaPopover';
 
 function mockFetch(routes: Record<string, unknown>) {
@@ -37,6 +38,11 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
 
   // Last value loads and DPT-1 renders On/Off (no free-text field).
   await waitFor(() => expect(screen.getByText('Off')).toBeInTheDocument());
+
+  // Verify that the timestamp is also formatted and displayed.
+  const expectedTime = format(new Date('2026-07-17T09:00:00Z'), 'yyyy-MM-dd HH:mm:ss');
+  expect(screen.getByText(`(${expectedTime})`)).toBeInTheDocument();
+
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /^On$/ }));
