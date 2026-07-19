@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, X, Clock } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
 import { getPref, setPref } from '../utils/prefs';
@@ -88,6 +88,32 @@ const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 const anchorKey = (t: Telegram) =>
   `${t.timestamp}-${t.source_address}-${t.target_address}-${t.raw_hex ?? ''}`;
 
+// ── Quick filter bar (#271) ──────────────────────────────────────────────────
+
+/** Per-column text the quick filter matches against (addresses and names alike). */
+const quickFilterHaystack = (id: ColId, t: Telegram): string => {
+  switch (id) {
+    case 'time': return format(new Date(t.timestamp), 'yyyy-MM-dd HH:mm:ss.SS');
+    case 'delta': return ''; // derived from visible row order — nothing to filter
+    case 'source': return `${t.source_address} ${t.source_name ?? ''}`;
+    case 'target': return `${t.target_address} ${t.target_name ?? ''}`;
+    case 'type': return `${t.simplified_type || t.telegram_type} ${t.direction ?? ''}`;
+    case 'dpt': return `${t.dpt_name ?? ''} ${t.dpt_main != null ? dptKey(t.dpt_main, t.dpt_sub) : ''}`;
+    case 'value': return `${t.value_formatted ?? t.value_numeric ?? ''} ${t.unit ?? ''} ${t.raw_hex ?? ''}`;
+  }
+};
+
+/** Case-insensitive regex matcher; an invalid pattern degrades to a literal substring match. */
+const makeQuickMatcher = (pattern: string): ((s: string) => boolean) => {
+  try {
+    const re = new RegExp(pattern, 'i');
+    return s => re.test(s);
+  } catch {
+    const lower = pattern.toLowerCase();
+    return s => s.toLowerCase().includes(lower);
+  }
+};
+
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend
 }) => {
@@ -146,13 +172,36 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     });
   }, [persistWidths]);
 
+  // ── Quick filter bar (#271): per-column regex/literal filter on top of the
+  // complex filter. Expanding enables it, collapsing disables it; the toggle
+  // in the bar switches it without losing the patterns.
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickEnabled, setQuickEnabled] = useState(false);
+  const [quickPatterns, setQuickPatterns] = useState<Partial<Record<ColId, string>>>({});
+
+  const toggleQuickOpen = () => {
+    setQuickOpen(open => {
+      setQuickEnabled(!open);
+      return !open;
+    });
+  };
+
+  const quickFiltered = useMemo(() => {
+    if (!quickOpen || !quickEnabled) return telegrams;
+    const matchers = Object.entries(quickPatterns)
+      .filter(([, p]) => p && p.trim() !== '')
+      .map(([id, p]) => [id, makeQuickMatcher(p!.trim())] as const);
+    if (matchers.length === 0) return telegrams;
+    return telegrams.filter(t => matchers.every(([id, m]) => m(quickFilterHaystack(id as ColId, t))));
+  }, [telegrams, quickOpen, quickEnabled, quickPatterns]);
+
   // Compute time deltas between consecutive rows (by visual order)
   const telegramRows = useMemo<TelegramRow[]>(() => {
-    return telegrams.map((t, idx) => {
+    return quickFiltered.map((t, idx) => {
       let deltaStr: string | null = null;
       if (idx > 0) {
         const curr = new Date(t.timestamp).getTime();
-        const prev = new Date(telegrams[idx - 1].timestamp).getTime();
+        const prev = new Date(quickFiltered[idx - 1].timestamp).getTime();
         const diffMs = Math.abs(curr - prev);
         const mm = String(Math.floor(diffMs / 60000)).padStart(2, '0');
         const ss = String(Math.floor((diffMs % 60000) / 1000)).padStart(2, '0');
@@ -161,7 +210,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       }
       return { ...t, deltaStr };
     });
-  }, [telegrams]);
+  }, [quickFiltered]);
 
   const virtualizer = useVirtualizer({
     count: telegramRows.length,
@@ -550,7 +599,16 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         }}
       >
         {visibleCols.map((c, i) => (
-          <div key={c.id} style={{ padding: cellPadding, position: 'relative' }}>
+          <div key={c.id} style={{ padding: cellPadding, position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {c.id === 'time' && (
+              <button
+                className={`quick-filter-bar-toggle ${quickOpen ? 'open' : ''}`}
+                onClick={toggleQuickOpen}
+                title={quickOpen ? 'Hide quick filter bar' : 'Show quick filter bar'}
+              >
+                <ListFilter size={13} />
+              </button>
+            )}
             {c.sortKey ? (
               <button className="sort-header" onClick={() => onSort(c.sortKey!)}>
                 {c.label} {renderSortArrow(c.sortKey)}
@@ -569,6 +627,45 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           </div>
         ))}
       </div>
+
+      {/* Quick filter bar (#271) — one regex/literal input per visible column */}
+      {quickOpen && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: gridTemplate,
+            background: 'var(--bg-subtle)',
+            borderBottom: '1px solid var(--border-color)',
+            flexShrink: 0,
+            paddingRight: '8px', // align with the header's scrollbar compensation
+            opacity: quickEnabled ? 1 : 0.5,
+          }}
+        >
+          {visibleCols.map(c => (
+            <div key={c.id} style={{ padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
+              {c.id === 'time' && (
+                <button
+                  className={`quick-filter-bar-toggle ${quickEnabled ? 'open' : ''}`}
+                  onClick={() => setQuickEnabled(e => !e)}
+                  title={quickEnabled ? 'Disable quick filter (keeps patterns)' : 'Enable quick filter'}
+                >
+                  <Filter size={12} />
+                </button>
+              )}
+              {c.id !== 'delta' && (
+                <input
+                  className="quick-filter-bar-input"
+                  type="text"
+                  value={quickPatterns[c.id] ?? ''}
+                  placeholder="regex…"
+                  aria-label={`Quick filter ${c.label}`}
+                  onChange={e => setQuickPatterns(prev => ({ ...prev, [c.id]: e.target.value }))}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Body area — relative wrapper so the jump-to-live pill (#202) anchors
           below the header, not over it. */}
@@ -726,6 +823,47 @@ style.textContent = `
   .jump-to-live-pill:hover {
     filter: brightness(1.08);
     transform: translateX(-50%) scale(1.03);
+  }
+
+  .quick-filter-bar-toggle {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-dim);
+    padding: 0.15rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+
+  .quick-filter-bar-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--accent-primary);
+  }
+
+  .quick-filter-bar-toggle.open {
+    color: var(--accent-primary);
+  }
+
+  .quick-filter-bar-input {
+    width: 100%;
+    min-width: 0;
+    background: var(--bg-tag);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 0.25rem 0.45rem;
+    color: var(--text-main);
+    font-size: 0.72rem;
+    font-family: var(--font-mono, monospace);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .quick-filter-bar-input:focus {
+    border-color: var(--accent-primary);
   }
 
   .col-resize-handle {
