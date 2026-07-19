@@ -56,3 +56,27 @@ test('renders TimeBrush, handles middle click and drags to pan', () => {
   // Release drag
   fireEvent.mouseUp(window);
 });
+
+test('double-clicking a handle snaps that limit to min/max (#267)', () => {
+  const onChangeMock = vi.fn();
+
+  const { container } = render(
+    <TimeBrush
+      minTime={minTime}
+      maxTime={maxTime}
+      value={initialVal}
+      onChange={onChangeMock}
+      telegrams={[]}
+    />
+  );
+
+  const [leftHandle, rightHandle] = container.querySelectorAll('div[style*="ew-resize"]');
+  expect(leftHandle).toBeTruthy();
+  expect(rightHandle).toBeTruthy();
+
+  fireEvent.doubleClick(leftHandle);
+  expect(onChangeMock).toHaveBeenLastCalledWith([minTime, initialVal[1]]);
+
+  fireEvent.doubleClick(rightHandle);
+  expect(onChangeMock).toHaveBeenLastCalledWith([initialVal[0], maxTime]);
+});

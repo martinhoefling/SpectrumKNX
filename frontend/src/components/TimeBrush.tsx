@@ -186,6 +186,11 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
             e.stopPropagation();
             handleStartDrag('left', e.clientX);
           }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onChange([minTime, value[1]]);
+          }}
+          title="Drag to adjust · double-click to extend to the oldest data"
           style={{
             position: 'absolute',
             left: `calc(${leftPct}% - 5px)`,
@@ -217,6 +222,11 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
             e.stopPropagation();
             handleStartDrag('right', e.clientX);
           }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onChange([value[0], maxTime]);
+          }}
+          title="Drag to adjust · double-click to extend to the newest data"
           style={{
             position: 'absolute',
             left: `calc(${rightPct}% - 5px)`,
