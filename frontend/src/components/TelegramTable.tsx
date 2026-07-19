@@ -194,6 +194,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // from the scroll-container top. Captured from user scrolls only.
   const anchorRef = useRef<{ key: string; offset: number } | null>(null);
   const programmaticScrollRef = useRef(false);
+  // Zebra stripes must stay with a telegram, not with a row index (#266):
+  // prepends at the live edge shift every index by the number of new rows, so
+  // this offset accumulates those shifts and is added back to the index parity.
+  const [stripeOffset, setStripeOffset] = useState(0);
 
   // Suppress edge/anchor tracking for scrolls we cause ourselves. Auto-clears on
   // the next frame so a no-op programmatic scroll can't swallow a later real one.
@@ -247,6 +251,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
   };
 
+  // Clicking a row pauses live-following just like scrolling away (#266) — the
+  // row being read must not move. The jump-to-live pill is the way back.
+  const handleRowClick = () => {
+    if (!isTimeSort || !atEdgeRef.current) return;
+    atEdgeRef.current = false;
+    captureAnchor();
+  };
+
   const scrollToEdge = () => {
     markProgrammatic();
     virtualizer.scrollToOffset(liveEdge === 'top' ? 0 : virtualizer.getTotalSize());
@@ -278,6 +290,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // Changing sort moves (or removes) the live edge — drop the anchor state.
   useEffect(() => {
     setNewSinceAnchor(0);
+    setStripeOffset(0);
     anchorRef.current = null;
     atEdgeRef.current = checkAtEdge();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -295,6 +308,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const lastKey = rows.length > 0 ? anchorKey(rows[rows.length - 1]) : null;
     prevRowsRef.current = { firstKey, lastKey, len: rows.length };
 
+    if (rows.length === 0) setStripeOffset(0);
     if (!isTimeSort || prev.len === 0 || rows.length === 0) return;
 
     const edgeKey = liveEdge === 'top' ? firstKey : lastKey;
@@ -313,8 +327,16 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       // Previous edge vanished: list replaced (clear / filter / history load).
       anchorRef.current = null;
       setNewSinceAnchor(0);
+      setStripeOffset(0);
       return;
     }
+
+    // Keep each row's stripe color across the update (#266). Existing rows
+    // shift down by `added` on top-prepends; with the buffer at capacity the
+    // asc view instead drops rows from the head, shifting indexes up.
+    const dropped = prev.len + added - rows.length;
+    const indexShift = liveEdge === 'top' ? added : -dropped;
+    setStripeOffset(o => (((o + indexShift) % 2) + 2) % 2);
 
     if (atEdgeRef.current) {
       scrollToEdge();
@@ -618,6 +640,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   key={virtualRow.key}
                   data-index={virtualRow.index}
                   data-akey={anchorKey(t)}
+                  onClick={handleRowClick}
                   ref={virtualizer.measureElement}
                   style={{
                     position: 'absolute',
@@ -629,7 +652,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     gridTemplateColumns: gridTemplate,
                     borderBottom: '1px solid var(--border-color)',
                     fontSize: '0.8125rem',
-                    background: virtualRow.index % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
+                    background: (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
                     alignItems: 'start',
                     minHeight: '60px' // Ensure a minimum touch/visual target
                   }}
