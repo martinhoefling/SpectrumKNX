@@ -10,6 +10,8 @@ import {
 } from '../types/filters';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { KnxAddressTree } from './KnxAddressTree';
+import { DptTypeTree } from './DptTypeTree';
+import { dptWidthLabel, bareDptLabel } from '../utils/dpt';
 import { SendToGaPopover } from './SendToGaPopover';
 
 const rowActionBtnStyle: React.CSSProperties = {
@@ -227,11 +229,24 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
 
   const filteredDpts = useMemo(() =>
     options.dpts.filter(d =>
-      !q || d.label?.toLowerCase().includes(q)
+      !q
+      || d.label?.toLowerCase().includes(q)
+      || dptKey(d.main!, d.sub).includes(q)
+      || (d.main != null && dptWidthLabel(d.main).toLowerCase().includes(q))
     ), [options.dpts, q]);
 
   const toggle = <T extends string | number>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter(v => v !== value) : [...list, value];
+
+  // Live count for a DPT filter key; a bare main-type key ("1") aggregates
+  // every subtype count of that main type (#273).
+  const dptCount = (key: string): number => {
+    const c = counts?.dpts ?? {};
+    if (!/^\d+$/.test(key)) return c[key] ?? 0;
+    return Object.entries(c)
+      .filter(([k]) => k === key || k.startsWith(`${key}.`))
+      .reduce((sum, [, v]) => sum + v, 0);
+  };
 
   const update = (patch: Partial<ActiveFilters>) =>
     onFiltersChange({ ...activeFilters, ...patch });
@@ -375,13 +390,14 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             />
           ))}
           {activeFilters.dpts.map(d => {
-            const label = options.dpts.find(opt => dptKey(opt.main!, opt.sub) === d)?.label;
+            const label = options.dpts.find(opt => dptKey(opt.main!, opt.sub) === d)?.label
+              ?? (/^\d+$/.test(d) ? bareDptLabel(Number(d)) : undefined);
             return (
               <OptionRow
                 key={`active-dpt-${d}`}
                 label={label || `DPT ${d}`}
                 checked={true}
-                count={mode === 'live' ? (counts?.dpts[d] ?? 0) : undefined}
+                count={mode === 'live' ? dptCount(d) : undefined}
                 onToggle={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
                 onRemove={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
               />
@@ -551,21 +567,17 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           </Section>
         )}
 
-        {/* DPT */}
+        {/* DPT — grouped by main data type / bit-byte width (#273) */}
         {filteredDpts.length > 0 && (
           <Section title="DPT" defaultOpen={false}>
-            {filteredDpts.map(d => {
-              const key = dptKey(d.main!, d.sub);
-              return (
-                <OptionRow
-                  key={key}
-                  label={d.label!}
-                  checked={activeFilters.dpts.includes(key)}
-                  count={mode === 'live' ? (counts?.dpts[key] ?? 0) : undefined}
-                  onToggle={() => update({ dpts: toggle(activeFilters.dpts, key) })}
-                />
-              );
-            })}
+            <DptTypeTree
+              entries={filteredDpts}
+              selected={activeFilters.dpts}
+              onChange={dpts => update({ dpts })}
+              counts={counts?.dpts}
+              mode={mode}
+              searchQuery={q}
+            />
           </Section>
         )}
 
