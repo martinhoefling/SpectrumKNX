@@ -5,6 +5,8 @@ import {
 import { apiUrl } from '../utils/basePath';
 import { useExpanded } from '../utils/buildingExpansion';
 import { SendToGaPopover } from './SendToGaPopover';
+import { GaValuesTable } from './GaValuesTable';
+import type { Telegram } from '../hooks/useWebSocket';
 
 // ── Types (mirror /api/building response) ──────────────────────────────────────
 
@@ -19,6 +21,7 @@ export interface Ko {
   text: string;
   function_text: string;
   dpts: { main: number; sub: number | null; name?: string | null }[];
+  flags?: { transmit?: boolean };
   group_addresses: GaRef[];
 }
 
@@ -76,6 +79,8 @@ interface BuildingOverlayProps {
   /** Open the live KO status view for a device (#153). */
   onDeviceStatus: (device: DeviceNode) => void;
   writeEnabled?: boolean;
+  /** Newest telegram from the live websocket feed; keeps expanded GA tables current. */
+  latestTelegram?: Telegram | null;
 }
 
 // ── Group-address collection helpers ─────────────────────────────────────────────
@@ -175,24 +180,32 @@ const Caret: React.FC<{ open: boolean; hasChildren: boolean }> = ({ open, hasChi
 
 const KoRow: React.FC<{
   ko: Ko;
+  koKey: string;
   depth: number;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   writeEnabled?: boolean;
-}> = ({ ko, depth, onFilterGAs, onLastSeen, writeEnabled }) => {
+  latestTelegram?: Telegram | null;
+}> = ({ ko, koKey, depth, onFilterGAs, onLastSeen, writeEnabled, latestTelegram }) => {
+  const [open, toggle] = useExpanded(`ko:${koKey}`, false);
   const dpt = formatDpt(ko.dpts);
   const gaAddresses = ko.group_addresses.map(g => g.address);
+  const hasGAs = gaAddresses.length > 0;
+  // ETS lists the sending GA first among a transmitting object's links.
+  const sendingGA = ko.flags?.transmit && hasGAs ? ko.group_addresses[0].address : null;
   const nameText = ko.text || ko.name;
   const label = (nameText && ko.function_text && nameText !== ko.function_text)
     ? `${nameText} (${ko.function_text})`
     : (nameText || ko.function_text || `Object ${ko.number ?? ''}`);
   return (
+    <div>
     <div
-      style={{ ...rowStyle(depth) }}
+      style={{ ...rowStyle(depth), cursor: hasGAs ? 'pointer' : 'default' }}
+      onClick={() => hasGAs && toggle()}
       onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
-      <Caret open={false} hasChildren={false} />
+      <Caret open={open} hasChildren={hasGAs} />
       {ko.number != null && (
         <span style={{
           fontFamily: "'JetBrains Mono', monospace", fontSize: '0.65rem', fontWeight: 600,
@@ -207,14 +220,23 @@ const KoRow: React.FC<{
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{label}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.15rem' }}>
-          {ko.group_addresses.map(ga => (
-            <span key={ga.address} title={ga.name || ga.address} style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: '0.65rem',
-              padding: '0.05rem 0.3rem', borderRadius: '3px',
-              background: 'rgba(99,102,241,0.1)', color: 'var(--accent-primary)',
-              border: '1px solid rgba(99,102,241,0.25)',
-            }}>{ga.address}</span>
-          ))}
+          {ko.group_addresses.map(ga => {
+            const sending = ga.address === sendingGA;
+            return (
+              <span
+                key={ga.address}
+                title={`${ga.name || ga.address}${sending ? ' — sending group address' : ''}`}
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: '0.65rem',
+                  padding: '0.05rem 0.3rem', borderRadius: '3px',
+                  background: sending ? 'rgba(99,102,241,0.22)' : 'rgba(99,102,241,0.1)',
+                  color: 'var(--accent-primary)',
+                  border: sending ? '1px solid rgba(99,102,241,0.6)' : '1px solid rgba(99,102,241,0.25)',
+                  fontWeight: sending ? 700 : 400,
+                }}
+              >{ga.address}</span>
+            );
+          })}
         </div>
       </div>
       {dpt && (
@@ -272,6 +294,20 @@ const KoRow: React.FC<{
         </>
       )}
     </div>
+      {open && hasGAs && (
+        <GaValuesTable
+          entries={ko.group_addresses.map(ga => ({
+            address: ga.address,
+            name: ga.name || '',
+            sending: ga.address === sendingGA,
+          }))}
+          depth={depth + 1}
+          latestTelegram={latestTelegram}
+          onFilterGAs={onFilterGAs}
+          onLastSeen={onLastSeen}
+        />
+      )}
+    </div>
   );
 };
 
@@ -286,7 +322,8 @@ const DeviceRow: React.FC<{
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onDeviceStatus: (device: DeviceNode) => void;
   writeEnabled?: boolean;
-}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled }) => {
+  latestTelegram?: Telegram | null;
+}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`dev:${device.address}`, false);
   const koCount = device.channels.reduce((s, c) => s + c.kos.length, 0) + device.kos.length;
   const hasChildren = koCount > 0;
@@ -366,11 +403,16 @@ const DeviceRow: React.FC<{
               <ChannelRow
                 key={ch.id} channel={ch} deviceAddress={device.address} visibleKos={visibleKos} depth={depth + 1}
                 query={query} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled}
+                latestTelegram={latestTelegram}
               />
             );
           })}
           {sortKos(query ? device.kos.filter(k => koMatches(k, query)) : device.kos).map((ko, i) => (
-            <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled} />
+            <KoRow
+              key={`${ko.number}-${i}`} ko={ko} koKey={`${device.address}:${ko.number}-${i}`}
+              depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+              writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+            />
           ))}
         </div>
       )}
@@ -387,7 +429,8 @@ const ChannelRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   writeEnabled?: boolean;
-}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen, writeEnabled }) => {
+  latestTelegram?: Telegram | null;
+}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`ch:${deviceAddress}:${channel.id}`, false);
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => channelGAs(channel), [channel]);
@@ -420,7 +463,11 @@ const ChannelRow: React.FC<{
         )}
       </div>
       {effectiveOpen && visibleKos.map((ko, i) => (
-        <KoRow key={`${ko.number}-${i}`} ko={ko} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled} />
+        <KoRow
+          key={`${ko.number}-${i}`} ko={ko} koKey={`${deviceAddress}:${channel.id}:${ko.number}-${i}`}
+          depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+          writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+        />
       ))}
     </div>
   );
@@ -428,72 +475,14 @@ const ChannelRow: React.FC<{
 
 // ── Function nodes ──────────────────────────────────────────────────────────────
 
-const FunctionGaRow: React.FC<{
-  ga: FunctionGA;
-  depth: number;
-  onFilterGAs: (addresses: string[]) => void;
-  onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ ga, depth, onFilterGAs, onLastSeen }) => {
-  return (
-    <div
-      style={{ ...rowStyle(depth) }}
-      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-    >
-      <Caret open={false} hasChildren={false} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
-          <span style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem',
-            padding: '0.05rem 0.3rem', borderRadius: '3px',
-            background: 'rgba(99,102,241,0.1)', color: 'var(--accent-primary)',
-            border: '1px solid rgba(99,102,241,0.25)',
-          }}>{ga.address}</span>
-          {ga.role && (
-            <span style={{
-              fontSize: '0.62rem', fontWeight: 600, color: 'var(--text-dim)',
-              textTransform: 'uppercase', background: 'var(--bg-tag)',
-              padding: '0.05rem 0.25rem', borderRadius: '3px'
-            }}>{ga.role}</span>
-          )}
-        </div>
-        {ga.name && (
-          <div title={ga.name} style={{
-            fontSize: '0.78rem', color: 'var(--text-dim)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            marginTop: '0.15rem'
-          }}>{ga.name}</div>
-        )}
-      </div>
-      <button
-        style={iconBtnStyle}
-        title="Filter by this group address"
-        onClick={e => { e.stopPropagation(); onFilterGAs([ga.address]); }}
-        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
-      >
-        <Filter size={12} />
-      </button>
-      <button
-        style={iconBtnStyle}
-        title="Show last seen values"
-        onClick={e => { e.stopPropagation(); onLastSeen([ga.address], 'ga'); }}
-        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
-      >
-        <Clock size={12} />
-      </button>
-    </div>
-  );
-};
-
 const FunctionRow: React.FC<{
   func: FunctionNode;
   depth: number;
   query: string;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ func, depth, query, onFilterGAs, onLastSeen }) => {
+  latestTelegram?: Telegram | null;
+}> = ({ func, depth, query, onFilterGAs, onLastSeen, latestTelegram }) => {
   const [open, toggle] = useExpanded(`func:${func.id}`, false);
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => func.group_addresses.map(g => g.address), [func]);
@@ -545,9 +534,19 @@ const FunctionRow: React.FC<{
           </>
         )}
       </div>
-      {effectiveOpen && func.group_addresses.map((ga, i) => (
-        <FunctionGaRow key={`${ga.address}-${i}`} ga={ga} depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} />
-      ))}
+      {effectiveOpen && func.group_addresses.length > 0 && (
+        <GaValuesTable
+          entries={func.group_addresses.map(ga => ({
+            address: ga.address,
+            name: ga.name || '',
+            role: ga.role || undefined,
+          }))}
+          depth={depth + 1}
+          latestTelegram={latestTelegram}
+          onFilterGAs={onFilterGAs}
+          onLastSeen={onLastSeen}
+        />
+      )}
     </div>
   );
 };
@@ -564,7 +563,8 @@ const SpaceRow: React.FC<{
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onDeviceStatus: (device: DeviceNode) => void;
   writeEnabled?: boolean;
-}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled }) => {
+  latestTelegram?: Telegram | null;
+}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
   if (query && !spaceMatches(space, query)) return null;
   const effectiveOpen = open || !!query;
@@ -597,20 +597,20 @@ const SpaceRow: React.FC<{
             <SpaceRow
               key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
-              writeEnabled={writeEnabled}
+              writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
           {visibleFunctions.map((func, i) => (
             <FunctionRow
               key={`${func.id}-${i}`} func={func} depth={depth + 1} query={query}
-              onFilterGAs={onFilterGAs} onLastSeen={onLastSeen}
+              onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} latestTelegram={latestTelegram}
             />
           ))}
           {visibleDevices.map(device => (
             <DeviceRow
               key={device.address} device={device} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
-              writeEnabled={writeEnabled}
+              writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
         </div>
@@ -622,7 +622,7 @@ const SpaceRow: React.FC<{
 // ── Main overlay ────────────────────────────────────────────────────────────────
 
 export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
-  onClose, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled,
+  onClose, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled, latestTelegram,
 }) => {
   const [data, setData] = useState<BuildingData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -697,7 +697,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
             <SpaceRow
               key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
-              writeEnabled={writeEnabled}
+              writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
 
@@ -710,7 +710,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
                 <DeviceRow
                   key={device.address} device={device} depth={1} query={query}
                   onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onDeviceStatus={onDeviceStatus}
-                  writeEnabled={writeEnabled}
+                  writeEnabled={writeEnabled} latestTelegram={latestTelegram}
                 />
               ))}
             </div>

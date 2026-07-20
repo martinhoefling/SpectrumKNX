@@ -1047,6 +1047,7 @@ function App() {
                     onLastSeen={handleQuickLastSeen}
                     onDeviceStatus={setStatusDevice}
                     writeEnabled={serverConfig?.status?.write_enabled}
+                    latestTelegram={latestTelegram}
                   />
                 ) : isDatabaseOpen ? (
                   <DatabaseOverlay onClose={() => setIsDatabaseOpen(false)} />
