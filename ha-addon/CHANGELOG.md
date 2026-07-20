@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.16.0
+
+### Added
+
+- **Quick filter bar in the telegram table**: a per-column regex/literal filter row on top of the main filter, for fast ad-hoc narrowing without opening the filter panel (#271).
+- **Group addresses as a sortable last-values table in the building view**: expanding a communication object or a function now shows its group addresses with name, role, last value and age, sortable by any column; the transmitting object's sending GA is highlighted (#268, #269).
+- **"Quick goto time" in the telegram list**: a clock button opens a time-entry popover that jumps the list to the telegram nearest that time and pauses live-follow — the jump-to-live pill brings you back (#282).
+- **Date-aware visualization labels**: axis ticks, tooltips and the pan/zoom timeline now show a date alongside the time once the visible range spans more than one day, and the drag-to-zoom selection is now visible while dragging (#281).
+- **DPT filter grouped by main data type** for easier browsing of large project DPT lists (#273).
+- **Double-click a pan/zoom timeline handle** to snap that edge to the earliest / newest data (#267).
+
+### Changed
+
+- **Zebra stripes stay with their telegram**, and clicking a row pauses live-follow so the row you are reading no longer shifts as new telegrams arrive (#266).
+
+### Fixed
+
+- **Visualization no longer resets to the full time range** when a new telegram arrives — the zoom and the pan/zoom timeline now stay in sync (#281).
+
 ## 1.15.1
 
 ### Fixed
