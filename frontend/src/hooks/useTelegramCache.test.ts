@@ -56,7 +56,7 @@ beforeEach(() => {
     vi.fn(async (url: RequestInfo | URL) => {
       const u = String(url);
       fetchCalls.push(u);
-      if (u.includes('/api/database')) {
+      if (u.includes('/api/database/info')) {
         return jsonRes({ retention_days: null });
       }
       const next = telegramResponses.shift() ?? { telegrams: [] };

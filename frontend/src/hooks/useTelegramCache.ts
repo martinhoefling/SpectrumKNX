@@ -175,7 +175,7 @@ export function useTelegramCache(maxSize: number): TelegramCache {
 
       // Clamp everything to the backend's retention window when known.
       try {
-        const res = await fetch(apiUrl('/api/database'));
+        const res = await fetch(apiUrl('/api/database/info'));
         const info = await res.json();
         if (info.retention_days != null) {
           const minMs = Date.now() - (info.retention_days + 1) * 86_400_000;
