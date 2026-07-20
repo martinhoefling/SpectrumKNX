@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
   // Set the third parameter to '' to load all env instead of just those starting with `VITE_`.
   const env = loadEnv(mode, process.cwd(), '');
-  const backendUrl = env.VITE_BACKEND_URL || 'http://localhost:8000';
+  const backendUrl = env.VITE_BACKEND_URL || 'http://localhost:8765';
   const wsBackendUrl = backendUrl.replace(/^http/, 'ws');
   const appVersion = process.env.VITE_APP_VERSION || env.VITE_APP_VERSION || gitVersion;
 

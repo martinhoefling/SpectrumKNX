@@ -30,12 +30,12 @@ COPY backend/ .
 COPY --from=frontend-builder /app/frontend/dist ./static
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8765
 
 # Environment variables
 ENV LOG_LEVEL=INFO
 ENV BIND_HOST=0.0.0.0
-ENV BIND_PORT=8000
+ENV BIND_PORT=8765
 
 # Command to run the application. `exec` keeps uvicorn as PID 1 so it receives
 # signals for graceful shutdown; the shell form lets BIND_HOST/BIND_PORT expand.

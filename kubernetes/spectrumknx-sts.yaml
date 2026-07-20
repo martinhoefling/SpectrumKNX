@@ -39,7 +39,7 @@ spec:
                   name: spectrumknx-secret
                   key: KNX_PASSWORD
           ports:
-            - containerPort: 8000
+            - containerPort: 8765
               name: http
           volumeMounts:
             - name: knxproj

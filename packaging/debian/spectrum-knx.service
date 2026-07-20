@@ -12,7 +12,7 @@ Group=spectrum-knx
 # at package build time.
 Environment=APP_VERSION=@VERSION@
 Environment=BIND_HOST=0.0.0.0
-Environment=BIND_PORT=8000
+Environment=BIND_PORT=8765
 EnvironmentFile=-/etc/spectrum-knx/spectrum-knx.env
 WorkingDirectory=/opt/spectrum-knx/app
 ExecStart=/opt/spectrum-knx/venv/bin/uvicorn main:app --host ${BIND_HOST} --port ${BIND_PORT}

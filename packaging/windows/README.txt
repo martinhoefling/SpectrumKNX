@@ -16,7 +16,7 @@ GETTING STARTED
    - A console window opens and shows the log output. Keep it open;
      closing it stops Spectrum KNX.
    - Your browser opens the web interface automatically
-     (default: http://localhost:8000).
+     (default: http://localhost:8765).
    - On first start, Windows Firewall asks for network permission.
      Allow it — it is required to discover KNX/IP gateways and to
      receive KNX routing (multicast) traffic.
@@ -45,7 +45,7 @@ The most important settings:
   Web interface
     BIND_HOST=127.0.0.1     only this PC can open the UI (default)
     BIND_HOST=0.0.0.0       other devices on your network can open it
-    BIND_PORT=8000          change if port 8000 is already in use
+    BIND_PORT=8765          change if port 8765 is already in use
 
   KNX connection
     KNX_CONNECTION_TYPE=automatic
@@ -118,7 +118,7 @@ TROUBLESHOOTING
 
 - The browser shows "connection refused":
   Check the console window — the URL and any errors are printed there.
-  If port 8000 is taken by another program, set a different BIND_PORT
+  If port 8765 is taken by another program, set a different BIND_PORT
   in .env and restart.
 
 - No KNX gateway found / no telegrams:

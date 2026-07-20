@@ -23,13 +23,13 @@ services:
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - BIND_HOST=${BIND_HOST:-0.0.0.0}
-      - BIND_PORT=${BIND_PORT:-8000}
+      - BIND_PORT=${BIND_PORT:-8765}
     env_file:
       - .env
     volumes:
       - knx_project_data:/project
     ports:
-      - "${BIND_PORT:-8000}:${BIND_PORT:-8000}"
+      - "${BIND_PORT:-8765}:${BIND_PORT:-8765}"
     depends_on:
       - db
     restart: unless-stopped

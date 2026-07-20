@@ -23,9 +23,9 @@ python -m venv .venv
 source .venv/bin/activate  # Or `.\.venv\Scripts\Activate.ps1` on Windows
 pip install -r requirements.txt
 ```
-Run the local uvicorn server in auto-reload mode (runs on port 8000):
+Run the local uvicorn server in auto-reload mode (runs on port 8765):
 ```bash
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8765
 ```
 
 ### 3. Frontend (React / Vite)
@@ -40,7 +40,7 @@ npm run dev
 ```
 
 > [!TIP]
-> **API Proxying:** The Vite dev server is configured (via `vite.config.ts`) to automatically proxy any requests made to `/api` and `/ws` over to `localhost:8000`. This means you can develop the frontend logic at port 5173 and it will transparently communicate with your local python daemon.
+> **API Proxying:** The Vite dev server is configured (via `vite.config.ts`) to automatically proxy any requests made to `/api` and `/ws` over to `localhost:8765`. This means you can develop the frontend logic at port 5173 and it will transparently communicate with your local python daemon.
 
 ## Code Quality Standards
 - **Python Linter:** We use `Ruff`. Run `ruff check .` before committing.

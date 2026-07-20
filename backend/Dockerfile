@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV BIND_HOST=0.0.0.0
-ENV BIND_PORT=8000
+ENV BIND_PORT=8765
 
 # `exec` keeps uvicorn as PID 1 so it receives signals for graceful shutdown;
 # the shell form lets BIND_HOST/BIND_PORT expand.

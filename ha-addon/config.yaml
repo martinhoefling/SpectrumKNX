@@ -9,7 +9,7 @@ arch:
   - aarch64
   - amd64
 ingress: true
-ingress_port: 8000
+ingress_port: 8765
 ingress_stream: true
 panel_icon: mdi:chart-timeline-variant
 panel_title: "Spectrum KNX"

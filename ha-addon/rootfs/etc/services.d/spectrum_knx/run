@@ -62,7 +62,7 @@ ln -sfn /data/project /project
 # Ingress support path (provided by Home Assistant)
 if bashio::config.has_value 'ingress_port'; then
     # We serve directly on the port and Home Assistant handles the Ingress proxying
-    export PORT=8000
+    export PORT=8765
 fi
 
 # Set root path if running under HA Ingress
@@ -73,4 +73,4 @@ fi
 
 cd /app/backend
 bashio::log.info "Starting Spectrum KNX Backend..."
-exec /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+exec /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8765

@@ -67,7 +67,7 @@ def run() -> None:
     prepare_environment()
 
     host = os.environ.get("BIND_HOST", "127.0.0.1")
-    port = int(os.environ.get("BIND_PORT", "8000"))
+    port = int(os.environ.get("BIND_PORT", "8765"))
 
     import uvicorn
     from main import app

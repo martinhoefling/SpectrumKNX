@@ -93,7 +93,7 @@ Steps:
       installed (direct deps from `pyproject.toml`, versions constrained by
       `requirements.txt`) — package size ≈ 13 MB. The unit gets defaults via
       `Environment=` so an old conffile can't break an upgrade; `APP_VERSION`
-      is baked into the unit at build time. The web UI defaults to port 8000.*
+      is baked into the unit at build time. The web UI defaults to port 8765.*
 - [x] Local build inside `debian:trixie` container; verified with
       `dpkg-deb -c`, `lintian` (remaining tags are the expected
       `dir-or-file-in-opt` for venv-bundled software) and an install/run smoke
@@ -108,7 +108,7 @@ Steps:
 - **Launcher**: `packaging/windows/launcher.py` is the PyInstaller entry point.
   It loads `.env` next to the exe (created from a template on first run),
   defaults `DATABASE_URL` and `KNX_PROJECT_PATH` to
-  `%LOCALAPPDATA%\SpectrumKNX\`, starts uvicorn on `127.0.0.1:8000` and opens
+  `%LOCALAPPDATA%\SpectrumKNX\`, starts uvicorn on `127.0.0.1:8765` and opens
   the default browser. Console window stays visible for logs (documented;
   a tray/service wrapper via WinSW is a possible follow-up).
 - **Static frontend**: bundled as PyInstaller data files so `main.py`'s

@@ -44,7 +44,7 @@ Key variables:
 - `KNX_PROJECT_PATH`: Path to the `.knxproj` file inside the container.
 - `KNX_GATEWAY_IP`: IP of your KNX interface (or `AUTO`). See `DEPLOYMENT.md` for advanced connection settings.
 - `APP_IMAGE`: Docker image to use for production stacks.
-- `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8000`).
+- `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8765`).
 
 Companion mode (read an external telegram store instead of running the KNX daemon):
 - `STORE_MODE`: `standalone` (default) or `external-readonly` — read a sqlite store owned and written by another process (e.g. Home Assistant's KNX integration). Requires a `sqlite+aiosqlite://` `DATABASE_URL`; the KNX daemon is not started, and purge/optimize are disabled.
@@ -81,9 +81,9 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8765
 ```
-The API will be available at `http://localhost:8000`.
+The API will be available at `http://localhost:8765`.
 
 #### Via Docker
 ```bash

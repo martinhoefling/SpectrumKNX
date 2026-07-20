@@ -111,9 +111,9 @@ jobs:
             mkdir -p /var/lib/spectrum-knx && chown spectrum-knx: /var/lib/spectrum-knx
             set -a; . /etc/spectrum-knx/spectrum-knx.env; set +a
             cd /opt/spectrum-knx/app
-            runuser -u spectrum-knx -- /opt/spectrum-knx/venv/bin/uvicorn main:app --port 8000 &
-            for i in \$(seq 1 30); do curl -sf http://localhost:8000/api/version && break; sleep 1; done
-            curl -sf http://localhost:8000/ | grep -q '<title>Spectrum KNX</title>'
+            runuser -u spectrum-knx -- /opt/spectrum-knx/venv/bin/uvicorn main:app --port 8765 &
+            for i in \$(seq 1 30); do curl -sf http://localhost:8765/api/version && break; sleep 1; done
+            curl -sf http://localhost:8765/ | grep -q '<title>Spectrum KNX</title>'
           "
 
       - name: Upload to release
@@ -163,9 +163,9 @@ jobs:
         shell: bash
         run: |
           ./dist/windows/spectrum-knx/spectrum-knx.exe &
-          for i in $(seq 1 60); do curl -sf http://localhost:8000/api/version && break; sleep 1; done
-          curl -sf http://localhost:8000/api/version | grep -q "${GITHUB_REF_NAME#v}"
-          curl -sf http://localhost:8000/ | grep -q '<title>Spectrum KNX</title>'
+          for i in $(seq 1 60); do curl -sf http://localhost:8765/api/version && break; sleep 1; done
+          curl -sf http://localhost:8765/api/version | grep -q "${GITHUB_REF_NAME#v}"
+          curl -sf http://localhost:8765/ | grep -q '<title>Spectrum KNX</title>'
           kill %1
 
       - name: Zip bundle

@@ -180,7 +180,7 @@ automatically) running as its own system user. Locations:
 
 Edit the env file (KNX connection, bind address/port — all variables from
 [Section 5](#5-configuration-variables-docker--kubernetes) apply), then
-`sudo systemctl restart spectrum-knx`. The web UI listens on port 8000 by
+`sudo systemctl restart spectrum-knx`. The web UI listens on port 8765 by
 default. Logs: `journalctl -u spectrum-knx`. `apt purge` removes the database
 and the service user; `apt remove` keeps them.
 
@@ -188,7 +188,7 @@ and the service user; `apt remove` keeps them.
 
 Unzip `spectrum-knx-<version>-windows-x64.zip` anywhere and run
 `spectrum-knx.exe`: a console window shows the logs and the browser opens the
-UI (default `http://localhost:8000`). A `README.txt` with the full setup
+UI (default `http://localhost:8765`). A `README.txt` with the full setup
 guide is included in the zip.
 
 - Configuration lives in the `.env` file created next to the exe on first run

@@ -46,9 +46,9 @@ The easiest way to run Spectrum KNX is with Docker Compose. This automatically p
    docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
    ```
 
-4. Access the web interface at `http://localhost:8000` (or `http://localhost:5173` in Dev mode).
+4. Access the web interface at `http://localhost:8765` (or `http://localhost:5173` in Dev mode).
 
-   > The listen port defaults to `8000`. Set `BIND_PORT` (and optionally
+   > The listen port defaults to `8765`. Set `BIND_PORT` (and optionally
    > `BIND_HOST`) in your `.env` if it clashes with another service.
 
 ## 📦 Debian Package & Windows
@@ -58,7 +58,7 @@ No Docker needed — both packages run Spectrum KNX with a local SQLite database
 
 - **Debian 13+ / compatible (amd64, arm64):** `sudo apt install ./spectrum-knx_<version>_<arch>.deb`,
   configure `/etc/spectrum-knx/spectrum-knx.env`, then `sudo systemctl restart spectrum-knx`.
-  Web UI on port 8000.
+  Web UI on port 8765.
 - **Windows (x64):** unzip `spectrum-knx-<version>-windows-x64.zip`, run
   `spectrum-knx.exe` — the browser opens automatically; settings live in the
   `.env` file created next to the exe.

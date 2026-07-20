@@ -15,7 +15,7 @@ services:
       context: ./frontend
     container_name: knx_frontend
     environment:
-      - VITE_BACKEND_URL=http://backend:8000
+      - VITE_BACKEND_URL=http://backend:8765
       - VITE_APP_VERSION=${APP_VERSION:-dev}
     volumes:
       - ./frontend:/app
