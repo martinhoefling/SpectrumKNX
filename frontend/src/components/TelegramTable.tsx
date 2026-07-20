@@ -5,6 +5,7 @@ import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
+import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 
 export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
@@ -320,6 +321,36 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     scrollToEdge();
   };
 
+  // "Quick goto time" (#282): scroll to the telegram nearest a given time and
+  // stop live-following, so the viewed rows stay put while new ones accumulate.
+  // The jump-to-live pill is the way back. Only meaningful for the timestamp
+  // sort, where rows are ordered by time.
+  const gotoTime = (targetMs: number) => {
+    const rows = telegramRows;
+    if (!isTimeSort || rows.length === 0) return;
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < rows.length; i++) {
+      const diff = Math.abs(new Date(rows[i].timestamp).getTime() - targetMs);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    }
+    atEdgeRef.current = false;
+    setNewSinceAnchor(0);
+    markProgrammatic();
+    virtualizer.scrollToIndex(bestIdx, { align: 'center' });
+    // Pin the row we land on once the virtualizer has settled the scroll (rows
+    // are dynamically measured, so give it two frames before capturing).
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      captureAnchor();
+      atEdgeRef.current = false;
+    }));
+  };
+
+  // Newest telegram time, used to seed the goto-time input.
+  const newestMs = telegramRows.length > 0
+    ? new Date(telegramRows[liveEdge === 'top' ? 0 : telegramRows.length - 1].timestamp).getTime()
+    : null;
+
   // Correct scrollTop so the anchored row keeps its recorded viewport offset.
   // Only the top (newest-first) edge needs this — bottom-appends don't move the
   // content above the viewport.
@@ -631,6 +662,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <ListFilter size={13} />
               </button>
             )}
+            {c.id === 'time' && isTimeSort && (
+              <GotoTimeControl seedMs={newestMs} onGoto={gotoTime} />
+            )}
             {c.sortKey ? (
               <button className="sort-header" onClick={() => onSort(c.sortKey!)}>
                 {c.label} {renderSortArrow(c.sortKey)}
@@ -887,6 +921,54 @@ style.textContent = `
 
   .quick-filter-bar-input:focus {
     border-color: var(--accent-primary);
+  }
+
+  .goto-time-popover {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .goto-time-input {
+    background: var(--bg-tag);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 0.25rem 0.45rem;
+    color: var(--text-main);
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .goto-time-input:focus {
+    border-color: var(--accent-primary);
+  }
+
+  .goto-time-go {
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 5px;
+    padding: 0.3rem 0.7rem;
+    color: white;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s;
+  }
+
+  .goto-time-go:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .goto-time-go:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .col-resize-handle {
