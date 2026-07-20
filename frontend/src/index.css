@@ -220,6 +220,14 @@ code, pre {
   color: var(--text-main) !important;
 }
 
+/* Make the drag-to-zoom selection visible while dragging (#281). uPlot's
+   default .u-select tint is near-invisible on the dark chart background. */
+.u-select {
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid var(--accent-primary);
+  box-sizing: border-box;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

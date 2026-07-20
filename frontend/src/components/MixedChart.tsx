@@ -6,6 +6,7 @@ import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
 import { seriesColor } from '../utils/seriesColors';
 import { isSeriesHidden, setSeriesHidden } from '../utils/legendVisibility';
+import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
 
 interface MixedChartProps {
   bucket: ChartBucket;
@@ -70,6 +71,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
     const axisStroke = style.getPropertyValue('--text-dim').trim();
 
+    // Show a date alongside times once the visible range crosses midnight (#281).
+    const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
+
     // Configure Y-Axis scale limits based on smart defaults
     let scaleConfig: uPlot.Scale = {};
     if (!isBinary && (unit === '%' || unit === 'Hz' || unit === 'W')) {
@@ -132,9 +136,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
           space: 50,
           grid: { stroke: gridStroke, width: 1 },
           stroke: axisStroke,
-          values: (_u, splits) => splits.map(v =>
-            new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-          )
+          values: (_u, splits) => splits.map(v => formatAxisTime(v * 1000, multiDay))
         },
         {
           space: 30,
@@ -147,7 +149,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
       ],
       series: [
         {
-          value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+          value: (_u, v) => v == null ? '-' : formatFullTime(v * 1000, multiDay)
         },
         ...series.map((s, sIdx) => ({
           label: s.name,
@@ -177,7 +179,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
         {isBinary ? 'Binary States (Ein/Aus)' : `Metrics (${unit})`}
       </h4>
       <div ref={containerRef} style={{ width: '100%', overflow: 'hidden' }}>
-         <UplotReact options={options} data={data} />
+         {/* resetScales=false: keep the app-controlled zoom on live updates so a
+             new telegram doesn't snap the x-axis back to the full range (#281). */}
+         <UplotReact options={options} data={data} resetScales={false} />
       </div>
     </div>
   );

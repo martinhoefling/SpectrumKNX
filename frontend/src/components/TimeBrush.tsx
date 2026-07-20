@@ -1,5 +1,6 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import type { Telegram } from '../hooks/useWebSocket';
+import { spansMultipleDays, formatFullTime } from '../utils/timeFormat';
 
 interface TimeBrushProps {
   minTime: number;
@@ -114,9 +115,10 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
     };
   }, [dragMode, minTime, maxTime, range, value, onChange]);
 
-  const formatTime = (ms: number) => {
-    return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  };
+  // Date-aware edge labels: show the date too once the data spans days (#281),
+  // so the selected window's bounds aren't ambiguous across midnight.
+  const multiDay = spansMultipleDays(minTime, maxTime);
+  const formatTime = (ms: number) => formatFullTime(ms, multiDay);
 
   return (
     <div style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-panel)', flexShrink: 0 }}>

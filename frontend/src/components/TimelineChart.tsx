@@ -4,6 +4,7 @@ import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
+import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
 
 interface TimelineChartProps {
   bucket: ChartBucket;
@@ -61,6 +62,9 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
     const axisStroke = style.getPropertyValue('--text-dim').trim();
     const accentPrimary = style.getPropertyValue('--accent-primary').trim();
+
+    // Show a date alongside times once the visible range crosses midnight (#281).
+    const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
 
     const timelinePlugin = () => ({
       hooks: {
@@ -185,9 +189,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
           space: 50,
           stroke: axisStroke,
           grid: { stroke: gridStroke },
-          values: (_u, splits) => splits.map(v =>
-            new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-          )
+          values: (_u, splits) => splits.map(v => formatAxisTime(v * 1000, multiDay))
         },
         {
           show: true,
@@ -199,7 +201,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
       ],
       series: [
         {
-          value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+          value: (_u, v) => v == null ? '-' : formatFullTime(v * 1000, multiDay)
         },
         ...series.map((s) => ({
           label: s.name,
@@ -216,7 +218,9 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
         Binary States Timeline
       </h4>
       <div ref={containerRef} style={{ width: '100%', overflow: 'visible' }}>
-         <UplotReact options={options} data={data} />
+         {/* resetScales=false: keep the app-controlled zoom on live updates so a
+             new telegram doesn't snap the x-axis back to the full range (#281). */}
+         <UplotReact options={options} data={data} resetScales={false} />
       </div>
     </div>
   );
