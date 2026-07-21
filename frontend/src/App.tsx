@@ -15,6 +15,7 @@ import { TelegramTable, type SortConfig, type SortKey } from './components/Teleg
 import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock } from 'lucide-react';
 import { getPref, setPref } from './utils/prefs';
+import { getLabel, getFileName } from './utils/labels';
 import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
@@ -884,7 +885,7 @@ function App() {
                     {Object.entries(serverConfig.connection || {}).map(([key, value]) => (
                       value != null && (
                         <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
+                          <span style={{ color: 'var(--text-dim)' }}>{getLabel('connection', key)}:</span>
                           <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
                             {String(value)}
                           </span>
@@ -896,16 +897,30 @@ function App() {
                     <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ color: 'var(--text-dim)' }}>Project file:</span>
-                        <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
-                          {serverConfig.files?.project_loaded ? '● Loaded' : '○ Not loaded'}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {serverConfig.files?.project_file && (
+                            <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                              {getFileName(serverConfig.files.project_file)}
+                            </span>
+                          )}
+                          <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                            {serverConfig.files?.project_loaded ? '● Loaded' : '○ Not loaded'}
+                          </span>
+                        </div>
                       </div>
                       {serverConfig.files?.knxkeys_found !== undefined && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
                           <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>
-                          <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
-                            {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {serverConfig.files?.knxkeys_file && (
+                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                                {getFileName(serverConfig.files.knxkeys_file)}
+                              </span>
+                            )}
+                            <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                              {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -916,7 +931,7 @@ function App() {
                         {Object.entries(serverConfig.security || {}).map(([key, value]) => (
                           value != null && (
                             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                              <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
+                              <span style={{ color: 'var(--text-dim)' }}>{getLabel('security', key)}:</span>
                               <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
                                 {String(value)}
                               </span>
