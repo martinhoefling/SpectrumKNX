@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.16.1
+
+### Added
+
+- **Progressive history loading**: history now loads in newest-first chunks and paints after each chunk, and startup restores only the most recent telegrams (older history is fetched on demand). The telegram list and charts build quickly even on low-power hosts like a Raspberry Pi, instead of waiting for the whole history read to finish (#284).
+
+### Changed
+
+- **Buffer controls moved into the status bar**: the clear and load-history actions now sit next to the buffer count, with an inline marker when the buffer is full (#284).
+
+### Fixed
+
+- **Freeze-on-click in the group monitor** now holds with newest-on-bottom sorting even when the buffer is full: selecting a telegram keeps it in place instead of drifting upward as older rows are evicted (#297).
+- Telegram-cache retention probe no longer requests a missing endpoint (#294).
+
 ## 1.16.0
 
 ### Added
