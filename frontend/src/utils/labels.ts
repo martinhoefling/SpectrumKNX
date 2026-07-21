@@ -35,10 +35,10 @@ export const getLabel = (section: string, key: string): string => {
 };
 
 /**
- * Extract the filename from a file path.
+ * Extract filename from a file path.
  * Handles both Unix (/) and Windows (\) path separators.
  */
 export const getFileName = (filePath: string | null | undefined): string | null => {
   if (!filePath) return null;
-  return filePath.split(/[\/\\]/).pop() ?? null;
+  return filePath.split(/[/\\]/).pop() ?? null;
 };
