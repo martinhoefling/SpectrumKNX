@@ -108,7 +108,9 @@ def test_get_building_with_project():
                 "name": "Dimming Light",
                 "function_type": "Dimming",
                 "group_addresses": {
-                    "1/2/3": {"name": "Light On/Off", "role": "Switch"}
+                    # As in real projects: the function ref carries no name and an
+                    # opaque UUID role — the real name/DPT come from the project (#295).
+                    "1/2/3": {"name": "", "role": "98139557-C86A-4134-AB91-325CF8ECFC2A"}
                 }
             }
         },
@@ -145,7 +147,7 @@ def test_get_building_with_project():
             "O-3": {"number": 3, "name": "Status", "text": "State", "group_address_links": ["1/2/4"]},
         },
         "group_addresses": {
-            "1/2/3": {"name": "Light On/Off"},
+            "1/2/3": {"name": "Light On/Off", "dpt": {"main": 1, "sub": 1}},
             "1/2/4": {"name": "Light Status"},
         },
     }
@@ -165,7 +167,12 @@ def test_get_building_with_project():
     assert func["id"] == "Func-1"
     assert func["name"] == "Dimming Light"
     assert func["type"] == "Dimming"
-    assert func["group_addresses"] == [{"address": "1/2/3", "name": "Light On/Off", "role": "Switch"}]
+    ga = func["group_addresses"][0]
+    assert ga["address"] == "1/2/3"
+    assert ga["name"] == "Light On/Off"  # resolved from the project, not the empty ref (#295)
+    assert "role" not in ga  # opaque UUID no longer surfaced
+    assert ga["dpts"][0]["main"] == 1 and ga["dpts"][0]["sub"] == 1
+    assert ga["dpts"][0]["name"].startswith("1.001")
 
     device = floor["devices"][0]
     assert device["address"] == "1.1.1"

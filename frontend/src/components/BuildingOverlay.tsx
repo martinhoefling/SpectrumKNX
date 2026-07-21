@@ -43,7 +43,7 @@ export interface DeviceNode {
 export interface FunctionGA {
   address: string;
   name: string;
-  role: string;
+  dpts?: { main: number; sub: number | null; name?: string | null }[];
 }
 
 export interface FunctionNode {
@@ -299,10 +299,12 @@ const KoRow: React.FC<{
           entries={ko.group_addresses.map(ga => ({
             address: ga.address,
             name: ga.name || '',
+            dpt: ko.dpts?.[0],
             sending: ga.address === sendingGA,
           }))}
           depth={depth + 1}
           latestTelegram={latestTelegram}
+          writeEnabled={writeEnabled}
           onFilterGAs={onFilterGAs}
           onLastSeen={onLastSeen}
         />
@@ -481,8 +483,9 @@ const FunctionRow: React.FC<{
   query: string;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
+  writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
-}> = ({ func, depth, query, onFilterGAs, onLastSeen, latestTelegram }) => {
+}> = ({ func, depth, query, onFilterGAs, onLastSeen, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`func:${func.id}`, false);
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => func.group_addresses.map(g => g.address), [func]);
@@ -539,10 +542,11 @@ const FunctionRow: React.FC<{
           entries={func.group_addresses.map(ga => ({
             address: ga.address,
             name: ga.name || '',
-            role: ga.role || undefined,
+            dpt: ga.dpts?.[0],
           }))}
           depth={depth + 1}
           latestTelegram={latestTelegram}
+          writeEnabled={writeEnabled}
           onFilterGAs={onFilterGAs}
           onLastSeen={onLastSeen}
         />
@@ -603,7 +607,7 @@ const SpaceRow: React.FC<{
           {visibleFunctions.map((func, i) => (
             <FunctionRow
               key={`${func.id}-${i}`} func={func} depth={depth + 1} query={query}
-              onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} latestTelegram={latestTelegram}
+              onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
           {visibleDevices.map(device => (

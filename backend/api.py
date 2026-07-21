@@ -602,10 +602,21 @@ def _build_space(space: dict, devices: dict, cos: dict, gas: dict, functions_dic
         if func:
             group_addresses = []
             for ga_addr, ga_ref in func.get("group_addresses", {}).items():
+                ga_master = gas.get(ga_addr) or {}
+                dpt = ga_master.get("dpt")
+                # The function ref's own name is empty and its "role" is an opaque
+                # UUID; resolve the real GA name + DPT from the project (#295).
                 group_addresses.append({
                     "address": ga_addr,
-                    "name": ga_ref.get("name", ""),
-                    "role": ga_ref.get("role", "")
+                    "name": ga_master.get("name") or ga_ref.get("name", ""),
+                    "dpts": (
+                        [{
+                            "main": dpt.get("main"),
+                            "sub": dpt.get("sub"),
+                            "name": format_dpt_name(dpt.get("main"), dpt.get("sub"))[0],
+                        }]
+                        if dpt else []
+                    ),
                 })
             space_functions.append({
                 "id": func_id,

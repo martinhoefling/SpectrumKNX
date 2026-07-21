@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Filter, Clock, ChevronUp, ChevronDown, Send } from 'lucide-react';
+import { format } from 'date-fns';
+import { Filter, Clock, ChevronUp, ChevronDown } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
+import { SendToGaPopover } from './SendToGaPopover';
 import type { Telegram } from '../hooks/useWebSocket';
 
 // Sortable table of group addresses with their last seen values (#269).
@@ -9,12 +11,13 @@ import type { Telegram } from '../hooks/useWebSocket';
 export interface GaTableEntry {
   address: string;
   name: string;
-  role?: string;
+  /** DPT of the address, resolved from the project (#295). */
+  dpt?: { main: number; sub: number | null; name?: string | null };
   /** The GA this KO sends on (first ETS link of a transmitting object). */
   sending?: boolean;
 }
 
-type SortKey = 'ga' | 'name' | 'role' | 'time';
+type SortKey = 'ga' | 'name' | 'time';
 
 interface GaValuesTableProps {
   entries: GaTableEntry[];
@@ -22,6 +25,8 @@ interface GaValuesTableProps {
   depth: number;
   /** Newest telegram from the live websocket feed; used to update values in place. */
   latestTelegram?: Telegram | null;
+  /** Show the per-row "send to this GA" action when the bus is writable. */
+  writeEnabled?: boolean;
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
 }
@@ -32,13 +37,17 @@ const gaSortValue = (address: string): number => {
   return parts.reduce((acc, p) => acc * 2048 + p, 0);
 };
 
-function ageOf(timestamp: string): string {
-  const diffMs = Date.now() - new Date(timestamp).getTime();
-  if (diffMs < 60_000) return `${Math.max(0, Math.round(diffMs / 1000))}s ago`;
-  if (diffMs < 3_600_000) return `${Math.round(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000) return `${Math.round(diffMs / 3_600_000)}h ago`;
-  return `${Math.round(diffMs / 86_400_000)}d ago`;
-}
+// "1.011 - Switch" → "1.011 Switch"; falls back to the bare "main.sub" number (#295).
+const formatDptLabel = (dpt?: GaTableEntry['dpt']): string | null => {
+  if (!dpt || dpt.main == null) return null;
+  const num = dpt.sub != null ? `${dpt.main}.${String(dpt.sub).padStart(3, '0')}` : String(dpt.main);
+  let desc = '';
+  if (dpt.name) {
+    const sep = dpt.name.indexOf(' - ');
+    desc = sep >= 0 ? dpt.name.slice(sep + 3) : dpt.name === num ? '' : dpt.name;
+  }
+  return desc ? `${num} ${desc}` : num;
+};
 
 const cellStyle: React.CSSProperties = {
   padding: '0.25rem 0.5rem',
@@ -84,7 +93,7 @@ const HeaderCell: React.FC<{
 };
 
 export const GaValuesTable: React.FC<GaValuesTableProps> = ({
-  entries, depth, latestTelegram, onFilterGAs, onLastSeen,
+  entries, depth, latestTelegram, writeEnabled, onFilterGAs, onLastSeen,
 }) => {
   const [valuesByGA, setValuesByGA] = useState<Record<string, Telegram>>({});
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null);
@@ -126,8 +135,6 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
       return null; // third click restores ETS order
     });
 
-  const hasRole = entries.some(e => e.role);
-
   const sorted = useMemo(() => {
     if (!sort) return entries;
     const dir = sort.dir === 'asc' ? 1 : -1;
@@ -137,8 +144,6 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
           return dir * (gaSortValue(a.address) - gaSortValue(b.address));
         case 'name':
           return dir * (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
-        case 'role':
-          return dir * (a.role || '').localeCompare(b.role || '', undefined, { sensitivity: 'base' });
         case 'time': {
           // Never-seen entries always sort to the end.
           const ta = valuesByGA[a.address] ? new Date(valuesByGA[a.address].timestamp).getTime() : null;
@@ -159,15 +164,16 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
           <tr>
             <HeaderCell label="GA" sortKey="ga" sort={sort} onSort={handleSort} />
             <HeaderCell label="Name" sortKey="name" sort={sort} onSort={handleSort} />
-            {hasRole && <HeaderCell label="Role" sortKey="role" sort={sort} onSort={handleSort} />}
-            <HeaderCell label="Value" sort={sort} onSort={handleSort} />
+            <HeaderCell label="DPT" sort={sort} onSort={handleSort} />
             <HeaderCell label="Time" sortKey="time" sort={sort} onSort={handleSort} />
+            <HeaderCell label="Value" sort={sort} onSort={handleSort} />
             <th style={{ ...cellStyle, borderBottom: '1px solid var(--border-subtle)', width: '1%' }} />
           </tr>
         </thead>
         <tbody>
           {sorted.map(entry => {
             const t = valuesByGA[entry.address];
+            const dptLabel = formatDptLabel(entry.dpt);
             return (
               <tr
                 key={entry.address}
@@ -175,32 +181,37 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
                 title={entry.sending ? 'Sending group address' : undefined}
               >
                 <td style={{ ...cellStyle, width: '1%' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <span style={{
+                  {/* The sending GA is framed rather than icon-tagged (#295). */}
+                  <span
+                    aria-label={entry.sending ? 'sending' : undefined}
+                    style={{
                       fontFamily: "'JetBrains Mono', monospace",
                       color: 'var(--accent-primary)',
                       fontWeight: entry.sending ? 700 : 400,
-                    }}>{entry.address}</span>
-                    {entry.sending && (
-                      <Send size={10} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} aria-label="sending" />
-                    )}
-                  </span>
+                      ...(entry.sending
+                        ? {
+                            display: 'inline-block',
+                            border: '1px solid var(--accent-primary)',
+                            borderRadius: '4px',
+                            padding: '0.02rem 0.3rem',
+                          }
+                        : {}),
+                    }}
+                  >{entry.address}</span>
                 </td>
-                <td style={{ ...cellStyle, maxWidth: 0, color: 'var(--text-dim)' }} title={entry.name || undefined}>
+                <td style={{ ...cellStyle, maxWidth: 300, color: 'var(--text-dim)' }} title={entry.name || undefined}>
                   {entry.name || '—'}
                 </td>
-                {hasRole && (
-                  <td style={{ ...cellStyle, width: '1%' }}>
-                    {entry.role ? (
-                      <span style={{
-                        fontSize: '0.62rem', fontWeight: 600, color: 'var(--text-dim)',
-                        textTransform: 'uppercase', background: 'var(--bg-tag)',
-                        padding: '0.05rem 0.25rem', borderRadius: '3px',
-                      }}>{entry.role}</span>
-                    ) : '—'}
-                  </td>
-                )}
-                <td style={{ ...cellStyle, width: '1%', fontWeight: 600, color: t ? 'var(--text-main)' : 'var(--text-dim)' }}>
+                <td style={{ ...cellStyle, width: '1%', color: 'var(--text-dim)' }} title={dptLabel || undefined}>
+                  {dptLabel || '—'}
+                </td>
+                <td
+                  style={{ ...cellStyle, width: '1%', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}
+                  title={t ? `by ${t.source_address}${t.source_name ? ` (${t.source_name})` : ''}` : 'Never updated'}
+                >
+                  {t ? format(new Date(t.timestamp), 'yyyy-MM-dd HH:mm:ss.SS') : '—'}
+                </td>
+                <td style={{ ...cellStyle, fontWeight: 600, color: t ? 'var(--text-main)' : 'var(--text-dim)' }}>
                   {t ? (
                     <>
                       {t.value_formatted ?? t.value_numeric ?? '—'}
@@ -208,31 +219,36 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
                     </>
                   ) : 'never seen'}
                 </td>
-                <td
-                  style={{ ...cellStyle, width: '1%', color: 'var(--text-dim)' }}
-                  title={t ? `Last updated: ${new Date(t.timestamp).toLocaleString()}\nby ${t.source_address}${t.source_name ? ` (${t.source_name})` : ''}` : 'Never updated'}
-                >
-                  {t ? ageOf(t.timestamp) : '—'}
-                </td>
                 <td style={{ ...cellStyle, width: '1%' }}>
-                  <button
-                    style={iconBtnStyle}
-                    title="Filter by this group address"
-                    onClick={e => { e.stopPropagation(); onFilterGAs([entry.address]); }}
-                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
-                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
-                  >
-                    <Filter size={11} />
-                  </button>
-                  <button
-                    style={iconBtnStyle}
-                    title="Show last seen values"
-                    onClick={e => { e.stopPropagation(); onLastSeen([entry.address], 'ga'); }}
-                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
-                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
-                  >
-                    <Clock size={11} />
-                  </button>
+                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    {writeEnabled && entry.dpt?.main != null && (
+                      <SendToGaPopover
+                        address={entry.address}
+                        name={entry.name}
+                        dptMain={entry.dpt.main}
+                        dptSub={entry.dpt.sub}
+                        buttonStyle={iconBtnStyle}
+                      />
+                    )}
+                    <button
+                      style={iconBtnStyle}
+                      title="Filter by this group address"
+                      onClick={e => { e.stopPropagation(); onFilterGAs([entry.address]); }}
+                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                    >
+                      <Filter size={11} />
+                    </button>
+                    <button
+                      style={iconBtnStyle}
+                      title="Show last seen values"
+                      onClick={e => { e.stopPropagation(); onLastSeen([entry.address], 'ga'); }}
+                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                    >
+                      <Clock size={11} />
+                    </button>
+                  </span>
                 </td>
               </tr>
             );
