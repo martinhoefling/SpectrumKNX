@@ -289,6 +289,28 @@ describe('useTelegramCache', () => {
     expect(saved.some(([s]) => s === 0)).toBe(false);
   });
 
+  it('stops backing off older history once the buffer is full (#313)', async () => {
+    // Buffer size 2, filled with the two newest (live) telegrams.
+    const { result } = renderHook(() => useTelegramCache(2));
+    await settle(result);
+    act(() => {
+      result.current.addLive(tg(8000, 'live1'));
+      result.current.addLive(tg(9000, 'live2'));
+    });
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.live2', '1.2.live1']);
+
+    // Requesting older history: every fetched row would be older than the
+    // buffer's oldest entry and evicted on arrival, so no backend request is made.
+    const before = fetchCalls.filter(u => u.includes('/api/telegrams')).length;
+    await act(async () => {
+      await result.current.loadRange(1000, 5000);
+    });
+    const loadFetches = fetchCalls.filter(u => u.includes('/api/telegrams')).length - before;
+
+    expect(loadFetches).toBe(0);
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.live2', '1.2.live1']);
+  });
+
   it('records a load failure without breaking the buffer', async () => {
     const { result } = renderHook(() => useTelegramCache(1000));
     await settle(result);

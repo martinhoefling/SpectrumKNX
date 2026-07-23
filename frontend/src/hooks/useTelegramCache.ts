@@ -148,6 +148,14 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
       let cursor = gapEnd;
       let fetched = 0;
       while (cursor >= gapStart && fetched < budget) {
+        // Once the buffer is full, anything older than its oldest entry is
+        // evicted the instant it arrives. Stop paging backward instead of
+        // fetching chunks only to discard them (#313). The skipped remainder
+        // stays uncovered so it loads on demand once there is room.
+        const buf = bufferRef.current!;
+        if (buf.length >= maxSize && buf.oldestTs !== null && cursor < buf.oldestTs) {
+          break;
+        }
         const limit = Math.min(HISTORY_CHUNK_SIZE, budget - fetched);
         const { entries, limitReached } = await fetchRange(gapStart, cursor, limit);
         if (entries.length === 0) {
@@ -172,7 +180,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
       }
       return fetched;
     },
-    [mergeIntoBuffer, publish],
+    [mergeIntoBuffer, publish, maxSize],
   );
 
   /**

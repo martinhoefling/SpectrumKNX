@@ -585,6 +585,10 @@ function App() {
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.directions.length + activeFilters.dpts.length
     : 0;
 
+  // The buffer holds at most `loadLimit` (newest) telegrams; once it is at
+  // capacity there is no room to load older history (#313).
+  const bufferFull = liveTelegrams.length >= loadLimit;
+
   // Inline "buffer full" marker shown next to the count in the stats pill (#284).
   const bufferLimitWarning = filteredLiveTelegrams.length >= loadLimit ? (
     <span
@@ -662,8 +666,20 @@ function App() {
                     <button
                       className="icon-button"
                       onClick={() => setIsHistoryLoaderOpen(true)}
-                      title={isHistoryLoading ? 'History read in progress…' : 'Load history'}
-                      style={{ color: isHistoryLoading ? 'var(--accent-primary)' : 'var(--text-dim)', padding: '0.15rem' }}
+                      disabled={bufferFull}
+                      title={
+                        bufferFull
+                          ? `Buffer full (${loadLimit.toLocaleString()}); clear it or raise the limit to load more history`
+                          : isHistoryLoading
+                            ? 'History read in progress…'
+                            : 'Load history'
+                      }
+                      style={{
+                        color: isHistoryLoading ? 'var(--accent-primary)' : 'var(--text-dim)',
+                        padding: '0.15rem',
+                        opacity: bufferFull ? 0.4 : 1,
+                        cursor: bufferFull ? 'not-allowed' : 'pointer',
+                      }}
                     >
                       <Download size={15} />
                     </button>

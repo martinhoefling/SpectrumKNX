@@ -73,6 +73,11 @@ export class TelegramBufferService {
     return this._buffer.length;
   }
 
+  /** Timestamp of the oldest buffered entry, or null when empty. */
+  get oldestTs(): number | null {
+    return this._buffer.length > 0 ? this._buffer[0].ts : null;
+  }
+
   get isEmpty(): boolean {
     return this._buffer.length === 0;
   }
