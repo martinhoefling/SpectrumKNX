@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.16.2
+
+### Added
+
+- **Plot group addresses without a project datatype**: the visualization now offers a datatype picker for a selected group address that has no DPT in the ETS project, decoding its raw payload (8/16/32-bit integers, the KNX 2-byte float, IEEE 4-byte float, percent scalings) so it can be graphed (#315).
+- **"Load cached telegrams on startup" setting**: the group monitor restores its browser cache on load by default; turning the new setting off starts the view empty, showing only live telegrams and manual history loads (#246).
+
+### Changed
+
+- **History loading stops when the buffer is full**: paging older history no longer churns through chunks that are immediately evicted, and "Load history" is disabled while the buffer is full (#313).
+- **Readable visualization time ruler when zoomed out**: wider tick spacing on multi-day ranges, plus an always-visible start/end time under each chart (#314).
+
+### Fixed
+
+- **Stable visualization chart order**: the per-metric charts no longer change vertical order as live telegrams or history chunks arrive (#312).
+- **Fewer group-monitor gaps**: a time range is only marked loaded once its telegrams are actually cached, so a failed cache write no longer leaves a permanent gap in the timeline (#317).
+
 ## 1.16.1
 
 ### Added
