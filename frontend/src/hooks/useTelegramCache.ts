@@ -85,8 +85,13 @@ async function fetchRange(startMs: number, endMs: number, limit: number): Promis
  *
  * The persistent cache is advisory: every IDB/backend failure degrades to
  * live-only behavior identical to the pre-cache app.
+ *
+ * `restoreFromCache` (default on) controls the startup restore only: when off,
+ * the buffer starts empty and only live telegrams and explicit `loadRange`
+ * calls (the history loader) populate it. Live telegrams are still flushed to
+ * the cache, so re-enabling the setting restores them on the next reload.
  */
-export function useTelegramCache(maxSize: number): TelegramCache {
+export function useTelegramCache(maxSize: number, restoreFromCache = true): TelegramCache {
   const bufferRef = useRef<TelegramBufferService | null>(null);
   bufferRef.current ??= new TelegramBufferService(maxSize);
   const cacheRef = useRef<TelegramCacheService | null>(null);
@@ -223,6 +228,9 @@ export function useTelegramCache(maxSize: number): TelegramCache {
 
   // ── Startup: restore cache + coverage, then fill gaps up to now ─────────────
   useEffect(() => {
+    // When restore is disabled the view starts empty; only live telegrams and
+    // manual history loads populate it (the setting is read once, at mount).
+    if (!restoreFromCache) return;
     let cancelled = false;
     void runLoad(async () => {
       const coverage = coverageRef.current!;

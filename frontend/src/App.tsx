@@ -203,6 +203,10 @@ function App() {
     };
   });
   const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getPref('rateMode') as 's' | 'm' | 'h') || 's');
+  // Restore the browser telegram cache (and fill the gap from the backend) on
+  // startup. On by default; when off the view starts empty and shows only live
+  // telegrams and manual history loads (#246).
+  const [restoreOnStartup, setRestoreOnStartup] = useState(() => getPref('restoreOnStartup') !== 'false');
 
   const [isHistoryLoaderOpen, setIsHistoryLoaderOpen] = useState(false);
   const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(
@@ -222,7 +226,7 @@ function App() {
     isLoading: isHistoryLoading,
     loadError: historyLoadError,
     clear: clearTelegrams,
-  } = useTelegramCache(loadLimit);
+  } = useTelegramCache(loadLimit, restoreOnStartup);
   const [isPaused, setIsPaused] = useState(false);
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
@@ -374,7 +378,8 @@ function App() {
     setPref('loadLimit', loadLimit.toString());
     setPref('visibleColumns', JSON.stringify(visibleColumns));
     setPref('rateMode', rateMode);
-  }, [loadLimit, visibleColumns, rateMode]);
+    setPref('restoreOnStartup', String(restoreOnStartup));
+  }, [loadLimit, visibleColumns, rateMode, restoreOnStartup]);
 
   // ── Persist workspace (#211) ────────────────────────────────────────────────
   const workspaceView: WorkspaceView = isVisualizerOpen
@@ -833,6 +838,21 @@ function App() {
                   onChange={e => setLoadLimit(Number(e.target.value))}
                 />
               </div>
+
+              <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
+                Startup
+              </h3>
+              <button
+                className="setting-item"
+                onClick={() => setRestoreOnStartup(v => !v)}
+                title="Restore recent telegrams from the browser cache and fill the gap from the server on load. When off, the view starts empty and shows only live telegrams and manual history loads."
+                style={{ padding: '0.5rem', background: 'var(--bg-subtle)', borderRadius: 6, marginBottom: '2rem' }}
+              >
+                <div className={`checkbox ${restoreOnStartup ? 'checked' : ''}`} style={{ width: 14, height: 14, border: '1px solid var(--border-color)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {restoreOnStartup && <div style={{ width: 8, height: 8, background: 'white', borderRadius: 2 }} />}
+                </div>
+                <span style={{ fontSize: '0.85rem' }}>Load cached telegrams on startup</span>
+              </button>
 
               <>
                 <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>

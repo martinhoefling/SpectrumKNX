@@ -111,6 +111,34 @@ describe('useTelegramCache', () => {
     expect(Date.parse(params.get('start_time')!)).toBe(2001);
   });
 
+  it('skips the startup restore when restoreFromCache is off, keeping live and manual loads', async () => {
+    seedIdb([tg(1000, 'a'), tg(2000, 'b')]);
+    localStorage.setItem(COVERAGE_STORAGE_KEY, JSON.stringify([[1000, 2000]]));
+
+    const { result } = renderHook(() => useTelegramCache(1000, false));
+    await settle(result);
+
+    // Nothing restored and nothing fetched from the backend on startup.
+    expect(result.current.telegrams).toEqual([]);
+    expect(fetchCalls.filter(u => u.includes('/api/telegrams'))).toEqual([]);
+
+    // Live telegrams still flow into the view.
+    act(() => {
+      result.current.addLive(tg(3000, 'live'));
+    });
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.live']);
+
+    // A manual history load still serves cache hits.
+    await act(async () => {
+      await result.current.loadRange(1000, 2000);
+    });
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual([
+      '1.2.live',
+      '1.2.b',
+      '1.2.a',
+    ]);
+  });
+
   it('hydrates only the newest slice of a large cache on startup, keeping the rest loadable (#284)', async () => {
     // Seed more than the 5000 initial-load budget, all already covered so no
     // gap fetch masks the cap.
