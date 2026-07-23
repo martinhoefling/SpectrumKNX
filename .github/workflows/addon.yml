@@ -10,8 +10,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Explicit lowercase image name (must match config.yaml `image:` field)
-  IMAGE_BASE: ghcr.io/martinhoefling/spectrum-knx-addon
 
 jobs:
   build-and-push-addon:
@@ -37,6 +35,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Compute image base (owner-scoped, fork-friendly)
+        id: image
+        # Derive the GHCR namespace from the repository owner so forks publish
+        # to their own packages instead of the upstream namespace. The canonical
+        # repo (owner "martinhoefling") is unaffected. GHCR requires lowercase.
+        run: |
+          OWNER="${{ github.repository_owner }}"
+          echo "base=${REGISTRY}/${OWNER,,}/spectrum-knx-addon" >> "$GITHUB_OUTPUT"
+
       - name: Read Add-on version from config.yaml
         id: addon_version
         run: |
@@ -61,7 +68,7 @@ jobs:
       - name: Check if image tag already exists
         id: check_tag
         run: |
-          IMAGE="${{ env.IMAGE_BASE }}-${{ matrix.ha_arch }}:${{ steps.addon_version.outputs.version }}"
+          IMAGE="${{ steps.image.outputs.base }}-${{ matrix.ha_arch }}:${{ steps.addon_version.outputs.version }}"
           # Only skip on main branch pushes to allow manual runs/tag releases to overwrite if needed
           if [[ "${{ github.ref }}" == "refs/heads/main" ]] && docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -81,5 +88,5 @@ jobs:
             BUILD_FROM=${{ matrix.base_image }}
           push: true
           tags: |
-            ${{ env.IMAGE_BASE }}-${{ matrix.ha_arch }}:${{ steps.addon_version.outputs.version }}
-            ${{ env.IMAGE_BASE }}-${{ matrix.ha_arch }}:latest
+            ${{ steps.image.outputs.base }}-${{ matrix.ha_arch }}:${{ steps.addon_version.outputs.version }}
+            ${{ steps.image.outputs.base }}-${{ matrix.ha_arch }}:latest
