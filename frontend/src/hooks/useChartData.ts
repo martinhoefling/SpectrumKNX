@@ -135,6 +135,12 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
       });
     }
 
+    // Order buckets by metric (unit), not by which telegram arrived first. The
+    // grouping Map above preserves insertion order, so without this the vertical
+    // order of the charts flipped whenever a new telegram or history chunk made
+    // a different metric the earliest one plotted (#312).
+    buckets.sort((a, b) => a.unit.localeCompare(b.unit));
+
     return { buckets, minTime, maxTime };
   }, [telegrams, selectedTargets]);
 }

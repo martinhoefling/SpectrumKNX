@@ -43,6 +43,28 @@ describe('useChartData — DPT backfill / duplicate graphs (#206)', () => {
   });
 });
 
+describe('useChartData — stable bucket order (#312)', () => {
+  test('orders buckets by metric regardless of which telegram is earliest', () => {
+    // '%' arrives first here, 'W' arrives first when reordered — the vertical
+    // order of the charts must not depend on telegram timing.
+    const early = [
+      at(1, { target_address: '1/1/1', dpt_main: 5, dpt_sub: 1, unit: '%', value_numeric: 50 }),
+      at(2, { target_address: '2/2/2', dpt_main: 14, unit: 'W', value_numeric: 1200 }),
+    ];
+    const swapped = [
+      at(1, { target_address: '2/2/2', dpt_main: 14, unit: 'W', value_numeric: 1200 }),
+      at(2, { target_address: '1/1/1', dpt_main: 5, dpt_sub: 1, unit: '%', value_numeric: 50 }),
+    ];
+    const targets = ['1/1/1', '2/2/2'];
+
+    const a = renderHook(() => useChartData(early, targets)).result.current.buckets.map(b => b.unit);
+    const b = renderHook(() => useChartData(swapped, targets)).result.current.buckets.map(b => b.unit);
+
+    expect(a).toEqual(['%', 'W']);
+    expect(b).toEqual(['%', 'W']);
+  });
+});
+
 describe('useChartData — extend last segment to newest telegram (#208)', () => {
   test("a binary series' held state extends to the newest telegram of another GA", () => {
     const telegrams = [
