@@ -13,7 +13,9 @@ h11==0.16.0
 idna==3.18
 ifaddr==0.2.0
 iniconfig==2.3.0
-knx-telegram-store==0.10.2
+# Temporary git pin for the unreleased MCP tools (knx_telegram_store.mcp, 0.11.0).
+# Revert to `knx-telegram-store==0.11.0` once it is published to PyPI.
+knx-telegram-store @ git+https://github.com/XKNX/knx-telegram-store.git@33aebf42baac37102ee8e8f9801629cf6f8cd4ff
 packaging==26.2
 pluggy==1.6.0
 pycparser==3.0
@@ -41,3 +43,14 @@ pytest-asyncio==1.4.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
 pre-commit==4.6.0
+# MCP server (SDK + transitives) for the /mcp endpoint.
+mcp==1.28.1
+PyJWT==2.13.0
+attrs==26.1.0
+httpx-sse==0.4.3
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+pydantic-settings==2.14.2
+referencing==0.37.0
+rpds-py==2026.6.3
+sse-starlette==3.4.6
