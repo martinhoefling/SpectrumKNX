@@ -8,10 +8,13 @@ import type { Telegram } from './useWebSocket';
 
 // In-memory IDB stand-in shared with the cache service.
 const _idb = new Map<string, { ts: number; telegram: Telegram }>();
+// Flip on to make cache writes reject (simulates IndexedDB quota failures).
+let storeShouldFail = false;
 
 vi.mock('idb-keyval', () => ({
   createStore: () => 'mock-store',
   setMany: async (pairs: [string, { ts: number; telegram: Telegram }][]) => {
+    if (storeShouldFail) throw new Error('QuotaExceededError');
     for (const [k, v] of pairs) _idb.set(k, v);
   },
   entries: async () => Array.from(_idb.entries()),
@@ -48,6 +51,7 @@ const jsonRes = (body: unknown) =>
 
 beforeEach(() => {
   _idb.clear();
+  storeShouldFail = false;
   localStorage.clear();
   telegramResponses = [];
   fetchCalls = [];
@@ -309,6 +313,26 @@ describe('useTelegramCache', () => {
 
     expect(loadFetches).toBe(0);
     expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.live2', '1.2.live1']);
+  });
+
+  it('does not mark a range covered when the cache write fails (#317)', async () => {
+    localStorage.setItem(COVERAGE_STORAGE_KEY, JSON.stringify([[10_000, 10_000]]));
+    telegramResponses.push({ telegrams: [] }); // startup gap fill
+    const { result } = renderHook(() => useTelegramCache(1000));
+    await settle(result);
+
+    // The load fetches a row, but persisting it to the cache fails.
+    storeShouldFail = true;
+    telegramResponses.push({ telegrams: [tg(5000, 'x')] });
+    await act(async () => {
+      await result.current.loadRange(0, 6000);
+    });
+
+    // The row is painted, but coverage must not claim its range — otherwise a
+    // reload would trust coverage and never refetch the (uncached) row.
+    expect(result.current.telegrams.map(t => t.source_address)).toContain('1.2.x');
+    const saved = JSON.parse(localStorage.getItem(COVERAGE_STORAGE_KEY)!) as [number, number][];
+    expect(saved.some(([s, e]) => s <= 5000 && 5000 <= e)).toBe(false);
   });
 
   it('records a load failure without breaking the buffer', async () => {

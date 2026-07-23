@@ -164,13 +164,19 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
           break;
         }
         if (mergeIntoBuffer(entries)) publish();
-        cacheRef.current!.store(entries).catch(() => {});
+        // Mark the range covered only once its rows are actually persisted. If
+        // the cache write fails (e.g. IndexedDB quota), leaving coverage claiming
+        // a range the cache can't serve surfaces later as a permanent gap (#317).
+        const stored = await cacheRef.current!.store(entries).then(
+          () => true,
+          () => false,
+        );
         fetched += entries.length;
         const oldestTs = entries[entries.length - 1].ts;
-        coverageRef.current!.addCovered(oldestTs, cursor);
+        if (stored) coverageRef.current!.addCovered(oldestTs, cursor);
         if (!limitReached) {
           // The whole remaining window came back — the gap is fully covered.
-          coverageRef.current!.addCovered(gapStart, cursor);
+          if (stored) coverageRef.current!.addCovered(gapStart, cursor);
           break;
         }
         // Page further back. Re-including `oldestTs` (dedup handles the repeat)
