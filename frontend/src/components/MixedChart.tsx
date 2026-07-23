@@ -38,6 +38,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
 
   const { unit, isBinary, timestamps, series } = bucket;
 
+  // Show a date alongside times once the visible range crosses midnight (#281).
+  const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
+
   // Prepare data array: [ [x], [y1], [y2] ]
   // We divide timestamps by 1000 since uPlot expects unix seconds by default
   const data: uPlot.AlignedData = [
@@ -70,9 +73,6 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
     const style = getComputedStyle(document.documentElement);
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
     const axisStroke = style.getPropertyValue('--text-dim').trim();
-
-    // Show a date alongside times once the visible range crosses midnight (#281).
-    const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
 
     // Configure Y-Axis scale limits based on smart defaults
     let scaleConfig: uPlot.Scale = {};
@@ -133,7 +133,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
       },
       axes: [
         {
-          space: 50,
+          // Wider minimum tick spacing when labels carry a date, so the
+          // "MM-DD HH:mm" ticks don't overlap into an unreadable ruler (#314).
+          space: multiDay ? 95 : 55,
           grid: { stroke: gridStroke, width: 1 },
           stroke: axisStroke,
           values: (_u, splits) => splits.map(v => formatAxisTime(v * 1000, multiDay))
@@ -183,6 +185,14 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
              new telegram doesn't snap the x-axis back to the full range (#281). */}
          <UplotReact options={options} data={data} resetScales={false} />
       </div>
+      {/* Always spell out the visible window's start and end, so the range is
+          readable even when the axis ticks are sparse or zoomed out (#314). */}
+      {minTime != null && maxTime != null && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+          <span>{formatFullTime(minTime, multiDay)}</span>
+          <span>{formatFullTime(maxTime, multiDay)}</span>
+        </div>
+      )}
     </div>
   );
 };

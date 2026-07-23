@@ -45,6 +45,12 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
     ...series.map(s => s.data)
   ];
 
+  // Show a date alongside times once the visible range crosses midnight (#281).
+  const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
+  // Series labels are drawn in a fixed gutter on the right (see padding below);
+  // keep the start/end caption aligned to the actual plot area (#314).
+  const LABEL_GUTTER = 180;
+
   const rowHeight = 40;
   const rowGap = 4;
   const chartHeight = series.length * (rowHeight + rowGap) + 60;
@@ -62,9 +68,6 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
     const axisStroke = style.getPropertyValue('--text-dim').trim();
     const accentPrimary = style.getPropertyValue('--accent-primary').trim();
-
-    // Show a date alongside times once the visible range crosses midnight (#281).
-    const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
 
     const timelinePlugin = () => ({
       hooks: {
@@ -152,7 +155,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
     return {
       width,
       height: chartHeight,
-      padding: [0, 180, 0, 0],
+      padding: [0, LABEL_GUTTER, 0, 0],
       cursor: {
         sync: { key: syncCursor.key },
         drag: { x: true, y: false, setScale: false }
@@ -186,7 +189,9 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
       },
       axes: [
         {
-          space: 50,
+          // Wider tick spacing for the longer "MM-DD HH:mm" labels so the ruler
+          // stays readable instead of overlapping when zoomed out (#314).
+          space: multiDay ? 95 : 55,
           stroke: axisStroke,
           grid: { stroke: gridStroke },
           values: (_u, splits) => splits.map(v => formatAxisTime(v * 1000, multiDay))
@@ -222,6 +227,14 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
              new telegram doesn't snap the x-axis back to the full range (#281). */}
          <UplotReact options={options} data={data} resetScales={false} />
       </div>
+      {/* Always spell out the visible window's start and end (#314). The right
+          gutter holds the series labels, so pad the caption to match the plot. */}
+      {minTime != null && maxTime != null && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', paddingRight: LABEL_GUTTER, fontSize: '0.7rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+          <span>{formatFullTime(minTime, multiDay)}</span>
+          <span>{formatFullTime(maxTime, multiDay)}</span>
+        </div>
+      )}
     </div>
   );
 };
