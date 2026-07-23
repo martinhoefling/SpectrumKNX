@@ -65,7 +65,9 @@ def mcp_status() -> dict[str, Any]:
 def _build_server() -> FastMCP:
     # stateless_http keeps each request self-contained — no server-side session
     # state to manage, which is all these read tools need and simplifies mounting.
-    mcp = FastMCP("spectrum-knx", stateless_http=True)
+    # streamable_http_path="/" so that mounting the app at "/mcp" serves the
+    # endpoint at "/mcp" rather than the doubled-up "/mcp/mcp".
+    mcp = FastMCP("spectrum-knx", stateless_http=True, streamable_http_path="/")
 
     @mcp.tool()
     async def query_telegrams(

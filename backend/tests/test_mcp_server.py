@@ -68,6 +68,14 @@ async def test_lists_read_only_tools(server):
     } <= names
 
 
+def test_endpoint_serves_at_mount_root_not_doubled():
+    # FastMCP must serve at "/" internally so mounting the app at "/mcp" yields
+    # "/mcp" and not the doubled-up "/mcp/mcp" (#332).
+    paths = [getattr(r, "path", None) for r in mcp_server.get_asgi_app().routes]
+    assert "/" in paths
+    assert "/mcp" not in paths
+
+
 @pytest.mark.asyncio
 async def test_query_telegrams(server):
     result = await _structured(server, "query_telegrams", {"destinations": ["1/1/1"]})
