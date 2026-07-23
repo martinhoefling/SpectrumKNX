@@ -26,7 +26,42 @@ export const Visualizer: React.FC<VisualizerProps> = ({
 }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
-  const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
+
+  // Datatype chosen per group address for GAs with no DPT in the project, so
+  // their raw payloads can be decoded and plotted (#315). Persisted so the
+  // choice survives reloads.
+  const [dptOverrides, setDptOverrides] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(getPref('vizDptOverrides') || '{}') as Record<string, string>;
+    } catch {
+      return {};
+    }
+  });
+
+  const setDptOverride = (address: string, key: string) => {
+    setDptOverrides(prev => {
+      const next = { ...prev };
+      if (key) next[address] = key;
+      else delete next[address];
+      setPref('vizDptOverrides', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // GAs whose telegrams never carry a decoded DPT but do carry raw byte
+  // payloads — the ones that need a manual datatype to be plottable (#315).
+  const untypedTargets = useMemo(() => {
+    const decoded = new Set<string>();
+    const rawArray = new Set<string>();
+    for (const t of telegrams) {
+      if (!t.target_address) continue;
+      if (t.dpt_main != null) decoded.add(t.target_address);
+      else if (Array.isArray(t.value_json)) rawArray.add(t.target_address);
+    }
+    return new Set([...rawArray].filter(a => !decoded.has(a)));
+  }, [telegrams]);
+
+  const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets, dptOverrides);
   const [stepped, setStepped] = useState(() => getPref('chartStepped') !== 'false');
   const [showDots, setShowDots] = useState(() => getPref('chartDots') !== 'false');
   const [linkCopied, setLinkCopied] = useState(false);
@@ -130,6 +165,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           selectedTargets={selectedTargets}
           onTargetsChange={handleTargetsChange}
           onClose={onClose}
+          untypedTargets={untypedTargets}
+          dptOverrides={dptOverrides}
+          onDptOverrideChange={setDptOverride}
         />
 
         {/* Chart Area */}

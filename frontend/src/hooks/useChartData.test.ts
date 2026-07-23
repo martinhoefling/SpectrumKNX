@@ -43,6 +43,42 @@ describe('useChartData — DPT backfill / duplicate graphs (#206)', () => {
   });
 });
 
+describe('useChartData — datatype override for untyped GAs (#315)', () => {
+  test('untyped raw-byte telegrams do not plot without a chosen datatype', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', value_json: [0x0c, 0x1a] as unknown as Record<string, unknown> }),
+      at(2, { target_address: '1/1/1', value_json: [0x0c, 0x1b] as unknown as Record<string, unknown> }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1']));
+    // A bucket exists but the raw byte arrays decode to nothing plottable.
+    const series = result.current.buckets[0]?.series[0];
+    expect(series?.data.every(v => v === null)).toBe(true);
+  });
+
+  test('a chosen datatype decodes raw payloads and groups by its unit', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', value_json: [0x0c, 0x1a] as unknown as Record<string, unknown> }),
+      at(2, { target_address: '1/1/1', value_json: [0x00, 0x00] as unknown as Record<string, unknown> }),
+    ];
+    // DPT 9 (2-byte float): 0x0C1A ≈ 21.0, 0x0000 = 0.
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1'], { '1/1/1': '9' }));
+    const bucket = result.current.buckets[0];
+    expect(bucket.unit).toBe('DPT 9');
+    const series = bucket.series.find(s => s.address === '1/1/1')!;
+    expect(series.data[0]).toBeCloseTo(21.0, 4);
+    expect(series.data[series.data.length - 1]).toBeCloseTo(0, 6);
+  });
+
+  test('a percent datatype buckets under its unit', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', value_json: [0xff] as unknown as Record<string, unknown> }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1'], { '1/1/1': '5.001' }));
+    expect(result.current.buckets[0].unit).toBe('%');
+    expect(result.current.buckets[0].series[0].data[0]).toBeCloseTo(100, 6);
+  });
+});
+
 describe('useChartData — stable bucket order (#312)', () => {
   test('orders buckets by metric regardless of which telegram is earliest', () => {
     // '%' arrives first here, 'W' arrives first when reordered — the vertical

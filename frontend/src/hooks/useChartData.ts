@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Telegram } from '../hooks/useWebSocket';
+import { decodeRawDpt, rawDptUnit } from '../utils/rawDpt';
 
 export interface ChartSeries {
   address: string;
@@ -24,11 +25,24 @@ export interface ChartDataResult {
   maxTime: number | null;
 }
 
-export function useChartData(telegrams: Telegram[], selectedTargets: string[]): ChartDataResult {
+export function useChartData(
+  telegrams: Telegram[],
+  selectedTargets: string[],
+  // Per-GA datatype chosen for group addresses with no DPT in the project, so
+  // their raw payloads can be decoded and plotted (#315). Keyed by address.
+  dptOverrides: Record<string, string> = {},
+): ChartDataResult {
   return useMemo(() => {
     if (selectedTargets.length === 0 || telegrams.length === 0) {
       return { buckets: [], minTime: null, maxTime: null };
     }
+
+    // Decode an untyped GA's raw payload with its chosen datatype, if any.
+    const overrideValue = (t: Telegram): number | null => {
+      const key = t.dpt_main == null ? dptOverrides[t.target_address] : undefined;
+      if (!key || !Array.isArray(t.value_json)) return null;
+      return decodeRawDpt(t.value_json as number[], key);
+    };
 
     // A GA whose DPT is known from the project produces decoded telegrams
     // (dpt_main set). Telegrams received *before* a project import stay
@@ -69,7 +83,13 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
     const grouped = new Map<string, typeof relevant>();
 
     for (const t of relevant) {
+      const overrideKey = t.dpt_main == null ? dptOverrides[t.target_address] : undefined;
       let bucketKey = t.unit || 'unknown';
+      if (overrideKey) {
+        // Group decoded-untyped GAs by their chosen unit (or the datatype key
+        // when dimensionless) so they don't fall into the 'unknown' bucket (#315).
+        bucketKey = rawDptUnit(overrideKey) || `DPT ${overrideKey}`;
+      }
       if (t.dpt_main === 1) bucketKey = 'binary';
       // Also catch anything with a boolean value_json if type is unknown
       if (typeof t.value_json === 'boolean') bucketKey = 'binary';
@@ -118,6 +138,9 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
               val = match.value_json ? 1 : 0;
             } else if (val === null && typeof match.value_json === 'number') {
               val = match.value_json;
+            } else if (val === null) {
+              // Untyped GA: decode the raw payload with the user-chosen DPT (#315).
+              val = overrideValue(match);
             }
             if (val !== null) lastVal = Number(val);
           }
@@ -142,5 +165,5 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
     buckets.sort((a, b) => a.unit.localeCompare(b.unit));
 
     return { buckets, minTime, maxTime };
-  }, [telegrams, selectedTargets]);
+  }, [telegrams, selectedTargets, dptOverrides]);
 }

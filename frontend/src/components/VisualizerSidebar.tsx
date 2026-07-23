@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { LineChart, X, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { OptionRow } from './FilterPanel';
+import { RAW_DPT_OPTIONS } from '../utils/rawDpt';
 
 interface TargetCount {
   address: string;
@@ -14,9 +15,18 @@ interface VisualizerSidebarProps {
   selectedTargets: string[];
   onTargetsChange: (targets: string[]) => void;
   onClose: () => void;
+  /** Selected GAs with no project DPT that need a manual datatype to plot (#315). */
+  untypedTargets?: Set<string>;
+  /** Chosen datatype key per address. */
+  dptOverrides?: Record<string, string>;
+  /** Assign (or clear, with '') the datatype for a GA. */
+  onDptOverrideChange?: (address: string, key: string) => void;
 }
 
-export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams, selectedTargets, onTargetsChange, onClose }) => {
+export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
+  telegrams, selectedTargets, onTargetsChange, onClose,
+  untypedTargets, dptOverrides = {}, onDptOverrideChange,
+}) => {
   const [search, setSearch] = useState('');
 
   // Extract unique targets and their counts from the currently plotted dataset
@@ -88,16 +98,42 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
           Select targets from the currently active {telegrams.length.toLocaleString()} telegrams to plot their metrics over time.
         </div>
 
-        {filteredTargets.map(t => (
-          <OptionRow
-            key={t.address}
-            label={t.address}
-            sublabel={t.name}
-            checked={selectedTargets.includes(t.address)}
-            count={t.count}
-            onToggle={() => toggle(t.address)}
-          />
-        ))}
+        {filteredTargets.map(t => {
+          const selected = selectedTargets.includes(t.address);
+          // Offer a datatype picker for a selected GA that has no project DPT,
+          // so its raw payload can be decoded into a plottable value (#315).
+          const needsDpt = selected && untypedTargets?.has(t.address) && onDptOverrideChange;
+          return (
+            <React.Fragment key={t.address}>
+              <OptionRow
+                label={t.address}
+                sublabel={t.name}
+                checked={selected}
+                count={t.count}
+                onToggle={() => toggle(t.address)}
+              />
+              {needsDpt && (
+                <div style={{ padding: '0 0.25rem 0.5rem 1.75rem', marginTop: '-0.25rem' }}>
+                  <select
+                    value={dptOverrides[t.address] ?? ''}
+                    onChange={e => onDptOverrideChange(t.address, e.target.value)}
+                    title="This group address has no datatype in the project. Pick one to decode and plot its raw payload."
+                    style={{
+                      width: '100%', background: 'var(--bg-tag)', color: 'var(--text-main)',
+                      border: '1px solid var(--border-color)', borderRadius: '6px',
+                      padding: '0.35rem 0.5rem', fontSize: '0.75rem',
+                    }}
+                  >
+                    <option value="">No datatype — pick to plot…</option>
+                    {RAW_DPT_OPTIONS.map(o => (
+                      <option key={o.key} value={o.key}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
     </div>
   );
