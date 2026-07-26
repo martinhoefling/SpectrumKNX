@@ -24,8 +24,11 @@ dependencies = [
     "SQLAlchemy",
     "uvicorn",
     "websockets",
-    "xknx",
-    "xknxproject",
+    # Git pins for the unreleased MCP tools (xknx.mcp / xknxproject.mcp).
+    # Revert to "xknx"/"xknxproject" once XKNX/xknx#1876 and
+    # XKNX/xknxproject#625 are merged and released to PyPI.
+    "xknx @ git+https://github.com/martinhoefling/xknx.git@f47860fe2f22afca9e43fc26717f21a3262e94aa",
+    "xknxproject @ git+https://github.com/martinhoefling/xknxproject.git@71da37a5f88e7693dd07c2eb28a9584fe47f3953",
 ]
 
 [dependency-groups]

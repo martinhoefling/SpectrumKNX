@@ -4,10 +4,115 @@ import pytest
 import pytest_asyncio
 from knx_telegram_store import StoredTelegram
 from knx_telegram_store.backends.memory import MemoryStore
+from xknx import XKNX
 
+import knx_daemon
 import mcp_server
 
 NOW = datetime(2026, 7, 23, 12, 0, 0, tzinfo=UTC)
+
+
+def _sample_project() -> dict:
+    """A minimal parsed-KNXProject shape covering the project introspection tools."""
+    flags = {
+        "read": False,
+        "write": True,
+        "communication": True,
+        "transmit": True,
+        "update": False,
+        "read_on_init": False,
+    }
+    return {
+        "info": {
+            "project_id": "P-1",
+            "name": "Demo",
+            "last_modified": None,
+            "group_address_style": "ThreeLevel",
+            "guid": "g",
+            "created_by": "ETS",
+            "schema_version": "21",
+            "tool_version": "6.0",
+            "xknxproject_version": "3.9.0",
+            "language_code": None,
+        },
+        "communication_objects": {
+            "1.1.5/O-1": {
+                "name": "CO",
+                "number": 1,
+                "text": "Switch",
+                "function_text": "On/Off",
+                "description": "",
+                "device_address": "1.1.5",
+                "device_application": None,
+                "module": None,
+                "channel": None,
+                "dpts": [{"main": 1, "sub": 1}],
+                "object_size": "1 Bit",
+                "group_address_links": ["1/0/0"],
+                "flags": flags,
+                "dpas": None,
+            }
+        },
+        "devices": {
+            "1.1.5": {
+                "name": "Switch Actuator",
+                "hardware_name": "HW",
+                "order_number": "ORD-1",
+                "description": "",
+                "manufacturer_name": "ACME",
+                "individual_address": "1.1.5",
+                "application": None,
+                "project_uid": None,
+                "communication_object_ids": ["1.1.5/O-1"],
+                "channels": {},
+            }
+        },
+        "topology": {
+            "1": {
+                "name": "Area 1",
+                "description": None,
+                "lines": {
+                    "1.1": {
+                        "name": "Line 1",
+                        "medium_type": "TP",
+                        "description": None,
+                        "devices": ["1.1.5"],
+                    }
+                },
+            }
+        },
+        "locations": {
+            "B1": {
+                "type": "Building",
+                "identifier": "B1",
+                "name": "House",
+                "usage_id": None,
+                "usage_text": "",
+                "number": "",
+                "description": "",
+                "project_uid": None,
+                "devices": ["1.1.5"],
+                "spaces": {},
+                "functions": [],
+            }
+        },
+        "group_addresses": {
+            "1/0/0": {
+                "name": "Kitchen Light",
+                "identifier": "GA-1",
+                "raw_address": 2048,
+                "address": "1/0/0",
+                "project_uid": None,
+                "dpt": {"main": 1, "sub": 1},
+                "data_secure": False,
+                "communication_object_ids": ["1.1.5/O-1"],
+                "description": "",
+                "comment": "",
+            }
+        },
+        "group_ranges": {},
+        "functions": {},
+    }
 
 
 async def _seeded_store() -> MemoryStore:
@@ -65,6 +170,18 @@ async def test_lists_read_only_tools(server):
         "get_store_capabilities",
         "count_telegrams",
         "get_server_config",
+        # ETS project introspection (xknxproject.mcp)
+        "get_project_info",
+        "list_group_addresses",
+        "describe_group_address",
+        "list_devices",
+        "list_communication_objects",
+        "get_topology",
+        "list_locations",
+        # DPT catalogue + bus status (xknx.mcp)
+        "list_dpts",
+        "describe_dpt",
+        "get_connection_status",
     } <= names
 
 
@@ -128,3 +245,67 @@ def test_invalid_mode_reported_as_off(monkeypatch):
     monkeypatch.setattr(mcp_server, "MCP_MODE", "bogus")
     assert mcp_server.mcp_enabled() is False
     assert mcp_server.mcp_status()["mode"] == "off"
+
+
+@pytest.mark.asyncio
+async def test_project_tools(server, monkeypatch):
+    monkeypatch.setattr(knx_daemon, "global_knx_project", _sample_project())
+
+    info = await _structured(server, "get_project_info")
+    assert info["name"] == "Demo"
+    assert info["group_address_count"] == 1
+    assert info["device_count"] == 1
+
+    gas = await _structured(server, "list_group_addresses", {"text": "kitchen"})
+    assert [g["address"] for g in gas["group_addresses"]] == ["1/0/0"]
+    assert gas["group_addresses"][0]["dpt"] == "1.001"
+
+    detail = await _structured(server, "describe_group_address", {"address": "1/0/0"})
+    assert detail["found"] is True
+    assert detail["devices"] == ["1.1.5"]
+
+    devices = await _structured(server, "list_devices", {"text": "acme"})
+    assert devices["devices"][0]["individual_address"] == "1.1.5"
+
+    cos = await _structured(server, "list_communication_objects", {"group_address": "1/0/0"})
+    assert cos["total_count"] == 1
+
+    topo = await _structured(server, "get_topology")
+    assert topo["areas"][0]["lines"][0]["devices"] == ["1.1.5"]
+
+    locations = await _structured(server, "list_locations")
+    assert locations["spaces"][0]["type"] == "Building"
+
+
+@pytest.mark.asyncio
+async def test_project_tool_without_project_errors(server, monkeypatch):
+    monkeypatch.setattr(knx_daemon, "global_knx_project", None)
+    with pytest.raises(Exception):  # noqa: B017, PT011
+        await _structured(server, "get_project_info")
+
+
+@pytest.mark.asyncio
+async def test_dpt_tools(server):
+    listed = await _structured(server, "list_dpts", {"main": 9})
+    assert all(d["dpt"].split(".")[0] == "9" for d in listed["dpts"])
+    assert "9.001" in {d["dpt"] for d in listed["dpts"]}
+
+    described = await _structured(server, "describe_dpt", {"dpt": "9.001"})
+    assert described["found"] is True
+    assert described["dpt"]["value_type"] == "temperature"
+    assert described["dpt"]["unit"] == "°C"
+
+    missing = await _structured(server, "describe_dpt", {"dpt": "999.999"})
+    assert missing["found"] is False
+
+
+@pytest.mark.asyncio
+async def test_connection_status_tool(server, monkeypatch):
+    monkeypatch.setattr(knx_daemon, "xknx_instance", XKNX())
+    status = await _structured(server, "get_connection_status")
+    assert status["state"] == "DISCONNECTED"
+    assert status["connected"] is False
+
+    monkeypatch.setattr(knx_daemon, "xknx_instance", None)
+    with pytest.raises(Exception):  # noqa: B017, PT011
+        await _structured(server, "get_connection_status")
