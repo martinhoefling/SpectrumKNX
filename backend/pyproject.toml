@@ -27,8 +27,8 @@ dependencies = [
     # Git pins for the unreleased MCP tools (xknx.mcp / xknxproject.mcp).
     # Revert to "xknx"/"xknxproject" once XKNX/xknx#1876 and
     # XKNX/xknxproject#625 are merged and released to PyPI.
-    "xknx @ git+https://github.com/martinhoefling/xknx.git@ec042264d99481ea1b5db2c7c91a6936354c2344",
-    "xknxproject @ git+https://github.com/martinhoefling/xknxproject.git@69853512955e302318839a557a3996f8ec83ef04",
+    "xknx @ git+https://github.com/martinhoefling/xknx.git@f9e48018595c377d6904e34b9a6ffcee399c320a",
+    "xknxproject @ git+https://github.com/martinhoefling/xknxproject.git@a6498fb497828cd9ba10acd6e76456749909bf9c",
 ]
 
 [dependency-groups]
