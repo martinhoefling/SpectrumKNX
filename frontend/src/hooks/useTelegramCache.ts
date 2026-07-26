@@ -105,6 +105,8 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   const pendingRef = useRef<TelegramEntry[]>([]);
   const connectedRef = useRef(false);
   const pausedRef = useRef(false);
+  /** Bumped by clear() to invalidate any background load still in flight (#339). */
+  const loadGenerationRef = useRef(0);
 
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [pausedCount, setPausedCount] = useState(0);
@@ -145,6 +147,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
    */
   const fetchGapProgressive = useCallback(
     async (gapStart: number, gapEnd: number, budget: number): Promise<number> => {
+      const gen = loadGenerationRef.current;
       let cursor = gapEnd;
       let fetched = 0;
       while (cursor >= gapStart && fetched < budget) {
@@ -158,6 +161,10 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
         }
         const limit = Math.min(HISTORY_CHUNK_SIZE, budget - fetched);
         const { entries, limitReached } = await fetchRange(gapStart, cursor, limit);
+        // A buffer clear during the fetch invalidates this load: drop the chunk
+        // and stop paging, so a late arrival can't repopulate the cleared buffer
+        // and leave a gap between it and newer telegrams (#339).
+        if (loadGenerationRef.current !== gen) return fetched;
         if (entries.length === 0) {
           // Nothing left in this window — the rest is covered-but-empty.
           coverageRef.current!.addCovered(gapStart, cursor);
@@ -197,10 +204,13 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
    */
   const fillGapsBudgeted = useCallback(
     async (startMs: number, endMs: number, budget: number) => {
+      const gen = loadGenerationRef.current;
       const gaps = coverageRef.current!.gaps(startMs, endMs);
       let remaining = budget;
       for (let i = gaps.length - 1; i >= 0 && remaining > 0; i--) {
         remaining -= await fetchGapProgressive(gaps[i][0], gaps[i][1], remaining);
+        // A buffer clear invalidated this load — don't start further gaps (#339).
+        if (loadGenerationRef.current !== gen) return;
       }
       saveCoverage();
     },
@@ -232,8 +242,11 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   const loadRange = useCallback(
     (startMs: number, endMs: number) =>
       runLoad(async () => {
+        const gen = loadGenerationRef.current;
         // Cache hits paint immediately; the backend only fills the gaps.
         const cached = await cacheRef.current!.loadRange(startMs, endMs).catch(() => []);
+        // A buffer clear during the cache read invalidates this load (#339).
+        if (loadGenerationRef.current !== gen) return;
         if (cached.length > 0 && mergeIntoBuffer(cached)) publish();
         await fillGaps(startMs, endMs);
       }),
@@ -247,6 +260,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
     if (!restoreFromCache) return;
     let cancelled = false;
     void runLoad(async () => {
+      const gen = loadGenerationRef.current;
       const coverage = coverageRef.current!;
       for (const [s, e] of loadCoverageIntervals()) coverage.addCovered(s, e);
 
@@ -265,7 +279,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
       if (cancelled) return;
 
       const cached = await cacheRef.current!.loadAll().catch(() => [] as TelegramEntry[]);
-      if (cancelled) return;
+      if (cancelled || loadGenerationRef.current !== gen) return;
       // Hydrate only the newest slice for a fast first paint; the older cached
       // remainder stays in IDB and is pulled in on demand via the history
       // loader / lazy loads (#284). Never exceed the configured buffer size.
@@ -390,6 +404,9 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   );
 
   const clear = useCallback(async () => {
+    // Invalidate any in-flight background load so a late-arriving history chunk
+    // can't repopulate the buffer we're about to wipe (#339).
+    loadGenerationRef.current++;
     trackRemoved(bufferRef.current!.clear());
     pendingRef.current = [];
     coverageRef.current!.clear();

@@ -352,6 +352,52 @@ describe('useTelegramCache', () => {
     expect(result.current.telegrams).toHaveLength(1);
   });
 
+  it('discards an in-flight history chunk when the buffer is cleared mid-load (#339)', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(res => { release = res; });
+    let gateArmed = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL) => {
+        const u = String(url);
+        fetchCalls.push(u);
+        if (u.includes('/api/database/info')) return jsonRes({ retention_days: null });
+        // Hold the history chunk in flight until the test releases it.
+        if (gateArmed) await gate;
+        return jsonRes({
+          telegrams: [tg(2000, 'x'), tg(1000, 'y')],
+          metadata: { limit_reached: false },
+        });
+      }),
+    );
+
+    const { result } = renderHook(() => useTelegramCache(1000));
+    await settle(result);
+
+    gateArmed = true;
+    let load!: Promise<void>;
+    act(() => {
+      load = result.current.loadRange(0, 5000);
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+
+    // User clears the buffer while the chunk is still loading.
+    await act(async () => {
+      await result.current.clear();
+    });
+
+    // The now-stale chunk resolves: it must be dropped, not merged back in.
+    await act(async () => {
+      release();
+      await load;
+    });
+
+    expect(result.current.telegrams).toEqual([]);
+    // Nothing was marked covered, so a later load can still fetch the range —
+    // no gap between the discarded chunk and newer telegrams (#339).
+    expect(JSON.parse(localStorage.getItem(COVERAGE_STORAGE_KEY)!)).toEqual([]);
+  });
+
   it('clear wipes buffer, persistent cache and coverage', async () => {
     seedIdb([tg(1000, 'a')]);
     localStorage.setItem(COVERAGE_STORAGE_KEY, JSON.stringify([[1000, 1000]]));
