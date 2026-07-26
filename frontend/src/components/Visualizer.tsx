@@ -121,13 +121,18 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     }
   };
 
+  // With no active zoom the charts should track the data as the buffer grows, so
+  // a new (or history-loaded) telegram that extends the range stays on screen
+  // instead of dropping off a frozen scale (#340). A user zoom freezes it (#281).
+  const autoFollow = zoomRange === null;
+
   const charts = (
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {buckets.map(b => (
         b.isBinary ? (
-          <TimelineChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} onZoomRangeChange={setZoomRange} />
+          <TimelineChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} />
         ) : (
-          <MixedChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} stepped={stepped} showDots={showDots} onZoomRangeChange={setZoomRange} />
+          <MixedChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} stepped={stepped} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} />
         )
       ))}
 

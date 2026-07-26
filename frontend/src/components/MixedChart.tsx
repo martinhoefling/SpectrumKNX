@@ -15,13 +15,17 @@ interface MixedChartProps {
   stepped: boolean;
   /** Draw a dot at each telegram timestamp so cyclic repeats are visible (#195). */
   showDots: boolean;
+  /** When true (no active zoom), let the chart re-fit to new data so a telegram
+   * that extends the range stays visible instead of falling off a frozen scale
+   * (#340). When zoomed, stays false to preserve the app-controlled range (#281). */
+  autoFollow?: boolean;
   onZoomRangeChange?: (value: [number, number] | null) => void;
 }
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots, onZoomRangeChange }) => {
+export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots, autoFollow = false, onZoomRangeChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -181,9 +185,10 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
         {isBinary ? 'Binary States (Ein/Aus)' : `Metrics (${unit})`}
       </h4>
       <div ref={containerRef} style={{ width: '100%', overflow: 'hidden' }}>
-         {/* resetScales=false: keep the app-controlled zoom on live updates so a
-             new telegram doesn't snap the x-axis back to the full range (#281). */}
-         <UplotReact options={options} data={data} resetScales={false} />
+         {/* Re-fit to new data only while not zoomed (#340): keeps a new telegram
+             visible instead of dropping off a frozen scale. When the user has
+             zoomed, autoFollow is false so the range is preserved (#281). */}
+         <UplotReact options={options} data={data} resetScales={autoFollow} />
       </div>
       {/* Always spell out the visible window's start and end, so the range is
           readable even when the axis ticks are sparse or zoomed out (#314). */}

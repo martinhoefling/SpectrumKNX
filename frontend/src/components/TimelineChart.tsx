@@ -12,12 +12,16 @@ interface TimelineChartProps {
   maxTime: number | null;
   /** Draw a tick at each telegram timestamp so cyclic repeats are visible (#195). */
   showDots: boolean;
+  /** When true (no active zoom), let the chart re-fit to new data so a telegram
+   * that extends the range stays visible instead of falling off a frozen scale
+   * (#340). When zoomed, stays false to preserve the app-controlled range (#281). */
+  autoFollow?: boolean;
   onZoomRangeChange?: (value: [number, number] | null) => void;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, onZoomRangeChange }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -223,9 +227,10 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
         Binary States Timeline
       </h4>
       <div ref={containerRef} style={{ width: '100%', overflow: 'visible' }}>
-         {/* resetScales=false: keep the app-controlled zoom on live updates so a
-             new telegram doesn't snap the x-axis back to the full range (#281). */}
-         <UplotReact options={options} data={data} resetScales={false} />
+         {/* Re-fit to new data only while not zoomed (#340): keeps a new telegram
+             visible instead of dropping off a frozen scale. When the user has
+             zoomed, autoFollow is false so the range is preserved (#281). */}
+         <UplotReact options={options} data={data} resetScales={autoFollow} />
       </div>
       {/* Always spell out the visible window's start and end (#314). The right
           gutter holds the series labels, so pad the caption to match the plot. */}
