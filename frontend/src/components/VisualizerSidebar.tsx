@@ -3,6 +3,7 @@ import { LineChart, X, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { OptionRow } from './FilterPanel';
 import { RAW_DPT_OPTIONS } from '../utils/rawDpt';
+import { getPref, setPref } from '../utils/prefs';
 
 interface TargetCount {
   address: string;
@@ -27,7 +28,13 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
   telegrams, selectedTargets, onTargetsChange, onClose,
   untypedTargets, dptOverrides = {}, onDptOverrideChange,
 }) => {
-  const [search, setSearch] = useState('');
+  // Persisted so the Targets filter survives closing/reopening the panel and
+  // reloads, like the other visualization prefs (#361).
+  const [search, setSearch] = useState(() => getPref('vizTargetSearch') ?? '');
+  const changeSearch = (value: string) => {
+    setSearch(value);
+    setPref('vizTargetSearch', value);
+  };
 
   // Extract unique targets and their counts from the currently plotted dataset
   const targetCounts = useMemo(() => {
@@ -84,7 +91,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
             type="text"
             placeholder="Search targets..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => changeSearch(e.target.value)}
             style={{
               background: 'transparent', border: 'none', outline: 'none',
               color: 'var(--text-main)', fontSize: '0.8125rem', width: '100%',

@@ -239,30 +239,10 @@ function App() {
     initialView?.filters ?? initialWorkspace?.filters ?? DEFAULT_FILTERS,
   );
 
+  // The Visualization is independent of the main filter (#361): editing the
+  // filter changes only the telegram list, never the plotted target selection.
   const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
-    setActiveFilters((prevFilters) => {
-      const updatedFilters = typeof newFilters === 'function' ? newFilters(prevFilters) : newFilters;
-
-      const addedTargets = updatedFilters.targets.filter(t => !prevFilters.targets.includes(t));
-      const removedTargets = prevFilters.targets.filter(t => !updatedFilters.targets.includes(t));
-
-      const addedSources = updatedFilters.sources.filter(s => !prevFilters.sources.includes(s));
-      const removedSources = prevFilters.sources.filter(s => !updatedFilters.sources.includes(s));
-
-      const added = [...addedTargets, ...addedSources];
-      const removed = [...removedTargets, ...removedSources];
-
-      if (added.length > 0 || removed.length > 0) {
-        setSelectedVisualizationTargets(prevSelected => {
-          let next = [...prevSelected];
-          added.forEach(a => { if (!next.includes(a)) next.push(a); });
-          removed.forEach(r => { next = next.filter(t => t !== r); });
-          return next;
-        });
-      }
-
-      return updatedFilters;
-    });
+    setActiveFilters(newFilters);
   }, []);
 
   const refreshServerConfig = useCallback(() => {
@@ -1072,7 +1052,9 @@ function App() {
                 )}
                 {isVisualizerOpen ? (
                   <Visualizer
-                    telegrams={filteredLiveTelegrams}
+                    // The main filter applies to the telegram list only; the
+                    // Visualization Targets list every GA in the buffer (#361).
+                    telegrams={liveTelegrams}
                     selectedTargets={selectedVisualizationTargets}
                     onTargetsChange={setSelectedVisualizationTargets}
                     onClose={() => setIsVisualizerOpen(false)}
