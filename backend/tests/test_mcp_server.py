@@ -5,6 +5,8 @@ import pytest_asyncio
 from knx_telegram_store import StoredTelegram
 from knx_telegram_store.backends.memory import MemoryStore
 from xknx import XKNX
+from xknx.dpt import DPTArray
+from xknx.telegram import GroupAddress, Telegram, apci
 
 import knx_daemon
 import mcp_server
@@ -297,6 +299,50 @@ async def test_dpt_tools(server):
 
     missing = await _structured(server, "describe_dpt", {"dpt": "999.999"})
     assert missing["found"] is False
+
+
+@pytest_asyncio.fixture
+async def rw_server(monkeypatch):
+    """An MCP server built in read-write mode, wired to a seeded store."""
+    store = await _seeded_store()
+    monkeypatch.setattr(mcp_server, "store", store)
+    monkeypatch.setattr(mcp_server, "MCP_MODE", "read-write")
+    return mcp_server._build_server()
+
+
+@pytest.mark.asyncio
+async def test_write_tools_hidden_in_read_only_mode(server):
+    names = {t.name for t in await server.list_tools()}
+    assert {"read_group_value", "send_group_value_read", "send_group_value_write"} & names == set()
+
+
+@pytest.mark.asyncio
+async def test_write_tools_exposed_in_read_write_mode(rw_server):
+    names = {t.name for t in await rw_server.list_tools()}
+    assert {"read_group_value", "send_group_value_read", "send_group_value_write"} <= names
+
+
+@pytest.mark.asyncio
+async def test_send_group_value_write_queues_telegram(rw_server, monkeypatch):
+    xknx = XKNX()
+    monkeypatch.setattr(knx_daemon, "xknx_instance", xknx)
+    result = await _structured(
+        rw_server,
+        "send_group_value_write",
+        {"group_address": "1/2/3", "value": 50, "value_type": "percent"},
+    )
+    assert result["apci"] == "GroupValueWrite"
+    assert xknx.telegrams.get_nowait() == Telegram(
+        destination_address=GroupAddress("1/2/3"),
+        payload=apci.GroupValueWrite(DPTArray((0x80,))),
+    )
+
+
+@pytest.mark.asyncio
+async def test_bus_tools_require_running_stack(rw_server, monkeypatch):
+    monkeypatch.setattr(knx_daemon, "xknx_instance", None)
+    with pytest.raises(Exception):  # noqa: B017, PT011
+        await _structured(rw_server, "send_group_value_read", {"group_address": "1/2/3"})
 
 
 @pytest.mark.asyncio
