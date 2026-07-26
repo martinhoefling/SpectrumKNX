@@ -128,3 +128,31 @@ test('renders instruction when no addresses are selected, and clicking a sidebar
     expect(screen.getByText('On')).toBeInTheDocument();
   });
 });
+
+test('sidebar address list is ordered numerically by main/middle/sub, not as text (#348)', () => {
+  const scrambled: FilterOptions = {
+    ...FILTER_OPTIONS,
+    targets: [
+      { address: '1/1/10', name: 'ten', main: 1, sub: 1 },
+      { address: '1/1/2', name: 'two', main: 1, sub: 1 },
+      { address: '0/1/1', name: 'zero', main: 0, sub: 1 },
+      { address: '1/1/1', name: 'one', main: 1, sub: 1 },
+    ],
+  };
+  render(
+    <LastSeenOverlay
+      filterOptions={scrambled}
+      initialAddresses={[]}
+      initialMode="ga"
+      onClose={() => {}}
+    />
+  );
+
+  const rendered = ['0/1/1', '1/1/1', '1/1/2', '1/1/10'].map(a => screen.getByText(a));
+  // Each address appears strictly before the next in document order.
+  for (let i = 0; i < rendered.length - 1; i++) {
+    expect(
+      rendered[i].compareDocumentPosition(rendered[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  }
+});

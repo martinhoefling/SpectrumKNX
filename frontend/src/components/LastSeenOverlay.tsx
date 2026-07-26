@@ -5,6 +5,7 @@ import type { Telegram } from '../hooks/useWebSocket';
 import type { FilterOptions } from '../types/filters';
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import { compareKnxAddress } from '../utils/knxAddress';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
 import { secondaryBtn } from '../utils/buttonStyles';
@@ -169,10 +170,14 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     setSearch('');
   };
 
-  const filteredAddresses = addressList.filter(a => {
-    const q = search.toLowerCase();
-    return (a.address ?? '').toLowerCase().includes(q) || (a.name ?? '').toLowerCase().includes(q);
-  });
+  const filteredAddresses = addressList
+    .filter(a => {
+      const q = search.toLowerCase();
+      return (a.address ?? '').toLowerCase().includes(q) || (a.name ?? '').toLowerCase().includes(q);
+    })
+    // Order by numeric address (main/middle/sub) rather than the backend's
+    // string order, so e.g. 1/1/2 sorts before 1/1/10 (#348).
+    .sort((a, b) => compareKnxAddress(a.address ?? '', b.address ?? ''));
 
   const selectedInfo = !multi
     ? addressList.find(a => a.address === selectedAddresses[0])
