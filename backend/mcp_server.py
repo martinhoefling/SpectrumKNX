@@ -282,6 +282,24 @@ def _build_server() -> FastMCP:
         """KNX bus connection state, connection type and local individual address."""
         return asdict(await xknx_mcp.get_connection_status(_require_xknx()))
 
+    @mcp.tool()
+    async def encode_value(value: Any, value_type: str) -> dict[str, Any]:
+        """Encode a value using a specific DPT into its raw payload bytes.
+        `value` is the Python native value; `value_type` is DPT number (e.g. "9.001") or name."""
+        result = await xknx_mcp.encode_value(
+            xknx_mcp.EncodeValueInput(value=value, value_type=value_type)
+        )
+        return asdict(result)
+
+    @mcp.tool()
+    async def decode_payload(payload: list[int] | int, value_type: str) -> dict[str, Any]:
+        """Decode raw payload bytes or integer using a specific DPT.
+        `payload` is a list of byte integers, or a single integer for 6-bit DPTs (like 1.001)."""
+        result = await xknx_mcp.decode_payload(
+            xknx_mcp.DecodePayloadInput(payload=payload, value_type=value_type)
+        )
+        return asdict(result)
+
     if write_tools_enabled():
         _register_bus_tools(mcp)
 

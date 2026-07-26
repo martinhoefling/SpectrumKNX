@@ -203,6 +203,8 @@ async def test_lists_read_only_tools(server):
         "list_dpts",
         "describe_dpt",
         "get_connection_status",
+        "encode_value",
+        "decode_payload",
     } <= names
 
 
@@ -386,3 +388,18 @@ async def test_connection_status_tool(server, monkeypatch):
     monkeypatch.setattr(knx_daemon, "xknx_instance", None)
     with pytest.raises(Exception):  # noqa: B017, PT011
         await _structured(server, "get_connection_status")
+
+
+@pytest.mark.asyncio
+async def test_encode_decode_value_tools(server):
+    encoded = await _structured(server, "encode_value", {"value": 21.0, "value_type": "9.001"})
+    assert encoded["payload"] == [0x0C, 0x1A]
+    assert encoded["value_type"] == "9.001"
+
+    decoded = await _structured(server, "decode_payload", {"payload": [0x0C, 0x1A], "value_type": "9.001"})
+    assert decoded["value"] == 21.0
+    assert decoded["value_type"] == "9.001"
+
+    decoded_binary = await _structured(server, "decode_payload", {"payload": 1, "value_type": "1.001"})
+    assert decoded_binary["value"] == "Switch.ON"
+
