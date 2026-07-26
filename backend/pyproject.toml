@@ -16,7 +16,7 @@ dependencies = [
     "fastapi",
     "httpx",
     # Git pin for the unreleased MCP tools; revert to ">=0.11.0" once on PyPI.
-    "knx-telegram-store @ git+https://github.com/XKNX/knx-telegram-store.git@33aebf42baac37102ee8e8f9801629cf6f8cd4ff",
+    "knx-telegram-store @ git+https://github.com/XKNX/knx-telegram-store.git@ed484ad4958ccbd971374827baefeff517022aca",
     "mcp",
     "pydantic",
     "python-dotenv",

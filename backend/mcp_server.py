@@ -78,12 +78,18 @@ def _build_server() -> FastMCP:
         telegram_types: list[str] | None = None,
         directions: list[str] | None = None,
         dpt_mains: list[int] | None = None,
+        dpts: list[str] | None = None,
+        delta_before_ms: int = 0,
+        delta_after_ms: int = 0,
         limit: int = 100,
         offset: int = 0,
         order_descending: bool = True,
     ) -> dict[str, Any]:
         """Search stored KNX telegrams. Times are ISO-8601; address/type/direction
-        filters are lists (OR within a filter, AND across filters)."""
+        filters are lists (OR within a filter, AND across filters). `telegram_types`
+        accepts "Write"/"Read"/"Response" or the full GroupValue* names. `dpts` are
+        "main" or "main.sub" strings (e.g. "9.001"). `delta_before_ms`/`delta_after_ms`
+        add a context window of telegrams around each match."""
         result = await lib_query_telegrams(
             store,
             QueryTelegramsInput(
@@ -94,6 +100,9 @@ def _build_server() -> FastMCP:
                 telegram_types=telegram_types or [],
                 directions=directions or [],
                 dpt_mains=dpt_mains or [],
+                dpts=dpts or [],
+                delta_before_ms=delta_before_ms,
+                delta_after_ms=delta_after_ms,
                 limit=limit,
                 offset=offset,
                 order_descending=order_descending,

@@ -85,6 +85,16 @@ async def test_query_telegrams(server):
 
 
 @pytest.mark.asyncio
+async def test_query_dpt_subtype_and_type_alias(server):
+    # DPT subtype filter reaches the store (only the 9.001 temperature telegram).
+    by_dpt = await _structured(server, "query_telegrams", {"dpts": ["9.001"]})
+    assert [t["destination"] for t in by_dpt["telegrams"]] == ["1/1/1"]
+    # "Write" alias resolves to GroupValueWrite (both seeded rows are writes).
+    by_type = await _structured(server, "query_telegrams", {"telegram_types": ["Write"]})
+    assert by_type["total_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_count_and_stats(server):
     assert (await _structured(server, "count_telegrams"))["count"] == 2
     stats = await _structured(server, "get_store_stats")

@@ -15,7 +15,7 @@ ifaddr==0.2.0
 iniconfig==2.3.0
 # Temporary git pin for the unreleased MCP tools (knx_telegram_store.mcp, 0.11.0).
 # Revert to `knx-telegram-store==0.11.0` once it is published to PyPI.
-knx-telegram-store @ git+https://github.com/XKNX/knx-telegram-store.git@33aebf42baac37102ee8e8f9801629cf6f8cd4ff
+knx-telegram-store @ git+https://github.com/XKNX/knx-telegram-store.git@ed484ad4958ccbd971374827baefeff517022aca
 packaging==26.2
 pluggy==1.6.0
 pycparser==3.0
