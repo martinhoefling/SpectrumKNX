@@ -233,6 +233,28 @@ def _build_server() -> FastMCP:
         """Building/location tree (spaces, nested, with devices and functions)."""
         return asdict(await xknxproject_mcp.list_locations(_require_project()))
 
+    @mcp.tool()
+    async def list_functions(
+        text: str | None = None,
+        space_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List project functions/functional blocks. `text` matches identifier/name/type/usage;
+        `space_id` restricts to a specific space/room."""
+        result = await xknxproject_mcp.list_functions(
+            _require_project(),
+            xknxproject_mcp.FunctionFilter(
+                text=text, space_id=space_id, limit=limit, offset=offset
+            ),
+        )
+        return asdict(result)
+
+    @mcp.tool()
+    async def describe_function(identifier: str) -> dict[str, Any]:
+        """Resolve one function/functional block by identifier to its group address references and roles."""
+        return asdict(await xknxproject_mcp.describe_function(_require_project(), identifier))
+
     # --- KNX data point types + bus status (xknx.mcp) -------------------------
 
     @mcp.tool()

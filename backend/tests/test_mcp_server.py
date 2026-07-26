@@ -113,7 +113,24 @@ def _sample_project() -> dict:
             }
         },
         "group_ranges": {},
-        "functions": {},
+        "functions": {
+            "F-1": {
+                "function_type": "FT-1",
+                "group_addresses": {
+                    "1/0/0": {
+                        "address": "1/0/0",
+                        "name": "Kitchen Light",
+                        "project_uid": 12,
+                        "role": "SwitchOnOff",
+                    }
+                },
+                "identifier": "F-1",
+                "name": "Kitchen Light Function",
+                "project_uid": 10,
+                "space_id": "B1",
+                "usage_text": "Control kitchen light",
+            }
+        },
     }
 
 
@@ -180,6 +197,8 @@ async def test_lists_read_only_tools(server):
         "list_communication_objects",
         "get_topology",
         "list_locations",
+        "list_functions",
+        "describe_function",
         # DPT catalogue + bus status (xknx.mcp)
         "list_dpts",
         "describe_dpt",
@@ -277,6 +296,18 @@ async def test_project_tools(server, monkeypatch):
 
     locations = await _structured(server, "list_locations")
     assert locations["spaces"][0]["type"] == "Building"
+
+    functions = await _structured(server, "list_functions", {"text": "kitchen"})
+    assert len(functions["functions"]) == 1
+    assert functions["functions"][0]["identifier"] == "F-1"
+    assert functions["functions"][0]["group_address_count"] == 1
+
+    detail = await _structured(server, "describe_function", {"identifier": "F-1"})
+    assert detail["found"] is True
+    assert detail["function"]["identifier"] == "F-1"
+    assert len(detail["group_addresses"]) == 1
+    assert detail["group_addresses"][0]["role"] == "SwitchOnOff"
+    assert detail["group_addresses"][0]["address"] == "1/0/0"
 
 
 @pytest.mark.asyncio
