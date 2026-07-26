@@ -5,7 +5,7 @@ import { useChartData } from '../hooks/useChartData';
 import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
 import { TimeBrush } from './TimeBrush';
-import { Download, Link2, Check } from 'lucide-react';
+import { Download, Link2, Check, X } from 'lucide-react';
 import { getPref, setPref } from '../utils/prefs';
 import { clearSeriesHidden } from '../utils/legendVisibility';
 import { expandDegenerateRange } from '../utils/timeRange';
@@ -164,7 +164,6 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           telegrams={telegrams}
           selectedTargets={selectedTargets}
           onTargetsChange={handleTargetsChange}
-          onClose={onClose}
           untypedTargets={untypedTargets}
           dptOverrides={dptOverrides}
           onDptOverrideChange={setDptOverride}
@@ -182,8 +181,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
               )}
             </div>
 
-            {buckets.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {buckets.length > 0 && (
+                <>
                 <button
                   onClick={toggleStepped}
                   title={stepped ? 'Switch to linear interpolation' : 'Switch to stepped (hold-last-value)'}
@@ -232,8 +232,18 @@ export const Visualizer: React.FC<VisualizerProps> = ({
                 >
                   <Download size={16} /> Export
                 </button>
-              </div>
-            )}
+                </>
+              )}
+              {/* Close X in the panel header, like every other main panel (#347). */}
+              <button
+                className="icon-button"
+                onClick={onClose}
+                title="Close Visualization"
+                style={{ padding: '0.4rem', display: 'flex', color: 'var(--text-dim)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
           </div>
 
           {charts}

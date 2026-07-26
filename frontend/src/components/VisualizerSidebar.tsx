@@ -14,7 +14,6 @@ interface VisualizerSidebarProps {
   telegrams: Telegram[];
   selectedTargets: string[];
   onTargetsChange: (targets: string[]) => void;
-  onClose: () => void;
   /** Selected GAs with no project DPT that need a manual datatype to plot (#315). */
   untypedTargets?: Set<string>;
   /** Chosen datatype key per address. */
@@ -24,7 +23,7 @@ interface VisualizerSidebarProps {
 }
 
 export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
-  telegrams, selectedTargets, onTargetsChange, onClose,
+  telegrams, selectedTargets, onTargetsChange,
   untypedTargets, dptOverrides = {}, onDptOverrideChange,
 }) => {
   const [search, setSearch] = useState('');
@@ -68,7 +67,15 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
         <span style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <LineChart size={16} style={{ color: 'var(--accent-primary)' }} /> Targets
         </span>
-        <button onClick={onClose} className="icon-button" title="Close Visualization" style={{ padding: '0.2rem' }}>
+        {/* Clears the checkmarks, like the filter panel's clear-all (#347). The
+            panel itself is closed with the X in the chart-area header. */}
+        <button
+          onClick={() => onTargetsChange([])}
+          disabled={selectedTargets.length === 0}
+          className="icon-button"
+          title="Clear all selected targets"
+          style={{ padding: '0.2rem', opacity: selectedTargets.length === 0 ? 0.4 : 1 }}
+        >
           <X size={14} />
         </button>
       </div>
