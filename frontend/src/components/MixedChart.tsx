@@ -24,6 +24,7 @@ interface MixedChartProps {
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
+const LEFT_GUTTER = 150;
 
 export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots, autoFollow = false, onZoomRangeChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +96,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
     return {
       width,
       height: isBinary ? Math.max(150, series.length * 50) : 300,
+      padding: [8, 16, 8, 0],
       cursor: {
         sync: { key: syncCursor.key },
         drag: { x: true, y: false, setScale: false }
@@ -148,6 +150,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
           space: 30,
           grid: { stroke: gridStroke, width: 1 },
           stroke: axisStroke,
+          size: LEFT_GUTTER,
           values: isBinary
             ? (_u, splits) => splits.map(v => v === 1 ? 'ON' : v === 0 ? 'OFF' : '')
             : undefined
@@ -193,7 +196,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime
       {/* Always spell out the visible window's start and end, so the range is
           readable even when the axis ticks are sparse or zoomed out (#314). */}
       {minTime != null && maxTime != null && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', paddingLeft: `${LEFT_GUTTER}px`, paddingRight: '16px', fontSize: '0.7rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
           <span>{formatFullTime(minTime, multiDay)}</span>
           <span>{formatFullTime(maxTime, multiDay)}</span>
         </div>
