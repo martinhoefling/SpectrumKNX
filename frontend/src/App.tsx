@@ -477,6 +477,12 @@ function App() {
   const toggleColumn = (col: string) =>
     setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }));
 
+  // ── Telegram list marks (#310) ──────────────────────────────────────────────
+  // Lifted above the conditionally-rendered panels so marked rows survive
+  // main-panel navigation. Keyed by the table's anchorKey identity.
+  const [markedTelegramKeys, setMarkedTelegramKeys] = useState<string[]>([]);
+  const [lastMarkedTelegramKey, setLastMarkedTelegramKey] = useState<string | null>(null);
+
   // ── Sorting ─────────────────────────────────────────────────────────────────
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   const handleSort = (key: SortKey) => {
@@ -1180,6 +1186,10 @@ function App() {
                     onListFollowChange={setListFollow}
                     listAnchorKey={listAnchorKey}
                     onListAnchorKeyChange={setListAnchorKey}
+                    markedKeys={markedTelegramKeys}
+                    onMarkedKeysChange={setMarkedTelegramKeys}
+                    lastMarkedKey={lastMarkedTelegramKey}
+                    onLastMarkedKeyChange={setLastMarkedTelegramKey}
                   />
                 )}
               </div>

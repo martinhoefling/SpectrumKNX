@@ -40,6 +40,13 @@ interface TelegramTableProps {
   onListFollowChange?: (follow: boolean) => void;
   listAnchorKey?: string | null;
   onListAnchorKeyChange?: (key: string | null) => void;
+
+  // Lifted row marks (#310): keys of marked telegrams + the most-recently
+  // clicked one. Lifted so marks survive main-panel navigation.
+  markedKeys?: string[];
+  onMarkedKeysChange?: (keys: string[]) => void;
+  lastMarkedKey?: string | null;
+  onLastMarkedKeyChange?: (key: string | null) => void;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -132,7 +139,8 @@ const makeQuickMatcher = (pattern: string): ((s: string) => boolean) => {
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
-  listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange
+  listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
+  markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -222,6 +230,32 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     setQuickOpen(nextOpen);
     setQuickEnabled(nextOpen);
   };
+
+  // ── Row marks (#310) ─────────────────────────────────────────────────────
+  // Controlled when App lifts them (so marks survive navigation), otherwise a
+  // local fallback. `lastMarkedKey` may legitimately be null, so distinguish
+  // "not lifted" (undefined) from "lifted, nothing last" (null).
+  const [internalMarkedKeys, setInternalMarkedKeys] = useState<string[]>([]);
+  const [internalLastMarkedKey, setInternalLastMarkedKey] = useState<string | null>(null);
+
+  const markedKeysList = markedKeys ?? internalMarkedKeys;
+  const setMarkedKeysList = useCallback((val: string[]) => {
+    setInternalMarkedKeys(val);
+    onMarkedKeysChange?.(val);
+  }, [onMarkedKeysChange]);
+
+  const lastMarked = lastMarkedKey !== undefined ? lastMarkedKey : internalLastMarkedKey;
+  const setLastMarked = useCallback((val: string | null) => {
+    setInternalLastMarkedKey(val);
+    onLastMarkedKeyChange?.(val);
+  }, [onLastMarkedKeyChange]);
+
+  const markedSet = useMemo(() => new Set(markedKeysList), [markedKeysList]);
+
+  const clearMarks = useCallback(() => {
+    setMarkedKeysList([]);
+    setLastMarked(null);
+  }, [setMarkedKeysList, setLastMarked]);
 
   const quickFiltered = useMemo(() => {
     if (!quickOpen || !quickEnabled) return telegrams;
@@ -363,9 +397,43 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
   };
 
-  // Clicking a row pauses live-following just like scrolling away (#266) — the
-  // row being read must not move. The jump-to-live pill is the way back.
-  const handleRowClick = () => {
+  // Clicking a row (a) marks it (#310) and (b) pauses live-following just like
+  // scrolling away (#266) — the row being read must not move. The jump-to-live
+  // pill is the way back.
+  const handleRowClick = (e: React.MouseEvent, key: string, index: number) => {
+    // ── Marks (#310) ──
+    const additive = e.ctrlKey || e.metaKey;
+    const range = e.shiftKey;
+    if (additive || range) {
+      // A modified click must not also start a native text selection.
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+    }
+
+    let nextKeys: string[];
+    if (range) {
+      // Range over the current visible order, from the last-clicked row to here.
+      const anchorIdx = lastMarked ? telegramRows.findIndex(r => anchorKey(r) === lastMarked) : -1;
+      let rangeKeys: string[];
+      if (anchorIdx === -1) {
+        rangeKeys = [key]; // no usable anchor → just this row
+      } else {
+        const lo = Math.min(anchorIdx, index);
+        const hi = Math.max(anchorIdx, index);
+        rangeKeys = telegramRows.slice(lo, hi + 1).map(r => anchorKey(r));
+      }
+      nextKeys = additive ? [...new Set([...markedKeysList, ...rangeKeys])] : rangeKeys;
+    } else if (additive) {
+      // Toggle this row, keeping the rest.
+      nextKeys = markedSet.has(key) ? markedKeysList.filter(k => k !== key) : [...markedKeysList, key];
+    } else {
+      // Plain click replaces the whole set.
+      nextKeys = [key];
+    }
+    setMarkedKeysList(nextKeys);
+    setLastMarked(key);
+
+    // ── Pause live-following on an edge click (#266), unchanged ──
     if (!isTimeSort || !atEdgeRef.current) return;
     atEdgeRef.current = false;
     onListFollowChange?.(false);
@@ -837,6 +905,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         </button>
       )}
 
+      {/* Clear-marks pill — shown only while rows are marked (#310) */}
+      {markedKeysList.length > 0 && (
+        <button
+          onClick={clearMarks}
+          className="clear-marks-pill"
+          style={{ position: 'absolute', right: '1rem', top: '0.75rem', zIndex: 20 }}
+          title="Clear all marks"
+        >
+          <X size={13} /> Clear {markedKeysList.length} mark{markedKeysList.length === 1 ? '' : 's'}
+        </button>
+      )}
+
       {/* Virtualized Body */}
       <div
         ref={parentRef}
@@ -860,12 +940,16 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           >
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const t = telegramRows[virtualRow.index];
+              const key = anchorKey(t);
+              const marked = markedSet.has(key);
+              // The most-recently-clicked row is the most prominent (#310).
+              const latest = marked && key === lastMarked;
               return (
                 <div
                   key={virtualRow.key}
                   data-index={virtualRow.index}
-                  data-akey={anchorKey(t)}
-                  onClick={handleRowClick}
+                  data-akey={key}
+                  onClick={(e) => handleRowClick(e, key, virtualRow.index)}
                   ref={virtualizer.measureElement}
                   style={{
                     position: 'absolute',
@@ -877,11 +961,19 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     gridTemplateColumns: gridTemplate,
                     borderBottom: '1px solid var(--border-color)',
                     fontSize: '0.8125rem',
-                    background: (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
+                    // Marked rows get an accent wash that overrides the zebra
+                    // stripe; the latest click is washed more strongly and gets
+                    // an accent bar. color-mix adapts to the theme's accent.
+                    background: latest
+                      ? 'color-mix(in srgb, var(--accent-primary) 34%, transparent)'
+                      : marked
+                        ? 'color-mix(in srgb, var(--accent-primary) 16%, transparent)'
+                        : (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
+                    boxShadow: latest ? 'inset 3px 0 0 0 var(--accent-primary)' : undefined,
                     alignItems: 'start',
                     minHeight: '60px' // Ensure a minimum touch/visual target
                   }}
-                  className="log-row"
+                  className={`log-row${marked ? ' marked' : ''}${latest ? ' latest' : ''}`}
                 >
                   {visibleCols.map(c => (
                     <React.Fragment key={c.id}>{renderCell(c.id, t)}</React.Fragment>
@@ -974,6 +1066,27 @@ style.textContent = `
   .jump-to-live-pill:hover {
     filter: brightness(1.08);
     transform: translateX(-50%) scale(1.03);
+  }
+
+  .clear-marks-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-panel);
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .clear-marks-pill:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
   }
 
   .quick-filter-bar-toggle {
