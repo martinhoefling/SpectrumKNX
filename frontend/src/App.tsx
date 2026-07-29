@@ -10,6 +10,11 @@ import {
   type WorkspaceState,
   type WorkspaceView,
 } from './utils/workspaceState';
+import {
+  loadUiState,
+  saveUiState,
+  DEFAULT_UI_STATE,
+} from './utils/uiState';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
@@ -153,6 +158,18 @@ function App() {
   const [initialWorkspace] = useState(() =>
     initialView ? null : isEmbedded() ? loadWorkspace() : parseMonitorSearch(window.location.search),
   );
+  const [initialUiState] = useState(() => loadUiState() ?? DEFAULT_UI_STATE);
+  const [quickFilterOpen, setQuickFilterOpen] = useState(initialUiState.quickFilter.open);
+  const [quickFilterEnabled, setQuickFilterEnabled] = useState(initialUiState.quickFilter.enabled);
+  const [quickPatterns, setQuickPatterns] = useState(initialUiState.quickFilter.patterns);
+  const [listFollow, setListFollow] = useState(initialUiState.listFollow);
+  const [listAnchorKey, setListAnchorKey] = useState<string | null>(initialUiState.listAnchorKey);
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(initialUiState.zoomRange);
+  const [statsSearch, setStatsSearch] = useState(initialUiState.statsSearch);
+  const [buildingSearch, setBuildingSearch] = useState(initialUiState.buildingSearch);
+  const [lastSeenLimit, setLastSeenLimit] = useState(initialUiState.lastSeenLimit);
+  const [lastSeenLive, setLastSeenLive] = useState(initialUiState.lastSeenLive);
+  const [lastSeenSearch, setLastSeenSearch] = useState(initialUiState.lastSeenSearch);
   const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>(
     initialView ? 'history' : initialWorkspace?.tab ?? 'live',
   );
@@ -392,6 +409,40 @@ function App() {
     }, 500);
     return () => clearTimeout(handle);
   }, [initialView, activeTab, workspaceView, isFilterOpen, activeFilters, selectedVisualizationTargets, lastSeenAddresses, lastSeenMode]);
+
+  // ── Persist UI Session State (#341) ──────────────────────────────────────────
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      saveUiState({
+        quickFilter: {
+          open: quickFilterOpen,
+          enabled: quickFilterEnabled,
+          patterns: quickPatterns,
+        },
+        listFollow,
+        listAnchorKey,
+        zoomRange,
+        statsSearch,
+        buildingSearch,
+        lastSeenLimit,
+        lastSeenLive,
+        lastSeenSearch,
+      });
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [
+    quickFilterOpen,
+    quickFilterEnabled,
+    quickPatterns,
+    listFollow,
+    listAnchorKey,
+    zoomRange,
+    statsSearch,
+    buildingSearch,
+    lastSeenLimit,
+    lastSeenLive,
+    lastSeenSearch,
+  ]);
 
   // ── Sync filter panel visibility with active views ───────────────────────────
   useEffect(() => {
@@ -1058,6 +1109,8 @@ function App() {
                     selectedTargets={selectedVisualizationTargets}
                     onTargetsChange={setSelectedVisualizationTargets}
                     onClose={() => setIsVisualizerOpen(false)}
+                    zoomRange={zoomRange}
+                    onZoomRangeChange={setZoomRange}
                   />
                 ) : isLastSeenOpen ? (
                   <LastSeenOverlay
@@ -1067,11 +1120,23 @@ function App() {
                     writeEnabled={serverConfig?.status?.write_enabled}
                     latestTelegram={latestTelegram}
                     onClose={() => setIsLastSeenOpen(false)}
+                    limit={lastSeenLimit}
+                    onLimitChange={setLastSeenLimit}
+                    autoRefresh={lastSeenLive}
+                    onAutoRefreshChange={setLastSeenLive}
+                    search={lastSeenSearch}
+                    onSearchChange={setLastSeenSearch}
+                    onSelectionChange={(mode, addresses) => {
+                      setLastSeenMode(mode);
+                      setLastSeenAddresses(addresses);
+                    }}
                   />
                 ) : isStatisticsOpen ? (
                   <StatisticsOverlay
                     filterOptions={filterOptions}
                     onClose={() => setIsStatisticsOpen(false)}
+                    searchQuery={statsSearch}
+                    onSearchQueryChange={setStatsSearch}
                   />
                 ) : isBuildingOpen && statusDevice ? (
                   <DeviceStatusOverlay
@@ -1089,6 +1154,8 @@ function App() {
                     onDeviceStatus={setStatusDevice}
                     writeEnabled={serverConfig?.status?.write_enabled}
                     latestTelegram={latestTelegram}
+                    searchQuery={buildingSearch}
+                    onSearchQueryChange={setBuildingSearch}
                   />
                 ) : isDatabaseOpen ? (
                   <DatabaseOverlay onClose={() => setIsDatabaseOpen(false)} />
@@ -1103,6 +1170,16 @@ function App() {
                     onQuickVisualize={handleQuickVisualize}
                     onQuickLastSeen={handleQuickLastSeen}
                     canSend={serverConfig?.status?.write_enabled}
+                    quickFilterOpen={quickFilterOpen}
+                    onQuickFilterOpenChange={setQuickFilterOpen}
+                    quickFilterEnabled={quickFilterEnabled}
+                    onQuickFilterEnabledChange={setQuickFilterEnabled}
+                    quickPatterns={quickPatterns}
+                    onQuickPatternsChange={setQuickPatterns}
+                    listFollow={listFollow}
+                    onListFollowChange={setListFollow}
+                    listAnchorKey={listAnchorKey}
+                    onListAnchorKeyChange={setListAnchorKey}
                   />
                 )}
               </div>

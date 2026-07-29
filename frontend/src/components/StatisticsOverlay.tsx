@@ -20,6 +20,8 @@ interface StatisticsData {
 interface StatisticsOverlayProps {
   filterOptions: FilterOptions;
   onClose: () => void;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
 }
 
 type TabId = 'ga' | 'pa' | 'hierarchy';
@@ -287,14 +289,22 @@ const HierarchyRow: React.FC<HierarchyRowProps> = ({ node, maxCount, total, dept
 
 // ── Main overlay ──────────────────────────────────────────────────────────────
 
-export const StatisticsOverlay: React.FC<StatisticsOverlayProps> = ({ filterOptions, onClose }) => {
+export const StatisticsOverlay: React.FC<StatisticsOverlayProps> = ({
+  filterOptions, onClose, searchQuery: searchQueryProp, onSearchQueryChange,
+}) => {
   const [tab, setTab] = useState<TabId>('ga');
   const [data, setData] = useState<StatisticsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('count');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [internalSearchQuery, setInternalSearchQuery] = useState('');
+  const searchQuery = searchQueryProp !== undefined ? searchQueryProp : internalSearchQuery;
+  const setSearchQuery = (val: string | ((prev: string) => string)) => {
+    const next = typeof val === 'function' ? val(searchQuery) : val;
+    setInternalSearchQuery(next);
+    onSearchQueryChange?.(next);
+  };
   const [timeAgo, setTimeAgo] = useState<string | null>(null);
 
   const fetchStats = useCallback(() => {

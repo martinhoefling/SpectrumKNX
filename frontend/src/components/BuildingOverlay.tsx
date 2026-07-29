@@ -81,6 +81,8 @@ interface BuildingOverlayProps {
   writeEnabled?: boolean;
   /** Newest telegram from the live websocket feed; keeps expanded GA tables current. */
   latestTelegram?: Telegram | null;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
 }
 
 // ── Group-address collection helpers ─────────────────────────────────────────────
@@ -627,10 +629,17 @@ const SpaceRow: React.FC<{
 
 export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
   onClose, onFilterDevice, onFilterGAs, onLastSeen, onDeviceStatus, writeEnabled, latestTelegram,
+  searchQuery: searchQueryProp, onSearchQueryChange,
 }) => {
   const [data, setData] = useState<BuildingData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [internalSearchQuery, setInternalSearchQuery] = useState('');
+  const searchQuery = searchQueryProp !== undefined ? searchQueryProp : internalSearchQuery;
+  const setSearchQuery = (val: string | ((prev: string) => string)) => {
+    const next = typeof val === 'function' ? val(searchQuery) : val;
+    setInternalSearchQuery(next);
+    onSearchQueryChange?.(next);
+  };
 
   const fetchBuilding = useCallback(() => {
     setIsLoading(true);

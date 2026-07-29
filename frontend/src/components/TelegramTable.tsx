@@ -26,6 +26,20 @@ interface TelegramTableProps {
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
   /** Enables the per-row "Send to this GA" quick popover; true only when the bus is writable (#214). */
   canSend?: boolean;
+
+  // Lifted Quick-Filter state (#280, #341)
+  quickFilterOpen?: boolean;
+  onQuickFilterOpenChange?: (open: boolean) => void;
+  quickFilterEnabled?: boolean;
+  onQuickFilterEnabledChange?: (enabled: boolean) => void;
+  quickPatterns?: Partial<Record<ColId, string>>;
+  onQuickPatternsChange?: (patterns: Partial<Record<ColId, string>>) => void;
+
+  // Lifted Follow / Anchor state (#203, #341)
+  listFollow?: boolean;
+  onListFollowChange?: (follow: boolean) => void;
+  listAnchorKey?: string | null;
+  onListAnchorKeyChange?: (key: string | null) => void;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -116,7 +130,9 @@ const makeQuickMatcher = (pattern: string): ((s: string) => boolean) => {
 };
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
-  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend
+  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
+  quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
+  listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -176,25 +192,45 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // ── Quick filter bar (#271): per-column regex/literal filter on top of the
   // complex filter. Expanding enables it, collapsing disables it; the toggle
   // in the bar switches it without losing the patterns.
-  const [quickOpen, setQuickOpen] = useState(false);
-  const [quickEnabled, setQuickEnabled] = useState(false);
-  const [quickPatterns, setQuickPatterns] = useState<Partial<Record<ColId, string>>>({});
+  const [internalQuickOpen, setInternalQuickOpen] = useState(false);
+  const [internalQuickEnabled, setInternalQuickEnabled] = useState(false);
+  const [internalQuickPatterns, setInternalQuickPatterns] = useState<Partial<Record<ColId, string>>>({});
+
+  const quickOpen = quickFilterOpen ?? internalQuickOpen;
+  const setQuickOpen = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof val === 'function' ? val(quickOpen) : val;
+    setInternalQuickOpen(next);
+    onQuickFilterOpenChange?.(next);
+  }, [quickOpen, onQuickFilterOpenChange]);
+
+  const quickEnabled = quickFilterEnabled ?? internalQuickEnabled;
+  const setQuickEnabled = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof val === 'function' ? val(quickEnabled) : val;
+    setInternalQuickEnabled(next);
+    onQuickFilterEnabledChange?.(next);
+  }, [quickEnabled, onQuickFilterEnabledChange]);
+
+  const currentPatterns = quickPatterns ?? internalQuickPatterns;
+  const setQuickPatterns = useCallback((val: Partial<Record<ColId, string>> | ((prev: Partial<Record<ColId, string>>) => Partial<Record<ColId, string>>)) => {
+    const next = typeof val === 'function' ? val(currentPatterns) : val;
+    setInternalQuickPatterns(next);
+    onQuickPatternsChange?.(next);
+  }, [currentPatterns, onQuickPatternsChange]);
 
   const toggleQuickOpen = () => {
-    setQuickOpen(open => {
-      setQuickEnabled(!open);
-      return !open;
-    });
+    const nextOpen = !quickOpen;
+    setQuickOpen(nextOpen);
+    setQuickEnabled(nextOpen);
   };
 
   const quickFiltered = useMemo(() => {
     if (!quickOpen || !quickEnabled) return telegrams;
-    const matchers = Object.entries(quickPatterns)
+    const matchers = Object.entries(currentPatterns)
       .filter(([, p]) => p && p.trim() !== '')
       .map(([id, p]) => [id, makeQuickMatcher(p!.trim())] as const);
     if (matchers.length === 0) return telegrams;
     return telegrams.filter(t => matchers.every(([id, m]) => m(quickFilterHaystack(id as ColId, t))));
-  }, [telegrams, quickOpen, quickEnabled, quickPatterns]);
+  }, [telegrams, quickOpen, quickEnabled, currentPatterns]);
 
   // Compute time deltas between consecutive rows (by visual order)
   const telegramRows = useMemo<TelegramRow[]>(() => {
@@ -238,16 +274,35 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // async re-measure of prepended rows is absorbed too.
   const isTimeSort = sortConfig.key === 'timestamp';
   const liveEdge = sortConfig.direction === 'desc' ? 'top' : 'bottom';
-  const atEdgeRef = useRef(true);
+  const atEdgeRef = useRef(listFollow ?? true);
   const [newSinceAnchor, setNewSinceAnchor] = useState(0);
   // The row pinned to the top of the viewport while anchored, and its offset
   // from the scroll-container top. Captured from user scrolls only.
-  const anchorRef = useRef<{ key: string; offset: number } | null>(null);
+  const anchorRef = useRef<{ key: string; offset: number } | null>(
+    listAnchorKey ? { key: listAnchorKey, offset: 0 } : null
+  );
   const programmaticScrollRef = useRef(false);
   // Zebra stripes must stay with a telegram, not with a row index (#266):
   // prepends at the live edge shift every index by the number of new rows, so
   // this offset accumulates those shifts and is added back to the index parity.
   const [stripeOffset, setStripeOffset] = useState(0);
+
+  // Sync props to refs
+  useEffect(() => {
+    if (listFollow !== undefined) {
+      atEdgeRef.current = listFollow;
+    }
+  }, [listFollow]);
+
+  useEffect(() => {
+    if (listAnchorKey !== undefined) {
+      if (listAnchorKey === null) {
+        anchorRef.current = null;
+      } else if (!anchorRef.current || anchorRef.current.key !== listAnchorKey) {
+        anchorRef.current = { key: listAnchorKey, offset: 0 };
+      }
+    }
+  }, [listAnchorKey]);
 
   // Suppress edge/anchor tracking for scrolls we cause ourselves. Auto-clears on
   // the next frame so a no-op programmatic scroll can't swallow a later real one.
@@ -282,7 +337,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       const rr = row.getBoundingClientRect();
       if (rr.bottom - cTop > 0) {
         const key = row.getAttribute('data-akey');
-        if (key) anchorRef.current = { key, offset: rr.top - cTop };
+        if (key) {
+          anchorRef.current = { key, offset: rr.top - cTop };
+          onListAnchorKeyChange?.(key);
+        }
         return;
       }
     }
@@ -292,10 +350,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     // Ignore the scrolls our own compensation triggers.
     if (programmaticScrollRef.current) return;
     const atEdge = checkAtEdge();
-    atEdgeRef.current = atEdge;
+    if (atEdge !== atEdgeRef.current) {
+      atEdgeRef.current = atEdge;
+      onListFollowChange?.(atEdge);
+    }
     if (atEdge) {
       setNewSinceAnchor(0);
       anchorRef.current = null;
+      onListAnchorKeyChange?.(null);
     } else {
       captureAnchor();
     }
@@ -306,6 +368,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const handleRowClick = () => {
     if (!isTimeSort || !atEdgeRef.current) return;
     atEdgeRef.current = false;
+    onListFollowChange?.(false);
     captureAnchor();
   };
 
@@ -316,7 +379,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
   const jumpToLive = () => {
     atEdgeRef.current = true;
+    onListFollowChange?.(true);
     anchorRef.current = null;
+    onListAnchorKeyChange?.(null);
     setNewSinceAnchor(0);
     scrollToEdge();
   };
@@ -335,6 +400,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     }
     atEdgeRef.current = false;
+    onListFollowChange?.(false);
     setNewSinceAnchor(0);
     markProgrammatic();
     virtualizer.scrollToIndex(bestIdx, { align: 'center' });
@@ -343,6 +409,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     requestAnimationFrame(() => requestAnimationFrame(() => {
       captureAnchor();
       atEdgeRef.current = false;
+      onListFollowChange?.(false);
     }));
   };
 
@@ -352,21 +419,12 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     : null;
 
   // Correct scrollTop so the anchored row keeps its recorded viewport offset.
-  // Both edges need this. Newest-first (top edge) prepends live rows above the
-  // viewport; oldest-first (bottom edge) looks safe — bottom-appends don't move
-  // content above the viewport — until the buffer hits capacity, when each new
-  // telegram also evicts the oldest from the head, i.e. the top of the asc view,
-  // shifting everything above the viewport up and drifting the read row (#297).
-  // Progressive history chunks (#284) prepend older rows at the top of the asc
-  // view the same way; the measured pixel delta absorbs all of these uniformly.
   const pinAnchor = () => {
     const el = parentRef.current;
     const anchor = anchorRef.current;
     if (!el || !anchor || atEdgeRef.current) return;
     const now = rowOffset(anchor.key);
     if (now == null) {
-      // The anchored row was evicted out from under us (#297): re-pin to the
-      // current top-most visible row so freezing continues from where we are.
       captureAnchor();
       return;
     }
@@ -382,9 +440,43 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     setNewSinceAnchor(0);
     setStripeOffset(0);
     anchorRef.current = null;
-    atEdgeRef.current = checkAtEdge();
+    onListAnchorKeyChange?.(null);
+    const atEdge = checkAtEdge();
+    if (atEdge !== atEdgeRef.current) {
+      atEdgeRef.current = atEdge;
+      onListFollowChange?.(atEdge);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortConfig]);
+
+  // Restore scroll position/anchor on mount (#203, #341)
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || telegramRows.length === 0) return;
+    restoredRef.current = true;
+
+    if (atEdgeRef.current) {
+      scrollToEdge();
+    } else if (listAnchorKey) {
+      const idx = telegramRows.findIndex(t => anchorKey(t) === listAnchorKey);
+      if (idx !== -1) {
+        markProgrammatic();
+        virtualizer.scrollToIndex(idx, { align: 'start' });
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const offset = rowOffset(listAnchorKey);
+          if (offset != null) {
+            anchorRef.current = { key: listAnchorKey, offset };
+            pinAnchor();
+          }
+        }));
+      } else {
+        jumpToLive();
+      }
+    } else {
+      scrollToEdge();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telegramRows.length]);
 
   // React to list updates before paint: follow the live edge, or pin the
   // anchored row by correcting scrollTop by its real pixel shift.
@@ -405,7 +497,6 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const prevEdgeKey = liveEdge === 'top' ? prev.firstKey : prev.lastKey;
     if (!prevEdgeKey || edgeKey === prevEdgeKey) return; // nothing new at the live edge
 
-    // How many rows appeared at the live edge (for the pill count).
     let added = -1;
     if (liveEdge === 'top') {
       for (let i = 0; i < rows.length; i++) if (anchorKey(rows[i]) === prevEdgeKey) { added = i; break; }
@@ -414,16 +505,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
 
     if (added <= 0) {
-      // Previous edge vanished: list replaced (clear / filter / history load).
       anchorRef.current = null;
+      onListAnchorKeyChange?.(null);
       setNewSinceAnchor(0);
       setStripeOffset(0);
       return;
     }
 
-    // Keep each row's stripe color across the update (#266). Existing rows
-    // shift down by `added` on top-prepends; with the buffer at capacity the
-    // asc view instead drops rows from the head, shifting indexes up.
     const dropped = prev.len + added - rows.length;
     const indexShift = liveEdge === 'top' ? added : -dropped;
     setStripeOffset(o => (((o + indexShift) % 2) + 2) % 2);
@@ -434,14 +522,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
 
     setNewSinceAnchor(n => n + added);
-    pinAnchor(); // pre-paint; the total-size effect re-pins after re-measure
+    pinAnchor();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramRows]);
 
-  // Re-pin whenever the measured content size changes. Prepended rows enter at
-  // the 85px estimate and shrink to their real height a frame later (async
-  // ResizeObserver), shifting everything below; this fires on that re-measure
-  // and cancels the shift, so the anchored row stays put across variable heights.
   const totalSize = virtualizer.getTotalSize();
   useLayoutEffect(() => {
     pinAnchor();
@@ -722,7 +806,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <input
                   className="quick-filter-bar-input"
                   type="text"
-                  value={quickPatterns[c.id] ?? ''}
+                  value={currentPatterns[c.id] ?? ''}
                   placeholder="regex…"
                   aria-label={`Quick filter ${c.label}`}
                   onChange={e => setQuickPatterns(prev => ({ ...prev, [c.id]: e.target.value }))}

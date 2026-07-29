@@ -21,6 +21,14 @@ interface LastSeenOverlayProps {
   writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
   onClose: () => void;
+
+  limit?: number;
+  onLimitChange?: (limit: number) => void;
+  autoRefresh?: boolean;
+  onAutoRefreshChange?: (refresh: boolean) => void;
+  search?: string;
+  onSearchChange?: (search: string) => void;
+  onSelectionChange?: (mode: 'ga' | 'pa', addresses: string[]) => void;
 }
 
 const getTypeColor = (type?: string | null) => {
@@ -55,15 +63,57 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   writeEnabled = false,
   latestTelegram,
   onClose,
+  limit: limitProp,
+  onLimitChange,
+  autoRefresh: autoRefreshProp,
+  onAutoRefreshChange,
+  search: searchProp,
+  onSearchChange,
+  onSelectionChange,
 }) => {
   const [mode, setMode] = useState<'ga' | 'pa'>(initialMode);
   const [selectedAddresses, setSelectedAddresses] = useState<string[]>(initialAddresses);
-  const [limit, setLimit] = useState<number>(20);
-  const [search, setSearch] = useState('');
+  const [internalLimit, setInternalLimit] = useState<number>(20);
+  const limit = limitProp !== undefined ? limitProp : internalLimit;
+  const setLimit = (val: number | ((prev: number) => number)) => {
+    const next = typeof val === 'function' ? val(limit) : val;
+    setInternalLimit(next);
+    onLimitChange?.(next);
+  };
+  const [internalSearch, setInternalSearch] = useState('');
+  const search = searchProp !== undefined ? searchProp : internalSearch;
+  const setSearch = (val: string | ((prev: string) => string)) => {
+    const next = typeof val === 'function' ? val(search) : val;
+    setInternalSearch(next);
+    onSearchChange?.(next);
+  };
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [internalAutoRefresh, setInternalAutoRefresh] = useState(false);
+  const autoRefresh = autoRefreshProp !== undefined ? autoRefreshProp : internalAutoRefresh;
+  const setAutoRefresh = (val: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof val === 'function' ? val(autoRefresh) : val;
+    setInternalAutoRefresh(next);
+    onAutoRefreshChange?.(next);
+  };
+
+  // Sync props to selection state (loop-safe)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMode(prev => prev !== initialMode ? initialMode : prev);
+    setSelectedAddresses(prev => {
+      if (prev.length !== initialAddresses.length || prev.some((v, i) => v !== initialAddresses[i])) {
+        return initialAddresses;
+      }
+      return prev;
+    });
+  }, [initialMode, initialAddresses]);
+
+  // Sync selection state back to parent
+  useEffect(() => {
+    onSelectionChange?.(mode, selectedAddresses);
+  }, [mode, selectedAddresses, onSelectionChange]);
   const [writeValue, setWriteValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);

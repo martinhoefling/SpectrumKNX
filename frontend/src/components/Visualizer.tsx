@@ -19,10 +19,13 @@ interface VisualizerProps {
   getShareLink?: () => string;
   /** Chart-area-only rendering for iframe/dashboard embedding (#150). */
   embed?: boolean;
+  zoomRange?: [number, number] | null;
+  onZoomRangeChange?: (range: [number, number] | null) => void;
 }
 
 export const Visualizer: React.FC<VisualizerProps> = ({
   telegrams, selectedTargets, onTargetsChange, onClose, getShareLink, embed = false,
+  zoomRange, onZoomRangeChange,
 }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
@@ -72,14 +75,20 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     return expandDegenerateRange(minTime ?? 0, maxTime ?? 0);
   }, [minTime, maxTime]);
 
-  const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
+  const [internalZoomRange, setInternalZoomRange] = useState<[number, number] | null>(null);
+  const currentZoomRange = zoomRange !== undefined ? zoomRange : internalZoomRange;
+  const setZoomRange = (val: [number, number] | null | ((prev: [number, number] | null) => [number, number] | null)) => {
+    const next = typeof val === 'function' ? val(currentZoomRange) : val;
+    setInternalZoomRange(next);
+    onZoomRangeChange?.(next);
+  };
 
   const activeRange = useMemo<[number, number]>(() => {
-    if (!zoomRange || minTime === null || maxTime === null) return defaultRange;
-    const left = Math.max(minTime, Math.min(maxTime, zoomRange[0]));
-    const right = Math.max(left, Math.min(maxTime, zoomRange[1]));
+    if (!currentZoomRange || minTime === null || maxTime === null) return defaultRange;
+    const left = Math.max(minTime, Math.min(maxTime, currentZoomRange[0]));
+    const right = Math.max(left, Math.min(maxTime, currentZoomRange[1]));
     return [left, right];
-  }, [zoomRange, minTime, maxTime, defaultRange]);
+  }, [currentZoomRange, minTime, maxTime, defaultRange]);
 
   // Deselecting a target clears any legend-hide on it, so reselecting the same
   // target shows its series again instead of staying invisible (#205).
@@ -124,7 +133,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   // With no active zoom the charts should track the data as the buffer grows, so
   // a new (or history-loaded) telegram that extends the range stays on screen
   // instead of dropping off a frozen scale (#340). A user zoom freezes it (#281).
-  const autoFollow = zoomRange === null;
+  const autoFollow = currentZoomRange === null;
 
   const charts = (
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
