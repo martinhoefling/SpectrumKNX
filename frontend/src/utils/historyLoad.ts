@@ -26,16 +26,32 @@ export function applyFilterParams(url: string, filters?: ActiveFilters): string 
   return url + (url.includes('?') ? '&' : '?') + params.join('&');
 }
 
+/** Converts local datetime-local string to UTC ISO string, returns empty string if invalid. */
+function localToUtcIso(localStr: string): string {
+  if (!localStr) return '';
+  const d = new Date(localStr);
+  return isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+/** Converts local datetime-local string to epoch milliseconds, returns fallback if invalid. */
+function localToEpochMs(localStr: string, fallback: number): number {
+  if (!localStr) return fallback;
+  const d = new Date(localStr);
+  return isNaN(d.getTime()) ? fallback : d.getTime();
+}
+
 /** Builds the /api/telegrams URL for a range. Times use the loader's
- * datetime-local format ("YYYY-MM-DDTHH:MM", treated as UTC). */
+ * datetime-local format ("YYYY-MM-DDTHH:MM", interpreted in the local timezone). */
 export function buildHistoryUrl(range: LoadedRange, limit: number): string {
   let url = apiUrl(`/api/telegrams?limit=${limit}`);
   if (range.kind === 'relative') {
     const start = new Date(Date.now() - range.seconds * 1000).toISOString();
     url += `&start_time=${encodeURIComponent(start)}`;
   } else {
-    if (range.startTime) url += `&start_time=${encodeURIComponent(range.startTime + ':00Z')}`;
-    if (range.endTime) url += `&end_time=${encodeURIComponent(range.endTime + ':00Z')}`;
+    const startUtc = localToUtcIso(range.startTime);
+    if (startUtc) url += `&start_time=${encodeURIComponent(startUtc)}`;
+    const endUtc = localToUtcIso(range.endTime);
+    if (endUtc) url += `&end_time=${encodeURIComponent(endUtc)}`;
   }
   return url;
 }
@@ -46,8 +62,8 @@ export function rangeToMs(range: LoadedRange, nowMs = Date.now()): { startMs: nu
     return { startMs: nowMs - range.seconds * 1000, endMs: nowMs };
   }
   return {
-    startMs: range.startTime ? Date.parse(range.startTime + ':00Z') : 0,
-    endMs: range.endTime ? Date.parse(range.endTime + ':00Z') : nowMs,
+    startMs: localToEpochMs(range.startTime, 0),
+    endMs: localToEpochMs(range.endTime, nowMs),
   };
 }
 
