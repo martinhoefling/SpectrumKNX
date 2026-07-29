@@ -107,6 +107,8 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   const pausedRef = useRef(false);
   /** Bumped by clear() to invalidate any background load still in flight (#339). */
   const loadGenerationRef = useRef(0);
+  /** Number of in-flight IDB store() calls — coverage saves are deferred while > 0 (#317). */
+  const pendingStoreCountRef = useRef(0);
 
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [pausedCount, setPausedCount] = useState(0);
@@ -135,6 +137,9 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   );
 
   const saveCoverage = useCallback(() => {
+    // Defer saving while IDB writes are in flight so a crash between the
+    // coverage save and the IDB commit can't leave orphaned coverage (#317).
+    if (pendingStoreCountRef.current > 0) return;
     saveCoverageIntervals(coverageRef.current!.covered);
   }, []);
 
@@ -144,9 +149,13 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
    * `HISTORY_CHUNK_SIZE` requests until the gap is exhausted or `budget` rows
    * have been fetched; a budget cut-off leaves the older remainder uncovered for
    * a later load. Returns how many telegrams were fetched (for cross-gap budgeting).
+   *
+   * When `skipBufferFullBreak` is true (user-initiated loads), the full-buffer
+   * early break (#313) is disabled so the entire requested range is fetched and
+   * persisted to IDB, even if the in-memory buffer evicts older entries (#317).
    */
   const fetchGapProgressive = useCallback(
-    async (gapStart: number, gapEnd: number, budget: number): Promise<number> => {
+    async (gapStart: number, gapEnd: number, budget: number, skipBufferFullBreak = false): Promise<number> => {
       const gen = loadGenerationRef.current;
       let cursor = gapEnd;
       let fetched = 0;
@@ -155,9 +164,12 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
         // evicted the instant it arrives. Stop paging backward instead of
         // fetching chunks only to discard them (#313). The skipped remainder
         // stays uncovered so it loads on demand once there is room.
-        const buf = bufferRef.current!;
-        if (buf.length >= maxSize && buf.oldestTs !== null && cursor < buf.oldestTs) {
-          break;
+        // User-initiated loads bypass this to fill the full range (#317).
+        if (!skipBufferFullBreak) {
+          const buf = bufferRef.current!;
+          if (buf.length >= maxSize && buf.oldestTs !== null && cursor < buf.oldestTs) {
+            break;
+          }
         }
         const limit = Math.min(HISTORY_CHUNK_SIZE, budget - fetched);
         const { entries, limitReached } = await fetchRange(gapStart, cursor, limit);
@@ -174,9 +186,10 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
         // Mark the range covered only once its rows are actually persisted. If
         // the cache write fails (e.g. IndexedDB quota), leaving coverage claiming
         // a range the cache can't serve surfaces later as a permanent gap (#317).
+        pendingStoreCountRef.current++;
         const stored = await cacheRef.current!.store(entries).then(
-          () => true,
-          () => false,
+          () => { pendingStoreCountRef.current--; return true; },
+          () => { pendingStoreCountRef.current--; return false; },
         );
         fetched += entries.length;
         const oldestTs = entries[entries.length - 1].ts;
@@ -201,14 +214,16 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
    * chunk, up to `budget` telegrams total. Older gaps (and the remainder of the
    * gap where the budget runs out) stay uncovered for on-demand loading, so a
    * load never blocks on more history than asked for (#284).
+   *
+   * `skipBufferFullBreak` is forwarded to `fetchGapProgressive` (#317).
    */
   const fillGapsBudgeted = useCallback(
-    async (startMs: number, endMs: number, budget: number) => {
+    async (startMs: number, endMs: number, budget: number, skipBufferFullBreak = false) => {
       const gen = loadGenerationRef.current;
       const gaps = coverageRef.current!.gaps(startMs, endMs);
       let remaining = budget;
       for (let i = gaps.length - 1; i >= 0 && remaining > 0; i--) {
-        remaining -= await fetchGapProgressive(gaps[i][0], gaps[i][1], remaining);
+        remaining -= await fetchGapProgressive(gaps[i][0], gaps[i][1], remaining, skipBufferFullBreak);
         // A buffer clear invalidated this load — don't start further gaps (#339).
         if (loadGenerationRef.current !== gen) return;
       }
@@ -217,9 +232,11 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
     [fetchGapProgressive, saveCoverage],
   );
 
-  /** Fills every uncovered sub-range of [startMs, endMs], bounded by the buffer size. */
+  /** Fills every uncovered sub-range of [startMs, endMs], bounded by the buffer size.
+   *  `skipBufferFullBreak` is forwarded to `fetchGapProgressive` (#317). */
   const fillGaps = useCallback(
-    (startMs: number, endMs: number) => fillGapsBudgeted(startMs, endMs, maxSize),
+    (startMs: number, endMs: number, skipBufferFullBreak = false) =>
+      fillGapsBudgeted(startMs, endMs, maxSize, skipBufferFullBreak),
     [fillGapsBudgeted, maxSize],
   );
 
@@ -248,7 +265,8 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
         // A buffer clear during the cache read invalidates this load (#339).
         if (loadGenerationRef.current !== gen) return;
         if (cached.length > 0 && mergeIntoBuffer(cached)) publish();
-        await fillGaps(startMs, endMs);
+        // User-initiated: bypass the full-buffer early break (#317).
+        await fillGaps(startMs, endMs, /* skipBufferFullBreak */ true);
       }),
     [runLoad, mergeIntoBuffer, publish, fillGaps],
   );
@@ -312,7 +330,11 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
       const pending = pendingRef.current;
       if (pending.length > 0) {
         pendingRef.current = [];
-        cacheRef.current!.store(pending).catch(() => {});
+        pendingStoreCountRef.current++;
+        cacheRef.current!.store(pending).then(
+          () => { pendingStoreCountRef.current--; saveCoverage(); },
+          () => { pendingStoreCountRef.current--; },
+        );
       }
       // A quiet-but-connected stream still covers the elapsed time.
       if (connectedRef.current) coverageRef.current!.extendLive(Date.now());
@@ -363,12 +385,16 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
       if (pendingRef.current.length >= FLUSH_BATCH_SIZE) {
         const batch = pendingRef.current;
         pendingRef.current = [];
-        cacheRef.current!.store(batch).catch(() => {});
+        pendingStoreCountRef.current++;
+        cacheRef.current!.store(batch).then(
+          () => { pendingStoreCountRef.current--; saveCoverage(); },
+          () => { pendingStoreCountRef.current--; },
+        );
       }
       if (pausedRef.current) setPausedCount(c => c + 1);
       else publish();
     },
-    [trackRemoved, publish],
+    [trackRemoved, publish, saveCoverage],
   );
 
   const setConnected = useCallback(

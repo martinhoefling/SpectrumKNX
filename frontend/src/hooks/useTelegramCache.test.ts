@@ -293,7 +293,7 @@ describe('useTelegramCache', () => {
     expect(saved.some(([s]) => s === 0)).toBe(false);
   });
 
-  it('stops backing off older history once the buffer is full (#313)', async () => {
+  it('loadRange pages through the full range even when the buffer is full (#317)', async () => {
     // Buffer size 2, filled with the two newest (live) telegrams.
     const { result } = renderHook(() => useTelegramCache(2));
     await settle(result);
@@ -303,16 +303,45 @@ describe('useTelegramCache', () => {
     });
     expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.live2', '1.2.live1']);
 
-    // Requesting older history: every fetched row would be older than the
-    // buffer's oldest entry and evicted on arrival, so no backend request is made.
+    // User-initiated loadRange bypasses the full-buffer early break (#317):
+    // older data IS fetched and persisted to IDB, even though the in-memory
+    // buffer will evict it (buffer is at capacity with newer rows).
+    telegramResponses.push({ telegrams: [tg(3000, 'old')] });
     const before = fetchCalls.filter(u => u.includes('/api/telegrams')).length;
     await act(async () => {
       await result.current.loadRange(1000, 5000);
     });
     const loadFetches = fetchCalls.filter(u => u.includes('/api/telegrams')).length - before;
 
-    expect(loadFetches).toBe(0);
-    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.live2', '1.2.live1']);
+    // A fetch WAS made (the old behavior would have skipped it entirely).
+    expect(loadFetches).toBeGreaterThan(0);
+    // The fetched telegram is persisted in IDB even if it got evicted from buffer.
+    expect(_idb.has(toEntry(tg(3000, 'old')).id)).toBe(true);
+  });
+
+  it('startup gap fill still stops early when the buffer is full (#313)', async () => {
+    // Buffer size 2 with prior coverage forcing a gap below the buffer window.
+    localStorage.setItem(COVERAGE_STORAGE_KEY, JSON.stringify([[1000, 9000]]));
+    seedIdb([tg(8000, 'a'), tg(9000, 'b')]);
+    telegramResponses.push({ telegrams: [] }); // startup gap [9001, now]
+
+    const { result } = renderHook(() => useTelegramCache(2));
+    await settle(result);
+
+    // The automatic startup restore still respects the full-buffer early break.
+    // Reconnect gap fills hit fillGaps without skipBufferFullBreak.
+    act(() => { result.current.setConnected(true); });
+    act(() => { result.current.setConnected(false); });
+    act(() => { result.current.setConnected(true); });
+
+    // Only the reconnect gap [disconnect..now] is fetched, not older gaps.
+    const reconnectFetches = fetchCalls
+      .filter(u => u.includes('/api/telegrams'))
+      .filter(u => {
+        const p = new URLSearchParams(u.split('?')[1]);
+        return Date.parse(p.get('end_time')!) < 8000;
+      });
+    expect(reconnectFetches).toHaveLength(0);
   });
 
   it('does not mark a range covered when the cache write fails (#317)', async () => {
@@ -333,6 +362,46 @@ describe('useTelegramCache', () => {
     expect(result.current.telegrams.map(t => t.source_address)).toContain('1.2.x');
     const saved = JSON.parse(localStorage.getItem(COVERAGE_STORAGE_KEY)!) as [number, number][];
     expect(saved.some(([s, e]) => s <= 5000 && 5000 <= e)).toBe(false);
+  });
+
+  it('defers coverage persistence while IDB writes are in flight (#317)', async () => {
+    // Use a gated store to keep the IDB write pending.
+    let releaseStore: () => void = () => {};
+    const storeGate = new Promise<void>(res => { releaseStore = res; });
+    let storeGateArmed = false;
+    const origSetMany = vi.mocked(await import('idb-keyval')).setMany;
+    vi.mocked(await import('idb-keyval')).setMany = vi.fn(async (...args: Parameters<typeof origSetMany>) => {
+      if (storeGateArmed) await storeGate;
+      return origSetMany(...args);
+    }) as unknown as typeof origSetMany;
+
+    const { result } = renderHook(() => useTelegramCache(1000));
+    await settle(result);
+
+    // Arm the gate so the next IDB write blocks.
+    storeGateArmed = true;
+    localStorage.removeItem(COVERAGE_STORAGE_KEY);
+
+    // Add a live telegram — its batch flush will start a pending store.
+    act(() => {
+      for (let i = 0; i < 200; i++) result.current.addLive(tg(1000 + i, `batch${i}`));
+    });
+
+    // Coverage should NOT have been saved while the write is in flight.
+    expect(localStorage.getItem(COVERAGE_STORAGE_KEY)).toBeNull();
+
+    // Release the store and let the deferred save run.
+    await act(async () => {
+      releaseStore();
+      // Allow microtasks to flush.
+      await new Promise(r => setTimeout(r, 10));
+    });
+
+    // Now coverage should be persisted.
+    expect(localStorage.getItem(COVERAGE_STORAGE_KEY)).not.toBeNull();
+
+    // Restore the original mock.
+    vi.mocked(await import('idb-keyval')).setMany = origSetMany;
   });
 
   it('records a load failure without breaking the buffer', async () => {
