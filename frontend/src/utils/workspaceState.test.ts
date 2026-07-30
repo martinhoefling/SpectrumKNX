@@ -24,7 +24,8 @@ const sampleWorkspace = (): WorkspaceState => ({
     dpts: ['1.001', '9'],
     deltaBeforeMs: 500,
     deltaAfterMs: 1000,
-    sourceTargetRelation: 'OR',
+    // Only AND round-trips now — `rel_st` is no longer written (#275).
+    sourceTargetRelation: 'AND',
   },
   plot: ['0/1/2'],
   lastSeenAddresses: ['0/1/2'],

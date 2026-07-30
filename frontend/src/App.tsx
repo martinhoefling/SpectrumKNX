@@ -217,6 +217,9 @@ function App() {
   const [lastSeenLimit, setLastSeenLimit] = useState(initialUiState.lastSeenLimit);
   const [lastSeenLive, setLastSeenLive] = useState(initialUiState.lastSeenLive);
   const [lastSeenSearch, setLastSeenSearch] = useState(initialUiState.lastSeenSearch);
+  // Master enable/disable of the filter set (#370): when off the list shows all
+  // telegrams while activeFilters is preserved.
+  const [filtersEnabled, setFiltersEnabled] = useState(initialUiState.filtersEnabled);
   const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>(
     initialView ? 'history' : initialWorkspace?.tab ?? 'live',
   );
@@ -475,6 +478,7 @@ function App() {
         lastSeenLimit,
         lastSeenLive,
         lastSeenSearch,
+        filtersEnabled,
       });
     }, 500);
     return () => clearTimeout(handle);
@@ -490,6 +494,7 @@ function App() {
     lastSeenLimit,
     lastSeenLive,
     lastSeenSearch,
+    filtersEnabled,
   ]);
 
   // ── Rate Calculation Loop ───────────────────────────────────────────────────
@@ -595,12 +600,14 @@ function App() {
   // ── In-memory filtering (live view) ────────────────────────────────────────
   const filteredLiveTelegrams = useMemo(() => {
     const f = activeFilters;
+    // Master toggle off (#370): show everything, keep the filter set intact.
     const noFilter =
-      f.sources.length === 0 &&
+      !filtersEnabled ||
+      (f.sources.length === 0 &&
       f.targets.length === 0 &&
       f.types.length === 0 &&
       f.directions.length === 0 &&
-      f.dpts.length === 0;
+      f.dpts.length === 0);
 
     // Step 1: mark each row as matching / not-matching
     const matches = sortedLiveTelegrams.map(t =>
@@ -627,7 +634,7 @@ function App() {
         (ts >= mts - f.deltaBeforeMs) && (ts <= mts + f.deltaAfterMs)
       );
     });
-  }, [sortedLiveTelegrams, activeFilters]);
+  }, [sortedLiveTelegrams, activeFilters, filtersEnabled]);
 
   // ── Count bubbles (live only) ───────────────────────────────────────────────
   const filterCounts = useMemo((): FilterCounts => {
@@ -1077,6 +1084,8 @@ function App() {
                     projectLoaded={projectStatus?.project_loaded}
                     onUploadProject={() => setIsSettingsOpen(true)}
                     writeEnabled={serverConfig?.status?.write_enabled}
+                    filtersEnabled={filtersEnabled}
+                    onFiltersEnabledChange={setFiltersEnabled}
                   />
                 </div>
               </div>
@@ -1162,7 +1171,7 @@ function App() {
                         title="Toggle filter panel"
                         style={{
                           position: 'relative',
-                          color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)',
+                          color: isFilterOpen || (hasActiveFilters(activeFilters) && filtersEnabled) ? 'var(--accent-primary)' : 'var(--text-dim)',
                         }}
                       >
                         <SlidersHorizontal size={18} />
@@ -1171,7 +1180,8 @@ function App() {
                             position: 'absolute', top: -5, right: -5,
                             fontSize: '0.55rem', fontWeight: 700, minWidth: 14, height: 14,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'var(--accent-primary)', color: 'white', borderRadius: '999px',
+                            background: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
+                            color: 'white', borderRadius: '999px',
                           }}>{activeFilterCount}</span>
                         )}
                       </button>

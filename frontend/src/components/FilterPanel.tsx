@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, ChevronDown, ChevronRight, SlidersHorizontal, X, Clock, FolderInput, AlertTriangle } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, SlidersHorizontal, X, Clock, FolderInput, AlertTriangle, Power } from 'lucide-react';
 import {
   type FilterOptions,
   type ActiveFilters,
@@ -52,6 +52,14 @@ interface FilterPanelProps {
   /** Opens the project upload flow (Settings). Enables the notice's CTA button. */
   onUploadProject?: () => void;
   writeEnabled?: boolean;
+  /**
+   * Master enable/disable of the whole filter set (live mode only, #370). When
+   * `false` the list shows all telegrams while `activeFilters` is preserved. Absent
+   * behaves as enabled; the toggle renders only when `onFiltersEnabledChange` is
+   * provided and `mode === 'live'`.
+   */
+  filtersEnabled?: boolean;
+  onFiltersEnabledChange?: (enabled: boolean) => void;
 }
 
 interface SectionProps {
@@ -200,8 +208,15 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   projectLoaded,
   onUploadProject,
   writeEnabled,
+  filtersEnabled = true,
+  onFiltersEnabledChange,
 }) => {
   const [search, setSearch] = useState('');
+  // The pane shows one of two views (#370): Edit filters (category controls) or
+  // Active filters (the current set). No auto-inserted active block, so editing
+  // never repositions entries (#87).
+  const [view, setView] = useState<'edit' | 'active'>('edit');
+  const showMasterToggle = mode === 'live' && !!onFiltersEnabledChange;
 
   // Source/target/DPT options come from the ETS project. Without one, those
   // filters are empty and searching them turns up nothing — surface why.
@@ -275,40 +290,81 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           {activeCount > 0 && (
             <span style={{
               fontSize: '0.65rem', fontWeight: 700, padding: '0.1rem 0.45rem',
-              borderRadius: '999px', background: 'var(--accent-primary)', color: 'white',
+              borderRadius: '999px',
+              background: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
+              color: 'white',
             }}>
               {activeCount}
             </span>
           )}
         </div>
-        {activeCount > 0 && (
-          <button
-            onClick={() => onFiltersChange(DEFAULT_FILTERS)}
-            title="Clear all filters"
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: 'var(--text-dim)', display: 'flex', alignItems: 'center',
-              padding: '0.2rem', borderRadius: '4px', transition: 'color 0.15s',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-main)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
-          >
-            <X size={14} />
-          </button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          {/* Master enable/disable — keeps the set, hides its effect (#370) */}
+          {showMasterToggle && (
+            <button
+              onClick={() => onFiltersEnabledChange!(!filtersEnabled)}
+              title={filtersEnabled ? 'Disable all filters (keeps them)' : 'Enable filters'}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
+                display: 'flex', alignItems: 'center', padding: '0.2rem', borderRadius: '4px',
+              }}
+            >
+              <Power size={14} />
+            </button>
+          )}
+          {activeCount > 0 && (
+            <button
+              onClick={() => onFiltersChange(DEFAULT_FILTERS)}
+              title="Clear all filters"
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'var(--text-dim)', display: 'flex', alignItems: 'center',
+                padding: '0.2rem', borderRadius: '4px', transition: 'color 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-main)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Active filters */}
-      {activeCount > 0 && (
-        <div style={{
-          padding: '0.5rem 0.75rem',
-          borderBottom: '1px solid var(--border-color)',
-          background: 'var(--bg-subtle)',
-          flexShrink: 0,
-          overflowY: 'auto',
-          maxHeight: '40%',
-        }}>
-          <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem', paddingLeft: '0.25rem' }}>Active Filters</div>
+      {/* View toggle: Edit filters ↔ Active filters (#370) */}
+      <div style={{
+        display: 'flex', gap: '0.25rem', padding: '0.5rem 0.75rem',
+        borderBottom: '1px solid var(--border-color)', flexShrink: 0,
+      }}>
+        {(['edit', 'active'] as const).map(v => {
+          const isActive = view === v;
+          return (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              style={{
+                flex: 1, padding: '0.35rem 0.5rem', borderRadius: '6px',
+                fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
+                border: '1px solid',
+                borderColor: isActive ? 'var(--accent-primary)' : 'var(--border-color)',
+                background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+                color: isActive ? 'var(--accent-primary)' : 'var(--text-dim)',
+              }}
+            >
+              {v === 'edit' ? 'Edit filters' : 'Active filters'}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Active filters view */}
+      {view === 'active' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0.75rem' }}>
+          {activeCount === 0 && (
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '0.5rem 0.25rem', lineHeight: 1.5 }}>
+              No active filters. Switch to <strong>Edit filters</strong> to add some.
+            </div>
+          )}
           {activeFilters.sources.map(s => {
             const name = options.sources.find(opt => opt.address === s)?.name;
             return (
@@ -324,23 +380,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               />
             );
           })}
-          {activeFilters.sources.length > 0 && activeFilters.targets.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.2rem 0.25rem' }}>
-              {(['AND', 'OR'] as const).map(m => (
-                <button
-                  key={m}
-                  onClick={() => update({ sourceTargetRelation: m })}
-                  style={{
-                    padding: '0.1rem 0.45rem', borderRadius: '4px', fontSize: '0.65rem',
-                    fontWeight: 600, cursor: 'pointer', border: '1px solid',
-                    borderColor: activeFilters.sourceTargetRelation === m ? 'var(--accent-primary)' : 'var(--border-color)',
-                    background: activeFilters.sourceTargetRelation === m ? 'rgba(99,102,241,0.15)' : 'transparent',
-                    color: activeFilters.sourceTargetRelation === m ? 'var(--accent-primary)' : 'var(--text-dim)',
-                  }}
-                >{m}</button>
-              ))}
-            </div>
-          )}
           {activeFilters.targets.map(t => {
             const opt = options.targets.find(o => o.address === t);
             return (
@@ -406,6 +445,8 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         </div>
       )}
 
+      {/* Edit filters view: search + category sections */}
+      {view === 'edit' && (<>
       {/* Search bar */}
       <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
         <div style={{
@@ -492,31 +533,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               writeEnabled={writeEnabled}
             />
           </Section>
-        )}
-
-        {/* AND / OR relation toggle — shown only when both sides have active selections */}
-        {activeFilters.sources.length > 0 && activeFilters.targets.length > 0 && (
-          <div style={{ padding: '0.4rem 1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>Combine as</span>
-            {(['AND', 'OR'] as const).map(mode => (
-              <button
-                key={mode}
-                onClick={() => update({ sourceTargetRelation: mode })}
-                title={mode === 'AND'
-                  ? 'Show telegrams matching a selected source AND a selected target'
-                  : 'Show telegrams matching any selected source OR any selected target'}
-                style={{
-                  padding: '0.15rem 0.55rem', borderRadius: '4px', fontSize: '0.7rem',
-                  fontWeight: 600, cursor: 'pointer', border: '1px solid',
-                  borderColor: activeFilters.sourceTargetRelation === mode ? 'var(--accent-primary)' : 'var(--border-color)',
-                  background: activeFilters.sourceTargetRelation === mode ? 'rgba(99,102,241,0.15)' : 'transparent',
-                  color: activeFilters.sourceTargetRelation === mode ? 'var(--accent-primary)' : 'var(--text-dim)',
-                }}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
         )}
 
         {/* Target */}
@@ -640,6 +656,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         </Section>
 
       </div>
+      </>)}
     </div>
   );
 };

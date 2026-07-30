@@ -12,6 +12,8 @@ export interface UiSessionState {
   lastSeenLimit: number;
   lastSeenLive: boolean;
   lastSeenSearch: string;
+  /** Master enable/disable of the filter set (#370); absent → enabled. */
+  filtersEnabled: boolean;
 }
 
 export const DEFAULT_UI_STATE: UiSessionState = {
@@ -28,6 +30,7 @@ export const DEFAULT_UI_STATE: UiSessionState = {
   lastSeenLimit: 20,
   lastSeenLive: true,
   lastSeenSearch: '',
+  filtersEnabled: true,
 };
 
 export const UI_STORAGE_KEY = 'spectrum-knx-ui';
@@ -85,5 +88,6 @@ function sanitize(p: Partial<StoredUiState>): UiSessionState {
     lastSeenLimit: typeof p.lastSeenLimit === 'number' ? p.lastSeenLimit : 20,
     lastSeenLive: typeof p.lastSeenLive === 'boolean' ? p.lastSeenLive : true,
     lastSeenSearch: typeof p.lastSeenSearch === 'string' ? p.lastSeenSearch : '',
+    filtersEnabled: typeof p.filtersEnabled === 'boolean' ? p.filtersEnabled : true,
   };
 }

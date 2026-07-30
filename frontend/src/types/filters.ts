@@ -32,19 +32,10 @@ export interface ActiveFilters {
   /** ms after a matching telegram to also include (0 = disabled) */
   deltaAfterMs: number;
   /**
-   * Controls how Source and Target filters combine when both are active.
-   *
-   * AND (default): a telegram must match a selected source AND a selected target.
-   *   Use when diagnosing traffic between specific devices and group addresses.
-   *
-   * OR: a telegram matches if it matches any selected source OR any selected target.
-   *   Use when you want to see everything from a device alongside everything sent
-   *   to a particular group address, regardless of which side triggered it.
-   *
-   * Within each category (multiple sources, multiple targets) the logic is always OR.
-   * OR mode requires two backend queries for history (one per side) whose results are
-   * merged client-side, because the knx-telegram-store library does not support
-   * cross-category OR natively.
+   * @deprecated All active filters combine with AND (#275); this no longer affects
+   * matching. Retained only so old shared links / workspaces carrying `rel_st=OR`
+   * still parse without error — they load and apply as AND. Cross-category OR returns
+   * later as multiple filter instances (#370). Do not read this for matching.
    */
   sourceTargetRelation: 'AND' | 'OR';
 }
@@ -101,11 +92,10 @@ export function matchesTelegram(t: FilterableTelegram, f: ActiveFilters): boolea
   const dirOk = f.directions.length === 0 || f.directions.includes(t.direction ?? '');
   const dptOk = f.dpts.length === 0 || matchesDpt(f.dpts, t.dpt_main, t.dpt_sub);
 
-  const srcTgtOk = f.sources.length > 0 && f.targets.length > 0
-    ? (f.sourceTargetRelation === 'OR' ? (srcMatch || tgtMatch) : (srcOk && tgtOk))
-    : (srcOk && tgtOk);
-
-  return srcTgtOk && typeOk && dirOk && dptOk;
+  // All active filters combine with AND (#275). `sourceTargetRelation` is retained
+  // on the type only for backward-compatible parsing of old `rel_st=OR` links; it no
+  // longer affects matching. OR returns later as multiple filter instances (#370).
+  return srcOk && tgtOk && typeOk && dirOk && dptOk;
 }
 
 export function hasActiveFilters(f: ActiveFilters): boolean {

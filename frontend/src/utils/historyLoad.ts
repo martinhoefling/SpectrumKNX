@@ -69,8 +69,7 @@ export function rangeToMs(range: LoadedRange, nowMs = Date.now()): { startMs: nu
 
 /**
  * Fetches history telegrams for a range with server-side filters applied.
- * OR source/target relation is handled with two queries merged client-side,
- * because the knx-telegram-store library only supports AND across the two.
+ * All active filters combine with AND (#275), so a single query suffices.
  */
 export async function loadHistoryTelegrams(
   range: LoadedRange,
@@ -78,34 +77,6 @@ export async function loadHistoryTelegrams(
   filters?: ActiveFilters,
 ): Promise<{ telegrams: Telegram[]; metadata: HistoryMetadata }> {
   const baseUrl = buildHistoryUrl(range, limit);
-  const isOrMode = filters?.sourceTargetRelation === 'OR'
-    && (filters.sources.length > 0)
-    && (filters.targets.length > 0);
-
-  if (isOrMode) {
-    const srcFilters = { ...filters, targets: [], sourceTargetRelation: 'AND' as const };
-    const tgtFilters = { ...filters, sources: [], sourceTargetRelation: 'AND' as const };
-    const [srcRes, tgtRes] = await Promise.all([
-      fetch(applyFilterParams(baseUrl, srcFilters)),
-      fetch(applyFilterParams(baseUrl, tgtFilters)),
-    ]);
-    if (!srcRes.ok || !tgtRes.ok) throw new Error(`Server error: ${srcRes.ok ? tgtRes.status : srcRes.status}`);
-    const [srcData, tgtData] = await Promise.all([srcRes.json(), tgtRes.json()]);
-
-    const seen = new Set<string>();
-    const merged: Telegram[] = [];
-    for (const t of [...(srcData.telegrams || []), ...(tgtData.telegrams || [])]) {
-      if (!seen.has(t.timestamp)) {
-        seen.add(t.timestamp);
-        merged.push(t);
-      }
-    }
-    // Re-sort descending (both halves arrive sorted but interleaved)
-    merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    const limitReached = (srcData.metadata?.limit_reached || tgtData.metadata?.limit_reached) ?? false;
-    return { telegrams: merged, metadata: { total_count: merged.length, limit_reached: limitReached } };
-  }
-
   const res = await fetch(applyFilterParams(baseUrl, filters));
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
   const data = await res.json();

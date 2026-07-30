@@ -57,7 +57,9 @@ describe('buildViewUrl', () => {
         dpts: ['9.001'],
         deltaBeforeMs: 250,
         deltaAfterMs: 0,
-        sourceTargetRelation: 'OR' as const,
+        // All filters combine with AND now (#275); `rel_st` is no longer written,
+        // so only AND round-trips. Old OR links are covered separately below.
+        sourceTargetRelation: 'AND' as const,
       },
       range: { kind: 'relative' as const, seconds: 6 * 3600 },
       limit: 10000,

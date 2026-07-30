@@ -27,6 +27,7 @@ test('round-trip save/load works correctly', () => {
     lastSeenLimit: 50,
     lastSeenLive: false,
     lastSeenSearch: 'lastseen',
+    filtersEnabled: false,
   };
 
   saveUiState(state);

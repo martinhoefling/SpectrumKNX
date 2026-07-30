@@ -101,7 +101,8 @@ export function buildViewUrl(state: {
   if (f.dpts.length > 0) p.set('dpt', f.dpts.join(','));
   if (f.deltaBeforeMs > 0) p.set('before', String(f.deltaBeforeMs));
   if (f.deltaAfterMs > 0) p.set('after', String(f.deltaAfterMs));
-  if (f.sourceTargetRelation === 'OR') p.set('rel_st', 'OR');
+  // `rel_st` is no longer written — all filters combine with AND (#275). Old links
+  // carrying rel_st=OR are still parsed above and load (harmlessly) as AND.
   if (state.range.kind === 'relative') {
     p.set('rel', formatRel(state.range.seconds));
   } else {

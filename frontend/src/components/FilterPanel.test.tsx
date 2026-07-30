@@ -80,11 +80,12 @@ test('active target rows offer send-to-GA and last-seen actions (#214)', () => {
     />
   );
 
-  const active = screen.getByText('Active Filters').parentElement!;
+  // Active rows live in the "Active filters" view (#370), not shown by default.
+  fireEvent.click(screen.getByRole('button', { name: 'Active filters' }));
   // One send trigger: the active GA target row (sources are PAs — no send).
-  expect(within(active).getAllByTitle('Send to this GA')).toHaveLength(1);
+  expect(screen.getAllByTitle('Send to this GA')).toHaveLength(1);
 
-  const lastSeen = within(active).getAllByTitle('Show last seen values');
+  const lastSeen = screen.getAllByTitle('Show last seen values');
   expect(lastSeen).toHaveLength(2); // source (PA) + target (GA)
   fireEvent.click(lastSeen[0]);
   expect(onQuickLastSeen).toHaveBeenCalledWith('1.2.3', 'pa');
@@ -104,9 +105,9 @@ test('hides the send action on active rows when writes are disabled', () => {
       onQuickLastSeen={() => {}}
     />
   );
-  const active = screen.getByText('Active Filters').parentElement!;
-  expect(within(active).queryByTitle('Send to this GA')).not.toBeInTheDocument();
-  expect(within(active).getAllByTitle('Show last seen values')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Active filters' }));
+  expect(screen.queryByTitle('Send to this GA')).not.toBeInTheDocument();
+  expect(screen.getAllByTitle('Show last seen values')).toHaveLength(2);
 });
 
 test('opens the quick-send popover from an active target row', async () => {
@@ -124,12 +125,74 @@ test('opens the quick-send popover from an active target row', async () => {
       writeEnabled={true}
     />
   );
-  const active = screen.getByText('Active Filters').parentElement!;
-  fireEvent.click(within(active).getByTitle('Send to this GA'));
+  fireEvent.click(screen.getByRole('button', { name: 'Active filters' }));
+  fireEvent.click(screen.getByTitle('Send to this GA'));
   // The popover shows the last value and the write/read controls.
   expect(await screen.findByText(/Last value/)).toBeInTheDocument();
   expect(screen.getByTitle('Send a GroupValueRead')).toBeInTheDocument();
   vi.unstubAllGlobals();
+});
+
+// ── Edit ↔ Active view + all-AND + master toggle (#370) ──────────────────────
+
+test('toggles Edit ↔ Active views, keeps the count badge, and has no AND/OR control', () => {
+  render(
+    <FilterPanel
+      options={GA_OPTIONS}
+      activeFilters={ACTIVE}
+      onFiltersChange={() => {}}
+      mode="live"
+      projectLoaded={true}
+      writeEnabled={true}
+      onQuickLastSeen={() => {}}
+    />
+  );
+  const header = screen.getByText('Filter').parentElement!;
+
+  // Default = Edit view: category sections shown, active rows hidden.
+  expect(screen.getByText('Direction')).toBeInTheDocument();
+  expect(screen.queryByTitle('Send to this GA')).not.toBeInTheDocument();
+  expect(within(header).getByText('2')).toBeInTheDocument();
+  // All filters AND now — no combination control (#275).
+  expect(screen.queryByText(/Combine as/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'OR' })).not.toBeInTheDocument();
+
+  // Switch to Active view: rows appear, category sections gone, badge stays.
+  fireEvent.click(screen.getByRole('button', { name: 'Active filters' }));
+  expect(screen.getByTitle('Send to this GA')).toBeInTheDocument();
+  expect(screen.queryByText('Direction')).not.toBeInTheDocument();
+  expect(within(header).getByText('2')).toBeInTheDocument();
+});
+
+test('master toggle disables the whole set (live only, #370)', () => {
+  const onFiltersEnabledChange = vi.fn();
+  const { rerender } = render(
+    <FilterPanel
+      options={GA_OPTIONS}
+      activeFilters={ACTIVE}
+      onFiltersChange={() => {}}
+      mode="live"
+      projectLoaded={true}
+      filtersEnabled={true}
+      onFiltersEnabledChange={onFiltersEnabledChange}
+    />
+  );
+  fireEvent.click(screen.getByTitle('Disable all filters (keeps them)'));
+  expect(onFiltersEnabledChange).toHaveBeenCalledWith(false);
+
+  // Not offered in history mode (there the filter is the query).
+  rerender(
+    <FilterPanel
+      options={GA_OPTIONS}
+      activeFilters={ACTIVE}
+      onFiltersChange={() => {}}
+      mode="history"
+      projectLoaded={true}
+      filtersEnabled={true}
+      onFiltersEnabledChange={onFiltersEnabledChange}
+    />
+  );
+  expect(screen.queryByTitle(/Disable all filters|Enable filters/)).not.toBeInTheDocument();
 });
 
 test('hides the notice when a project is loaded', () => {
