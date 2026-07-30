@@ -18,7 +18,7 @@ import {
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock } from 'lucide-react';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock, List } from 'lucide-react';
 import { getPref, setPref } from './utils/prefs';
 import { getLabel, getFileName } from './utils/labels';
 import { useTheme } from './hooks/useTheme';
@@ -148,6 +148,53 @@ const NavDropdown = ({ activeTab, isSettingsOpen, isDatabaseOpen, onChange }: { 
   );
 };
 
+// The five main panels inside Group Monitor (#374). One switch selects exactly
+// one; 'list' is the default every panel's close (X) returns to.
+type MainPanel = 'list' | 'visualizer' | 'statistics' | 'building' | 'lastseen';
+
+const MAIN_PANELS: { id: MainPanel; label: string; icon: typeof List }[] = [
+  { id: 'list', label: 'Telegram List', icon: List },
+  { id: 'visualizer', label: 'Visualization', icon: LineChart },
+  { id: 'statistics', label: 'Statistics', icon: BarChart2 },
+  { id: 'building', label: 'Building Structure', icon: Building2 },
+  { id: 'lastseen', label: 'Last Seen Values', icon: Clock },
+];
+
+// Segmented switch across the five main panels, marking the active one (#374).
+const PanelSwitch = ({ active, onChange }: { active: MainPanel; onChange: (p: MainPanel) => void }) => (
+  <div
+    role="tablist"
+    aria-label="Main panel"
+    style={{
+      display: 'flex', alignItems: 'center', gap: '0.15rem',
+      padding: '0.2rem', borderRadius: '8px',
+      background: 'var(--bg-subtle)', border: '1px solid var(--border-color)',
+    }}
+  >
+    {MAIN_PANELS.map(({ id, label, icon: Icon }) => {
+      const isActive = id === active;
+      return (
+        <button
+          key={id}
+          role="tab"
+          aria-selected={isActive}
+          onClick={() => onChange(id)}
+          title={label}
+          className="icon-button"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0.4rem', borderRadius: '6px',
+            background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+            color: isActive ? 'var(--accent-primary)' : 'var(--text-dim)',
+          }}
+        >
+          <Icon size={18} />
+        </button>
+      );
+    })}
+  </div>
+);
+
 function App() {
   const [theme, setTheme] = useTheme();
   // A view shared via URL (#150) starts on the History tab with its filters applied.
@@ -175,17 +222,24 @@ function App() {
   );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(initialWorkspace?.filterOpen ?? true);
-  const [isVisualizerOpen, setIsVisualizerOpen] = useState(initialWorkspace?.view === 'visualizer');
-  const [isLastSeenOpen, setIsLastSeenOpen] = useState(initialWorkspace?.view === 'lastseen');
+  // The active main panel within Group Monitor (#374). Replaces the former
+  // isVisualizerOpen/isLastSeenOpen/isStatisticsOpen/isBuildingOpen booleans with
+  // one selector so exactly one panel is active and every close returns to 'list'.
+  const [activePanel, setActivePanel] = useState<MainPanel>(
+    initialWorkspace?.view && initialWorkspace.view !== 'none' && initialWorkspace.view !== 'database'
+      ? (initialWorkspace.view as MainPanel)
+      : 'list',
+  );
+  const isVisualizerOpen = activePanel === 'visualizer';
+  const isLastSeenOpen = activePanel === 'lastseen';
+  const isStatisticsOpen = activePanel === 'statistics';
+  const isBuildingOpen = activePanel === 'building';
   const [lastSeenAddresses, setLastSeenAddresses] = useState<string[]>(initialWorkspace?.lastSeenAddresses ?? []);
   const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>(initialWorkspace?.lastSeenMode ?? 'ga');
-  const [isStatisticsOpen, setIsStatisticsOpen] = useState(initialWorkspace?.view === 'statistics');
-  const [isBuildingOpen, setIsBuildingOpen] = useState(initialWorkspace?.view === 'building');
   const [statusDevice, setStatusDevice] = useState<DeviceNode | null>(null);
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(initialWorkspace?.view === 'database');
   const [isSendOpen, setIsSendOpen] = useState(false);
-  const hasActiveView = isStatisticsOpen || isBuildingOpen || isLastSeenOpen || isDatabaseOpen;
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -379,17 +433,11 @@ function App() {
   }, [loadLimit, visibleColumns, rateMode, restoreOnStartup]);
 
   // ── Persist workspace (#211) ────────────────────────────────────────────────
-  const workspaceView: WorkspaceView = isVisualizerOpen
-    ? 'visualizer'
-    : isLastSeenOpen
-      ? 'lastseen'
-      : isStatisticsOpen
-        ? 'statistics'
-        : isBuildingOpen
-          ? 'building'
-          : isDatabaseOpen
-            ? 'database'
-            : 'none';
+  const workspaceView: WorkspaceView = isDatabaseOpen
+    ? 'database'
+    : activePanel === 'list'
+      ? 'none'
+      : activePanel;
   useEffect(() => {
     // A shared viz link owns the URL for this session; don't overwrite it or
     // persist its transient state as the workspace.
@@ -443,14 +491,6 @@ function App() {
     lastSeenLive,
     lastSeenSearch,
   ]);
-
-  // ── Sync filter panel visibility with active views ───────────────────────────
-  useEffect(() => {
-    if (hasActiveView) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsFilterOpen(false);
-    }
-  }, [hasActiveView]);
 
   // ── Rate Calculation Loop ───────────────────────────────────────────────────
   useEffect(() => {
@@ -512,20 +552,14 @@ function App() {
     setSelectedVisualizationTargets(prev =>
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
-    setIsVisualizerOpen(true);
-    setIsLastSeenOpen(false);
-    setIsStatisticsOpen(false);
-    setIsBuildingOpen(false);
+    setActivePanel('visualizer');
     setIsDatabaseOpen(false);
   };
 
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
     setLastSeenMode(mode);
-    setIsLastSeenOpen(true);
-    setIsVisualizerOpen(false);
-    setIsStatisticsOpen(false);
-    setIsBuildingOpen(false);
+    setActivePanel('lastseen');
     setIsDatabaseOpen(false);
   }, []);
 
@@ -622,6 +656,10 @@ function App() {
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.directions.length + activeFilters.dpts.length
     : 0;
 
+  // The filter pane and its toggle are tied to the Telegram List (#374): only
+  // that panel consumes the main filter, so the pane shows only when it is active.
+  const showFilterPane = activePanel === 'list' && isFilterOpen;
+
   // The buffer holds at most `loadLimit` (newest) telegrams; once it is at
   // capacity there is no room to load older history (#313).
   const bufferFull = liveTelegrams.length >= loadLimit;
@@ -659,10 +697,7 @@ function App() {
                 } else if (id === 'database') {
                   setIsDatabaseOpen(true);
                   setIsSettingsOpen(false);
-                  setIsVisualizerOpen(false);
-                  setIsLastSeenOpen(false);
-                  setIsStatisticsOpen(false);
-                  setIsBuildingOpen(false);
+                  setActivePanel('list');
                 } else {
                   setIsSettingsOpen(false);
                   setIsDatabaseOpen(false);
@@ -750,28 +785,13 @@ function App() {
                   )}
                 </div>
 
-                <button
-                  className="icon-button"
-                  disabled={hasActiveView}
-                  onClick={() => setIsFilterOpen(o => { const next = !o; if (next) setIsVisualizerOpen(false); return next; })}
-                  title={hasActiveView ? "Filters are not applicable for this view" : "Toggle filter panel"}
-                  style={{
-                    position: 'relative',
-                    color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)',
-                    opacity: hasActiveView ? 0.4 : 1,
-                    cursor: hasActiveView ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <SlidersHorizontal size={18} />
-                  {activeFilterCount > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -5, right: -5,
-                      fontSize: '0.55rem', fontWeight: 700, minWidth: 14, height: 14,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'var(--accent-primary)', color: 'white', borderRadius: '999px',
-                    }}>{activeFilterCount}</span>
-                  )}
-                </button>
+                {/* Main-panel switch (#374): the five panels close back to the
+                    list; the Building opener also clears any drilled-in device. */}
+                <PanelSwitch
+                  active={activePanel}
+                  onChange={(p) => { if (p !== 'building') setStatusDevice(null); setActivePanel(p); setIsDatabaseOpen(false); }}
+                />
+
                 {serverConfig?.status?.write_enabled && (
                   <button
                     className="icon-button"
@@ -782,45 +802,6 @@ function App() {
                     <Send size={18} />
                   </button>
                 )}
-
-                <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
-
-                <button
-                  className="icon-button"
-                  onClick={() => { setIsVisualizerOpen(v => !v); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsBuildingOpen(false); setIsDatabaseOpen(false); }}
-                  title="Visualize data"
-                  style={{ color: isVisualizerOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <LineChart size={18} />
-                </button>
-                <button
-                  className="icon-button"
-                  onClick={() => { setIsStatisticsOpen(v => !v); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsBuildingOpen(false); setIsDatabaseOpen(false); }}
-                  title="Traffic statistics"
-                  style={{ color: isStatisticsOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <BarChart2 size={18} />
-                </button>
-                <button
-                  className="icon-button"
-                  onClick={() => { setIsBuildingOpen(v => !v); setStatusDevice(null); setIsVisualizerOpen(false); setIsLastSeenOpen(false); setIsStatisticsOpen(false); setIsDatabaseOpen(false); }}
-                  title="Building structure"
-                  style={{ color: isBuildingOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <Building2 size={18} />
-                </button>
-                <button
-                  className="icon-button"
-                  onClick={() => { setIsLastSeenOpen(v => !v); setIsVisualizerOpen(false); setIsStatisticsOpen(false); setIsBuildingOpen(false); setIsDatabaseOpen(false); }}
-                  title="Last seen values"
-                  style={{ color: isLastSeenOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <Clock size={18} />
-                </button>
-
-                <button className="icon-button" onClick={togglePause} title={isPaused ? 'Resume' : 'Pause'}>
-                  {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
-                </button>
               </>
             )}
           </div>
@@ -1074,13 +1055,14 @@ function App() {
             {/* Content row: filter panel + table */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
 
-              {/* Filter panel (slide-in) */}
+              {/* Filter panel (slide-in). Filters apply to the Telegram List only,
+                  so the pane is list-only now (#374; contents redesign is #370). */}
               <div style={{
-                width: isFilterOpen ? 'clamp(260px, 18vw, 340px)' : '0px',
+                width: showFilterPane ? 'clamp(260px, 18vw, 340px)' : '0px',
                 overflow: 'hidden',
                 transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
                 flexShrink: 0,
-                borderRight: isFilterOpen ? '1px solid var(--border-color)' : 'none',
+                borderRight: showFilterPane ? '1px solid var(--border-color)' : 'none',
                 display: 'flex',
                 flexDirection: 'column'
               }}>
@@ -1114,7 +1096,7 @@ function App() {
                     telegrams={liveTelegrams}
                     selectedTargets={selectedVisualizationTargets}
                     onTargetsChange={setSelectedVisualizationTargets}
-                    onClose={() => setIsVisualizerOpen(false)}
+                    onClose={() => setActivePanel('list')}
                     zoomRange={zoomRange}
                     onZoomRangeChange={setZoomRange}
                   />
@@ -1125,7 +1107,7 @@ function App() {
                     initialMode={lastSeenMode}
                     writeEnabled={serverConfig?.status?.write_enabled}
                     latestTelegram={latestTelegram}
-                    onClose={() => setIsLastSeenOpen(false)}
+                    onClose={() => setActivePanel('list')}
                     limit={lastSeenLimit}
                     onLimitChange={setLastSeenLimit}
                     autoRefresh={lastSeenLive}
@@ -1140,7 +1122,7 @@ function App() {
                 ) : isStatisticsOpen ? (
                   <StatisticsOverlay
                     filterOptions={filterOptions}
-                    onClose={() => setIsStatisticsOpen(false)}
+                    onClose={() => setActivePanel('list')}
                     searchQuery={statsSearch}
                     onSearchQueryChange={setStatsSearch}
                   />
@@ -1153,7 +1135,7 @@ function App() {
                   />
                 ) : isBuildingOpen ? (
                   <BuildingOverlay
-                    onClose={() => setIsBuildingOpen(false)}
+                    onClose={() => setActivePanel('list')}
                     onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
                     onFilterGAs={handleFilterGAs}
                     onLastSeen={handleQuickLastSeen}
@@ -1166,7 +1148,43 @@ function App() {
                 ) : isDatabaseOpen ? (
                   <DatabaseOverlay onClose={() => setIsDatabaseOpen(false)} />
                 ) : (
-                  <TelegramTable
+                  <>
+                    {/* Telegram List panel header (#374): its own filter toggle
+                        (top-left) and the live play/pause it governs. */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '0.5rem',
+                      padding: '0.4rem 0.75rem', flexShrink: 0,
+                      borderBottom: '1px solid var(--border-color)',
+                    }}>
+                      <button
+                        className="icon-button"
+                        onClick={() => setIsFilterOpen(o => !o)}
+                        title="Toggle filter panel"
+                        style={{
+                          position: 'relative',
+                          color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)',
+                        }}
+                      >
+                        <SlidersHorizontal size={18} />
+                        {activeFilterCount > 0 && (
+                          <span style={{
+                            position: 'absolute', top: -5, right: -5,
+                            fontSize: '0.55rem', fontWeight: 700, minWidth: 14, height: 14,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'var(--accent-primary)', color: 'white', borderRadius: '999px',
+                          }}>{activeFilterCount}</span>
+                        )}
+                      </button>
+                      <button
+                        className="icon-button"
+                        onClick={togglePause}
+                        title={isPaused ? 'Resume' : 'Pause'}
+                        style={{ color: isPaused ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                      >
+                        {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
+                      </button>
+                    </div>
+                    <TelegramTable
                     telegrams={filteredLiveTelegrams}
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
@@ -1191,6 +1209,7 @@ function App() {
                     lastMarkedKey={lastMarkedTelegramKey}
                     onLastMarkedKeyChange={setLastMarkedTelegramKey}
                   />
+                  </>
                 )}
               </div>
             </div>
