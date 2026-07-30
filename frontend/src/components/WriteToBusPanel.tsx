@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Radio, X, Plus, AlertTriangle, CheckCircle2, Timer } from 'lucide-react';
+import { Send, Radio, X, Plus, AlertTriangle, CheckCircle2, Timer, RotateCcw } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 import {
   formatDpt,
+  parseDptMain,
   readTelegram,
   sendTelegram,
   startScheduledSend,
@@ -35,6 +36,14 @@ interface Row {
 
 const GA_RE = /^\d{1,2}\/\d{1,2}\/\d{1,3}$|^\d{1,2}\/\d{1,4}$|^\d{1,5}$/;
 const POLL_INTERVAL_MS = 1000;
+
+// Common DPTs offered as datalist hints when overriding a GA's type (#342).
+// The input stays free-text; these just guide the frequent cases.
+const COMMON_DPTS = [
+  '1.001', '1.002', '2.001', '3.007', '4.001', '5.001', '5.004', '5.010',
+  '6.010', '7.001', '8.001', '9.001', '9.004', '10.001', '11.001', '12.001',
+  '13.001', '14.056', '16.000', '17.001', '18.001', '19.001', '20.102', '232.600',
+];
 
 let rowSeq = 0;
 const newRow = (): Row => ({
@@ -109,6 +118,18 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
     return m;
   }, [targets]);
 
+  // DPT hints for the editable DPT field (#342): common types plus every DPT
+  // present in the loaded project, sorted numerically by main then sub.
+  const dptOptions = useMemo(() => {
+    const set = new Set<string>(COMMON_DPTS);
+    for (const t of targets) if (t.main != null) set.add(formatDpt(t.main, t.sub));
+    return [...set].sort((a, b) => {
+      const [am, as = 0] = a.split('.').map(Number);
+      const [bm, bs = 0] = b.split('.').map(Number);
+      return am - bm || as - bs;
+    });
+  }, [targets]);
+
   const jobActive = job != null && (job.state === 'waiting' || job.state === 'running');
 
   // Pick up an already-active job (e.g. after a page reload) and clean up the poller.
@@ -145,6 +166,15 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
       feedback: null,
       dpt: match && match.main != null ? formatDpt(match.main, match.sub) : '',
     });
+  };
+
+  // Editable DPT (#342): overriding the project default. When the DPT *main*
+  // changes the write widget switches (On/Off ↔ pickers ↔ free value), so a
+  // stale value must be cleared to avoid sending it to the new widget.
+  const onDptChange = (id: string, next: string) => {
+    const row = rows.find(r => r.id === id);
+    const mainChanged = row && parseDptMain(row.dpt) !== parseDptMain(next);
+    updateRow(id, { dpt: next, feedback: null, ...(mainChanged ? { value: '' } : {}) });
   };
 
   const write = async (row: Row, payload: boolean | number | string) => {
@@ -196,9 +226,18 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
         </button>
       </div>
 
+      {/* DPT hints shared by every row's editable DPT field (#342) */}
+      <datalist id="wtb-dpt-options">
+        {dptOptions.map(d => <option key={d} value={d} />)}
+      </datalist>
+
       {rows.map(row => {
         const known = byAddress.get(row.address.trim());
-        const dptMain = known?.main ?? undefined;
+        // The write widget follows the row's *effective* (possibly overridden)
+        // DPT, not the project default (#342).
+        const dptMain = parseDptMain(row.dpt);
+        const projectDpt = known && known.main != null ? formatDpt(known.main, known.sub) : '';
+        const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
         const addressValid = GA_RE.test(row.address.trim());
         const scheduledDisabled = row.busy || !addressValid;
         return (
@@ -236,9 +275,34 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
                   disabled={scheduledDisabled}
                 />
 
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", minWidth: '70px', display: 'inline-block' }}>
-                  DPT {row.dpt || '—'}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>DPT</span>
+                  <input
+                    className="glass-input"
+                    list="wtb-dpt-options"
+                    value={row.dpt}
+                    onChange={e => onDptChange(row.id, e.target.value)}
+                    placeholder="—"
+                    title={overridden ? `Overriding project DPT ${projectDpt}` : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'}
+                    style={{
+                      width: 78,
+                      padding: '0.2rem 0.35rem',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.72rem',
+                      borderColor: overridden ? 'var(--accent-primary)' : undefined,
+                    }}
+                  />
+                  {overridden && (
+                    <button
+                      className="icon-button"
+                      onClick={() => updateRow(row.id, { dpt: projectDpt, value: '', feedback: null })}
+                      title={`Reset to project DPT ${projectDpt}`}
+                      style={{ color: 'var(--text-dim)', padding: '0.1rem' }}
+                    >
+                      <RotateCcw size={13} />
+                    </button>
+                  )}
+                </div>
 
                 <input
                   className="glass-input"

@@ -116,7 +116,7 @@ test('restores persisted rows on mount (#254)', () => {
   expect(gaInputs[1]).toHaveValue('4/5/6');
   expect(screen.getAllByPlaceholderText(/Value/)[0]).toHaveValue('21.5');
   expect(screen.getByDisplayValue('10')).toBeInTheDocument(); // "Every s" of row 2
-  expect(screen.getByText('DPT 9.001')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('9.001')).toBeInTheDocument(); // editable DPT field of row 1
 });
 
 test('persists row edits so toggling the panel keeps them (#254)', async () => {

@@ -18,6 +18,17 @@ export function formatDpt(main?: number | null, sub?: number | null): string {
   return sub == null ? String(main) : `${main}.${String(sub).padStart(3, '0')}`;
 }
 
+/**
+ * Parse the main number out of a DPT string ("5.010" -> 5, "1" -> 1).
+ * Returns undefined for an empty or malformed value. Inverse of `formatDpt`;
+ * used to pick the write widget from the (possibly overridden) DPT (#342).
+ */
+export function parseDptMain(dpt: string): number | undefined {
+  const m = dpt.trim().match(/^(\d+)(?:\.\d+)?$/);
+  if (!m) return undefined;
+  return Number(m[1]);
+}
+
 async function post<T = unknown>(endpoint: string, body?: unknown): Promise<T> {
   const res = await fetch(apiUrl(endpoint), {
     method: 'POST',
