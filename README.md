@@ -27,6 +27,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 - **Zero Loss:** Pause the live feed without dropping packets—everything queues silently in the background buffer until you resume.
 - **Database Maintenance:** Inspect database size, telegram count and covered time range; purge old telegrams with a dry-run preview and reclaim the freed disk space—right from the UI.
 - **Home Assistant Companion Mode:** Run the analyzer directly on Home Assistant's own KNX telegram history—no second bus connection, no separate database.
+- **AI-Ready (MCP):** Expose your telegram store to AI agents (Claude, Cursor, …) via a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `/mcp`—query history and last values in natural language. Read-only by default; opt into bus read/write. See [MCP Server](DEPLOYMENT.md#7-mcp-server-ai-agents).
 
 ## 🐳 Quick Start (Docker Compose)
 
@@ -82,7 +83,7 @@ Two add-ons cover the two ways to run Spectrum KNX inside Home Assistant
 See [DEPLOYMENT.md](DEPLOYMENT.md) for installation and configuration of both.
 
 ### Detailed Guides
-See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, the [MCP Server guide](DEPLOYMENT.md#7-mcp-server-ai-agents) for AI-agent access, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
 
 ## 🛠 Tech Stack
 - **Backend:** Python 3.12+, FastAPI, `xknx`, WebSocket Streaming

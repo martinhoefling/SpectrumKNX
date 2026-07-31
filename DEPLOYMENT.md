@@ -225,6 +225,7 @@ You can configure the application via environment variables. These can be set in
 | `KNX_GATEWAY_PORT`| Port of the KNX IP Gateway | `3671` |
 | `KNX_LOCAL_IP` | Local IP or interface name to bind to | N/A |
 | `KNX_INDIVIDUAL_ADDRESS`| Individual address (e.g. `1.1.100`) | N/A |
+| `KNX_ALLOW_WRITE` | Allow writing to the bus (Write-to-Bus panel, and MCP bus tools in `read-write` mode). Only effective in standalone mode with a live connection. | `true` |
 | `KNX_ROUTE_BACK` | Enable route back for NAT/Docker bridge | `false` |
 | `KNX_MULTICAST_GROUP`| Multicast group for routing | `224.0.23.12`|
 | `KNX_MULTICAST_PORT` | Multicast port for routing | `3671` |
@@ -262,6 +263,7 @@ KNX_KNXKEYS_PASSWORD=my_secure_password
 |---|---|---|
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, etc.) | `INFO` |
 | `APP_IMAGE` | Docker image to pull (Prod Stack only) | `ghcr.io/martinhoefling/spectrumknx:latest` |
+| `MCP_MODE` | MCP server for AI agents at `/mcp`: `off`, `read-only`, or `read-write`. See [MCP Server](#7-mcp-server-ai-agents). | `read-only` |
 
 ---
 
@@ -315,3 +317,112 @@ If multiple security methods are configured simultaneously, the daemon uses the 
 3. **Manual Tunneling Credentials** (`KNX_SECURE_USER_ID` + `KNX_SECURE_USER_PASSWORD`) — lowest priority.
 
 Conflicts are logged as warnings.
+
+---
+
+## 7. MCP Server (AI Agents)
+
+Spectrum KNX ships a built-in [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP) server so AI agents — Claude Desktop, Cursor, and other MCP clients — can query
+your KNX data in natural language. It is mounted at **`/mcp`** over the Streamable HTTP
+transport, on the same host and port as the web UI and REST API.
+
+### 7.1 Enabling it
+
+The server is controlled by the `MCP_MODE` environment variable:
+
+| `MCP_MODE` | Behaviour |
+|---|---|
+| `off` | Endpoint is not mounted. |
+| `read-only` *(default)* | Query and introspection tools only — never writes to the bus. |
+| `read-write` | Additionally enables tools that transmit on the bus (group value read/write). |
+
+```bash
+# .env
+MCP_MODE=read-only
+```
+
+When enabled, the endpoint is served at `http://<host>:<BIND_PORT>/mcp` (default port
+`8765`).
+
+> ⚠️ **Enabled by default and unauthenticated.** With `MCP_MODE` unset the server runs
+> in `read-only` mode, so `/mcp` is exposed out of the box, and the endpoint has **no
+> authentication** — anyone who can reach it can call its tools. Expose it only on a
+> trusted network, or behind a reverse proxy / VPN that enforces access control. Set
+> `MCP_MODE=off` to disable it entirely. In `read-write` mode an agent can send
+> telegrams onto your KNX bus, so turn it on deliberately.
+
+### 7.2 Available tools
+
+**Read-only** (available in both `read-only` and `read-write` modes):
+
+*Telegram store:*
+
+| Tool | Description |
+|---|---|
+| `query_telegrams` | Search stored telegrams by time range, source/destination, type, direction and DPT (paginated). |
+| `get_last_values` | The most recent telegram for each group address. |
+| `get_store_stats` | Telegram count, covered time range, on-disk size, backend and retention. |
+| `get_store_capabilities` | What the storage backend supports (time range, pagination, size, …). |
+| `count_telegrams` | Total number of stored telegrams. |
+
+*ETS project* (requires a loaded `.knxproj`):
+
+| Tool | Description |
+|---|---|
+| `get_project_info` | Project name, tool version and object counts. |
+| `list_group_addresses` | Group addresses with names and DPTs (paginated, filterable). |
+| `describe_group_address` | Full detail for a single group address. |
+| `list_devices` | Devices in the project (paginated, filterable). |
+| `list_communication_objects` | Communication objects and their group-address links. |
+| `get_topology` | Area / line / device topology. |
+| `list_locations` | Building structure (buildings, floors, rooms). |
+
+*DPT & connection:*
+
+| Tool | Description |
+|---|---|
+| `list_dpts` | Known data point types (filter by main type or free text). |
+| `describe_dpt` | Detail for a DPT — unit, range, enum options, complex-type schema. |
+| `get_connection_status` | Current KNX connection state. |
+| `get_server_config` | SpectrumKNX connection and security configuration (secrets masked). |
+
+**Read-write** (`MCP_MODE=read-write`) is reserved for tools that read and write group
+values on the live bus. They require an active bus connection, and writes also need
+`KNX_ALLOW_WRITE=true` (see [KNX Settings](#knx-settings)).
+
+> The bus read/write tools, plus project resources and canned prompts, are still
+> landing; the tables above list the read-only tools available today.
+
+### 7.3 Connecting a client
+
+Point any MCP client that speaks **Streamable HTTP** at the endpoint URL. For example,
+a Cursor / generic `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "spectrum-knx": {
+      "url": "http://<host>:8765/mcp"
+    }
+  }
+}
+```
+
+For clients that only speak stdio (for example Claude Desktop), bridge with
+[`mcp-remote`](https://github.com/geelen/mcp-remote):
+
+```json
+{
+  "mcpServers": {
+    "spectrum-knx": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://<host>:8765/mcp"]
+    }
+  }
+}
+```
+
+Once connected, the client lists the tools above and can call them — for example
+_"how many telegrams are stored and over what period?"_ or _"show the last value for
+every light group address."_
