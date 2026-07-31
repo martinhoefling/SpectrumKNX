@@ -27,6 +27,21 @@ class TestSecurity(unittest.TestCase):
         # Though os.path.abspath handles it, it's good to check
         self.assertFalse(is_safe_path(self.static_dir, "index.html\0.php"))
 
+    def test_default_cors_origins(self):
+        from main import app
+        from fastapi.testclient import TestClient
+
+        client = TestClient(app)
+        response = client.options(
+            "/api/server/config",
+            headers={
+                "Origin": "http://example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access-control-allow-origin", response.headers)
+
 
 if __name__ == "__main__":
     unittest.main()
