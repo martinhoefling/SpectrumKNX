@@ -1,13 +1,13 @@
 # Pinned lock (runtime + dev + transitives) used by Docker, HA add-on and CI.
 # Direct dependencies are declared in pyproject.toml — update both together.
-annotated-doc==0.0.4
+annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
 asyncpg==0.31.0
 cffi==2.1.0
 click==8.4.2
 cryptography==49.0.0
-fastapi==0.140.0
+fastapi==0.140.13
 greenlet==3.5.4
 h11==0.16.0
 idna==3.18
@@ -48,7 +48,7 @@ aiosqlite==0.22.1
 python-multipart==0.0.32
 pre-commit==4.6.1
 # MCP server (SDK + transitives) for the /mcp endpoint.
-mcp==1.28.1
+mcp==2.0.0
 PyJWT==2.13.0
 attrs==26.1.0
 httpx-sse==0.4.3
