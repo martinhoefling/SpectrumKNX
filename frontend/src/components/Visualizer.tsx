@@ -16,7 +16,7 @@ interface VisualizerProps {
 export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTargets, onTargetsChange, onClose }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
-  const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets);
+  const { buckets } = useChartData(telegrams, selectedTargets);
 
   const exportPng = () => {
     // A quick hack: uPlot naturally renders to canvas
@@ -65,9 +65,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({ telegrams, selectedTarge
           <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
             {buckets.map(b => (
               b.isBinary ? (
-                <TimelineChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+                <TimelineChart key={b.unit} bucket={b} />
               ) : (
-                <MixedChart key={b.unit} bucket={b} minTime={minTime} maxTime={maxTime} />
+                <MixedChart key={b.unit} bucket={b} />
               )
             ))}
 

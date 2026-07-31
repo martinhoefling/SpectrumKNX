@@ -6,8 +6,6 @@ import type { ChartBucket } from '../hooks/useChartData';
 
 interface TimelineChartProps {
   bucket: ChartBucket;
-  minTime: number | null;
-  maxTime: number | null;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');

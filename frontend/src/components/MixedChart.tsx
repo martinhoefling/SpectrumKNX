@@ -6,8 +6,6 @@ import type { ChartBucket } from '../hooks/useChartData';
 
 interface MixedChartProps {
   bucket: ChartBucket;
-  minTime: number | null;
-  maxTime: number | null;
 }
 
 // Generate simple distinct colors for series

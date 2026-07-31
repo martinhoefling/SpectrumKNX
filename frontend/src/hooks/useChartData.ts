@@ -16,14 +16,12 @@ export interface ChartBucket {
 
 export interface ChartDataResult {
   buckets: ChartBucket[];
-  minTime: number | null;
-  maxTime: number | null;
 }
 
 export function useChartData(telegrams: Telegram[], selectedTargets: string[]): ChartDataResult {
   return useMemo(() => {
     if (selectedTargets.length === 0 || telegrams.length === 0) {
-      return { buckets: [], minTime: null, maxTime: null };
+      return { buckets: [] };
     }
 
     // 1. Filter out only relevant telegrams and parse timestamps
@@ -40,11 +38,8 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
       .sort((a, b) => a.ts - b.ts);
 
     if (relevant.length === 0) {
-      return { buckets: [], minTime: null, maxTime: null };
+      return { buckets: [] };
     }
-
-    const minTime = relevant[0].ts;
-    const maxTime = relevant[relevant.length - 1].ts;
 
     // 2. Group into physical units / buckets
     // We treat DPT1 (boolean/binary) as a special bucket called 'binary'
@@ -106,6 +101,6 @@ export function useChartData(telegrams: Telegram[], selectedTargets: string[]): 
       });
     }
 
-    return { buckets, minTime, maxTime };
+    return { buckets };
   }, [telegrams, selectedTargets]);
 }
