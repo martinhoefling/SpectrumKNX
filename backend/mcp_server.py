@@ -286,8 +286,8 @@ def _build_server() -> FastMCP:
     async def encode_value(value: Any, value_type: str) -> dict[str, Any]:
         """Encode a value using a specific DPT into its raw payload bytes.
         `value` is the Python native value; `value_type` is DPT number (e.g. "9.001") or name."""
-        result = await xknx_mcp.encode_value(
-            xknx_mcp.EncodeValueInput(value=value, value_type=value_type)
+        result = await xknx_mcp.encode_dpt_payload(
+            xknx_mcp.EncodeDptPayloadInput(value=value, value_type=value_type)
         )
         return asdict(result)
 
@@ -295,8 +295,8 @@ def _build_server() -> FastMCP:
     async def decode_payload(payload: list[int] | int, value_type: str) -> dict[str, Any]:
         """Decode raw payload bytes or integer using a specific DPT.
         `payload` is a list of byte integers, or a single integer for 6-bit DPTs (like 1.001)."""
-        result = await xknx_mcp.decode_payload(
-            xknx_mcp.DecodePayloadInput(payload=payload, value_type=value_type)
+        result = await xknx_mcp.decode_dpt_payload(
+            xknx_mcp.DecodeDptPayloadInput(payload=payload, value_type=value_type)
         )
         return asdict(result)
 

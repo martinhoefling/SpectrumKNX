@@ -25,10 +25,11 @@ dependencies = [
     "uvicorn",
     "websockets",
     # Git pins for the unreleased MCP tools (xknx.mcp / xknxproject.mcp).
-    # Revert to "xknx"/"xknxproject" once XKNX/xknx#1876 and
-    # XKNX/xknxproject#625 are merged and released to PyPI.
-    "xknx @ git+https://github.com/martinhoefling/xknx.git@f9e48018595c377d6904e34b9a6ffcee399c320a",
-    "xknxproject @ git+https://github.com/martinhoefling/xknxproject.git@a6498fb497828cd9ba10acd6e76456749909bf9c",
+    # xknx tracks upstream main (XKNX/xknx#1876/#1880 merged); xknxproject stays on
+    # the fork branch until XKNX/xknxproject#625 merges. Revert both to
+    # "xknx"/"xknxproject" once released to PyPI.
+    "xknx @ git+https://github.com/XKNX/xknx.git@678f2eac302c1a2a8b1a2ec1b13adaeb78c8358f",
+    "xknxproject @ git+https://github.com/martinhoefling/xknxproject.git@aba891dae69d9b14227e8565e811b317ed0dabb7",
 ]
 
 [dependency-groups]
