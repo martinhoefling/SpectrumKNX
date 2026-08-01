@@ -377,6 +377,8 @@ When enabled, the endpoint is served at `http://<host>:<BIND_PORT>/mcp` (default
 | `list_communication_objects` | Communication objects and their group-address links. |
 | `get_topology` | Area / line / device topology. |
 | `list_locations` | Building structure (buildings, floors, rooms). |
+| `list_functions` | ETS functions / functional blocks (paginated, filterable). |
+| `describe_function` | Detail for a single function, including its group-address roles. |
 
 *DPT & connection:*
 
@@ -384,15 +386,23 @@ When enabled, the endpoint is served at `http://<host>:<BIND_PORT>/mcp` (default
 |---|---|
 | `list_dpts` | Known data point types (filter by main type or free text). |
 | `describe_dpt` | Detail for a DPT — unit, range, enum options, complex-type schema. |
+| `encode_value` | Encode a Python value with a DPT into its raw payload bytes. |
+| `decode_payload` | Decode raw payload bytes (or an integer for 6-bit DPTs) with a DPT. |
 | `get_connection_status` | Current KNX connection state. |
 | `get_server_config` | SpectrumKNX connection and security configuration (secrets masked). |
 
-**Read-write** (`MCP_MODE=read-write`) is reserved for tools that read and write group
-values on the live bus. They require an active bus connection, and writes also need
-`KNX_ALLOW_WRITE=true` (see [KNX Settings](#knx-settings)).
+**Read-write** (`MCP_MODE=read-write` only) additionally exposes tools that read and
+write group values on the live bus. They require an active bus connection, and the
+write tools also need `KNX_ALLOW_WRITE=true` (see [KNX Settings](#knx-settings)).
 
-> The bus read/write tools, plus project resources and canned prompts, are still
-> landing; the tables above list the read-only tools available today.
+| Tool | Description |
+|---|---|
+| `read_group_value` | Read a group address from the bus (sends a `GroupValueRead`, waits, DPT-decodes the response). |
+| `send_group_value_read` | Queue a `GroupValueRead` on the bus (fire-and-forget). |
+| `send_group_value_write` | Write a value to a group address (queues a DPT-encoded `GroupValueWrite`). |
+
+> Project resources and canned prompts are still landing; the tables above list the
+> tools available today.
 
 ### 7.3 Connecting a client
 
