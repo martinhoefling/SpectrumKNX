@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -206,6 +207,69 @@ async def test_lists_read_only_tools(server):
         "encode_value",
         "decode_payload",
     } <= names
+
+
+# ── Project resources + canned prompts (#335) ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_lists_project_resources_and_prompts(server):
+    uris = {str(r.uri) for r in await server.list_resources()}
+    assert {
+        "knx://project",
+        "knx://project/group-addresses",
+        "knx://project/devices",
+        "knx://project/topology",
+        "knx://project/locations",
+        "knx://project/functions",
+    } <= uris
+
+    prompts = {p.name for p in await server.list_prompts()}
+    assert {"analyze_bus_traffic", "find_group_addresses_without_dpts"} <= prompts
+
+
+@pytest.mark.asyncio
+async def test_project_overview_and_sections(server, monkeypatch):
+    monkeypatch.setattr(knx_daemon, "global_knx_project", _sample_project())
+
+    overview = json.loads((await server.read_resource("knx://project"))[0].content)
+    assert overview["status"] == "ok"
+    assert overview["info"]["name"] == "Demo"
+    # Overview is a light index: counts, not the full section dumps.
+    assert overview["counts"]["group_addresses"] == 1
+    assert overview["counts"]["devices"] == 1
+    assert "group_addresses" not in overview  # detail lives in the section resource
+
+    gas = json.loads((await server.read_resource("knx://project/group-addresses"))[0].content)
+    assert gas["status"] == "ok"
+    # The section resource carries the raw parsed-project shape (dpt as {main, sub}).
+    assert gas["group_addresses"]["1/0/0"]["address"] == "1/0/0"
+    assert gas["group_addresses"]["1/0/0"]["dpt"] == {"main": 1, "sub": 1}
+
+
+@pytest.mark.asyncio
+async def test_project_resources_report_when_no_project_is_loaded(server, monkeypatch):
+    monkeypatch.setattr(knx_daemon, "global_knx_project", None)
+
+    overview = json.loads((await server.read_resource("knx://project"))[0].content)
+    assert overview == {"status": "no_project_loaded"}
+
+    locations = json.loads((await server.read_resource("knx://project/locations"))[0].content)
+    assert locations == {"status": "no_project_loaded", "locations": {}}
+
+
+@pytest.mark.asyncio
+async def test_canned_prompts_include_knx_context(server):
+    traffic = await server.get_prompt("analyze_bus_traffic", {"hours": "2"})
+    text = traffic.messages[0].content.text
+    assert "last 2 hour(s)" in text
+    assert "Do not send or modify bus values" in text
+    assert "Group addresses (GAs" in text  # shared KNX context primer is prepended
+
+    missing = await server.get_prompt("find_group_addresses_without_dpts")
+    missing_text = missing.messages[0].content.text
+    assert "knx://project/group-addresses" in missing_text
+    assert "Do not infer a DPT" in missing_text
 
 
 def test_endpoint_serves_at_mount_root_not_doubled():
