@@ -401,8 +401,7 @@ write tools also need `KNX_ALLOW_WRITE=true` (see [KNX Settings](#knx-settings))
 | `send_group_value_read` | Queue a `GroupValueRead` on the bus (fire-and-forget). |
 | `send_group_value_write` | Write a value to a group address (queues a DPT-encoded `GroupValueWrite`). |
 
-> Project resources and canned prompts are still landing; the tables above list the
-> tools available today.
+The server also exposes project **resources** and canned **prompts** — see [§7.4](#74-resources--prompts).
 
 ### 7.3 Connecting a client
 
@@ -436,3 +435,28 @@ For clients that only speak stdio (for example Claude Desktop), bridge with
 Once connected, the client lists the tools above and can call them — for example
 _"how many telegrams are stored and over what period?"_ or _"show the last value for
 every light group address."_
+
+### 7.4 Resources & prompts
+
+Beyond tools, the server publishes read-only **resources** (bulk project context an
+agent can pull) and **prompts** (ready-made task templates). Both are available in
+`read-only` and `read-write` modes.
+
+**Resources** — snapshots of the loaded ETS project as JSON. When no project is
+configured each returns `{"status": "no_project_loaded"}`.
+
+| Resource URI | Contents |
+|---|---|
+| `knx://project` | Light index: project metadata and per-section object counts. |
+| `knx://project/group-addresses` | Group addresses with names, DPTs and metadata. |
+| `knx://project/devices` | Devices keyed by individual address. |
+| `knx://project/topology` | Area / line topology. |
+| `knx://project/locations` | Building and room structure. |
+| `knx://project/functions` | Functions / functional blocks and their group-address roles. |
+
+**Prompts** — each prepends a short KNX domain primer so the agent has context.
+
+| Prompt | Purpose |
+|---|---|
+| `analyze_bus_traffic(hours)` | Steer a read-only analysis of recent traffic (volume, busy addresses, anomalies). |
+| `find_group_addresses_without_dpts` | Audit the project for group addresses missing a DPT. |
