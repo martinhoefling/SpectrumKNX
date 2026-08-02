@@ -31,7 +31,7 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
     const bins = 60;
     const counts = new Array(bins).fill(0);
     if (range <= 0) return counts;
-    
+
     for (const t of telegrams) {
       const time = new Date(t.timestamp).getTime();
       const bin = Math.min(bins - 1, Math.max(0, Math.floor(((time - minTime) / range) * bins)));

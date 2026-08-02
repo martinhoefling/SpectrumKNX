@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.0.0-beta.2
+
+### Added
+
+- **MCP Server Integration**: Introduces Model Context Protocol (MCP) server endpoints at `/mcp`. Allows external AI assistants to read and write to the KNX bus, explore ETS projects, filter telegrams, list group addresses, and query active data.
+- **Frontend Revamp App-Shell**: Implements a new five-panel layout switch for the frontend, providing a streamlined and modern navigation experience.
+- **Simplified Filter Pane**: Adds an edit/active toggle view to simplify filter configuration.
+- **DPT Override in Write-to-Bus**: Allows users to manually override Datapoint Types (DPT) directly in the Write-to-Bus panel.
+- **Session State Persistence**: Automatically persists the active session UI state across navigation and browser updates.
+- **Focused Telegram Highlighting**: Highlights/marks the focused rows in the telegram list for improved readability.
+- **Numerical Sorting**: Sorts group and physical addresses numerically in the Last Seen Values panel.
+- **Visualization Panel Header Controls**: Added a header close X control to the Visualization panel, and repurposed the Targets list X to clear targets.
+
+### Changed
+
+- **Visualization Chart Alignment**: Aligns chart borders, moves the timeline legend to the left, and prevents scale clipping when zooming or panning.
+- **Visualization Persistence**: Keeps charts on-screen automatically as the history/live buffer grows.
+- **Docker Build Optimization**: Bundles git within the backend Docker image to ensure `docker compose --build` runs successfully.
+- **xknx Update**: Upgraded xknx to 3.17.0.
+
+### Fixed
+
+- **History Load Cancellation**: Cancels any in-flight background history loading tasks when the buffer is cleared.
+- **History Buffer Gaps**: Fixed a bug where permanent time gaps could form in the async history buffer.
+- **History Search Timezone Offset**: Fixed timezone offset errors when specifying custom date ranges in history search.
+
 ## 1.16.2
 
 ### Added
