@@ -17,8 +17,9 @@ Access is gated by ``MCP_MODE``:
 
 import json
 import os
-from dataclasses import asdict
-from typing import Any
+from collections.abc import Callable
+from dataclasses import asdict, fields
+from typing import Annotated, Any
 
 from knx_telegram_store.mcp import (
     LastValuesInput,
@@ -40,6 +41,7 @@ from knx_telegram_store.mcp import (
     query_telegrams as lib_query_telegrams,
 )
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from xknx import mcp as xknx_mcp
 from xknxproject import mcp as xknxproject_mcp
 
@@ -134,6 +136,36 @@ def _require_xknx() -> Any:
     return instance
 
 
+def _describe(*input_types: type, **overrides: str) -> Callable[[Callable], Callable]:
+    """Attach parameter descriptions to a tool from library dataclass metadata.
+
+    The shared ``*.mcp`` input dataclasses carry each field's description as
+    ``dataclasses.field`` metadata. FastMCP only surfaces per-parameter
+    descriptions from ``Annotated[..., pydantic.Field(description=...)]`` in the
+    signature, so this decorator rewrites the wrapper's annotations in place —
+    matching parameter names to fields — instead of duplicating the text here.
+    ``overrides`` supplies descriptions for ad-hoc parameters that are not backed
+    by a dataclass field. Applied *below* ``@mcp.tool()`` so it runs first.
+    """
+    descriptions: dict[str, str] = {}
+    for input_type in input_types:
+        for field in fields(input_type):
+            description = field.metadata.get("description")
+            if description:
+                descriptions.setdefault(field.name, description)
+    descriptions.update(overrides)
+
+    def decorator(func: Callable) -> Callable:
+        hints = dict(func.__annotations__)
+        for name, description in descriptions.items():
+            if name in hints:
+                hints[name] = Annotated[hints[name], Field(description=description)]
+        func.__annotations__ = hints
+        return func
+
+    return decorator
+
+
 def _build_server() -> FastMCP:
     # stateless_http keeps each request self-contained — no server-side session
     # state to manage, which is all these read tools need and simplifies mounting.
@@ -224,6 +256,7 @@ def _build_server() -> FastMCP:
         )
 
     @mcp.tool()
+    @_describe(QueryTelegramsInput)
     async def query_telegrams(
         start_time: str | None = None,
         end_time: str | None = None,
@@ -265,6 +298,7 @@ def _build_server() -> FastMCP:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(LastValuesInput)
     async def get_last_values(destinations: list[str] | None = None) -> dict[str, Any]:
         """Most recent telegram for each group address (optionally filtered to
         the given destinations)."""
@@ -299,6 +333,7 @@ def _build_server() -> FastMCP:
         return asdict(await xknxproject_mcp.get_project_info(_require_project()))
 
     @mcp.tool()
+    @_describe(xknxproject_mcp.GroupAddressFilter)
     async def list_group_addresses(
         text: str | None = None,
         dpts: list[str] | None = None,
@@ -316,11 +351,13 @@ def _build_server() -> FastMCP:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(address='Group address to resolve, e.g. "1/2/3".')
     async def describe_group_address(address: str) -> dict[str, Any]:
         """Resolve one group address to its communication objects and devices."""
         return asdict(await xknxproject_mcp.describe_group_address(_require_project(), address))
 
     @mcp.tool()
+    @_describe(xknxproject_mcp.DeviceFilter)
     async def list_devices(
         text: str | None = None, limit: int = 100, offset: int = 0
     ) -> dict[str, Any]:
@@ -332,6 +369,7 @@ def _build_server() -> FastMCP:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(xknxproject_mcp.CommunicationObjectFilter)
     async def list_communication_objects(
         device_address: str | None = None,
         group_address: str | None = None,
@@ -364,6 +402,7 @@ def _build_server() -> FastMCP:
         return asdict(await xknxproject_mcp.list_locations(_require_project()))
 
     @mcp.tool()
+    @_describe(xknxproject_mcp.FunctionFilter)
     async def list_functions(
         text: str | None = None,
         space_id: str | None = None,
@@ -381,6 +420,7 @@ def _build_server() -> FastMCP:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(identifier="Function/functional-block identifier to resolve.")
     async def describe_function(identifier: str) -> dict[str, Any]:
         """Resolve one function/functional block by identifier to its group address references and roles."""
         return asdict(await xknxproject_mcp.describe_function(_require_project(), identifier))
@@ -388,6 +428,7 @@ def _build_server() -> FastMCP:
     # --- KNX data point types + bus status (xknx.mcp) -------------------------
 
     @mcp.tool()
+    @_describe(xknx_mcp.DptFilter)
     async def list_dpts(
         main: int | None = None,
         text: str | None = None,
@@ -402,6 +443,7 @@ def _build_server() -> FastMCP:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(dpt='DPT number ("9.001") or value type name ("temperature") to resolve.')
     async def describe_dpt(dpt: str) -> dict[str, Any]:
         """Resolve a DPT number ("9.001") or value type name ("temperature") to
         its definition (value type, unit, numeric bounds)."""
@@ -413,6 +455,7 @@ def _build_server() -> FastMCP:
         return asdict(await xknx_mcp.get_connection_status(_require_xknx()))
 
     @mcp.tool()
+    @_describe(xknx_mcp.EncodeDptPayloadInput)
     async def encode_value(value: Any, value_type: str) -> dict[str, Any]:
         """Encode a value using a specific DPT into its raw payload bytes.
         `value` is the Python native value; `value_type` is DPT number (e.g. "9.001") or name."""
@@ -422,6 +465,7 @@ def _build_server() -> FastMCP:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(xknx_mcp.DecodeDptPayloadInput)
     async def decode_payload(payload: list[int] | int, value_type: str) -> dict[str, Any]:
         """Decode raw payload bytes or integer using a specific DPT.
         `payload` is a list of byte integers, or a single integer for 6-bit DPTs (like 1.001)."""
@@ -444,6 +488,7 @@ def _register_bus_tools(mcp: FastMCP) -> None:
     """
 
     @mcp.tool()
+    @_describe(xknx_mcp.GroupValueReadInput)
     async def read_group_value(
         group_address: str, value_type: str | None = None
     ) -> dict[str, Any]:
@@ -457,6 +502,7 @@ def _register_bus_tools(mcp: FastMCP) -> None:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(xknx_mcp.GroupAddressInput)
     async def send_group_value_read(group_address: str) -> dict[str, Any]:
         """Queue a GroupValueRead telegram to trigger a response on the bus."""
         result = await xknx_mcp.send_group_value_read(
@@ -465,6 +511,7 @@ def _register_bus_tools(mcp: FastMCP) -> None:
         return asdict(result)
 
     @mcp.tool()
+    @_describe(xknx_mcp.GroupValueWriteInput)
     async def send_group_value_write(
         group_address: str,
         value: bool | int | float | str | list[int],
