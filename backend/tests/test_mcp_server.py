@@ -466,4 +466,3 @@ async def test_encode_decode_value_tools(server):
 
     decoded_binary = await _structured(server, "decode_payload", {"payload": 1, "value_type": "1.001"})
     assert decoded_binary["value"] == "on"
-

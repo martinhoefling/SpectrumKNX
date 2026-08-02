@@ -8,7 +8,7 @@ const initialVal: [number, number] = [minTime + 1000000, maxTime - 1000000];
 
 test('renders TimeBrush, handles middle click and drags to pan', () => {
   const onChangeMock = vi.fn();
-  
+
   const { container } = render(
     <TimeBrush
       minTime={minTime}
@@ -24,7 +24,7 @@ test('renders TimeBrush, handles middle click and drags to pan', () => {
   // Find container div that has clientWidth/getBoundingClientRect mocked
   const track = container.querySelector('div[style*="position: relative"]');
   expect(track).toBeTruthy();
-  
+
   // Mock bounding rect
   track!.getBoundingClientRect = () => ({
     width: 500,
@@ -43,10 +43,10 @@ test('renders TimeBrush, handles middle click and drags to pan', () => {
 
   // Trigger drag start
   fireEvent.mouseDown(middle!, { clientX: 200, button: 0 });
-  
+
   // Drag to the right
   fireEvent.mouseMove(window, { clientX: 250 });
-  
+
   // Assert onChange is called with increased range
   expect(onChangeMock).toHaveBeenCalled();
   const nextVal = onChangeMock.mock.calls[0][0];
