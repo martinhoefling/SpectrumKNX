@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from knx_telegram_store import StoredTelegram
 from knx_telegram_store.backends.memory import MemoryStore
 from xknx import XKNX
 from xknx.dpt import DPTArray
@@ -10,7 +11,6 @@ from xknx.telegram import GroupAddress, Telegram, apci
 
 import knx_daemon
 import mcp_server
-from knx_telegram_store import StoredTelegram
 
 NOW = datetime(2026, 7, 23, 12, 0, 0, tzinfo=UTC)
 
