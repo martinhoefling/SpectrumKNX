@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.3
+
+### Fixed
+
+- **MCP Transport Security**: Configured FastMCP transport security settings to allow network clients and custom Host headers without 421 Misdirected Request errors.
+
 ## 2.0.0-beta.2
 
 ### Added

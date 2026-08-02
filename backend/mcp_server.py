@@ -41,6 +41,7 @@ from knx_telegram_store.mcp import (
     query_telegrams as lib_query_telegrams,
 )
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 from xknx import mcp as xknx_mcp
 from xknxproject import mcp as xknxproject_mcp
@@ -122,9 +123,7 @@ def _require_project() -> Any:
     """
     project = knx_daemon.global_knx_project
     if project is None:
-        raise ValueError(
-            "No ETS project is loaded. Configure an ETS .knxproj to use project tools."
-        )
+        raise ValueError("No ETS project is loaded. Configure an ETS .knxproj to use project tools.")
     return project
 
 
@@ -171,7 +170,13 @@ def _build_server() -> FastMCP:
     # state to manage, which is all these read tools need and simplifies mounting.
     # streamable_http_path="/" so that mounting the app at "/mcp" serves the
     # endpoint at "/mcp" rather than the doubled-up "/mcp/mcp".
-    mcp = FastMCP("spectrum-knx", stateless_http=True, streamable_http_path="/")
+    # enable_dns_rebinding_protection=False allows remote network clients / custom Host headers.
+    mcp = FastMCP(
+        "spectrum-knx",
+        stateless_http=True,
+        streamable_http_path="/",
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
 
     # ── Project resources (#335) ────────────────────────────────────────────────
     # Read-only snapshots of the loaded ETS project. All degrade to a stable
@@ -344,9 +349,7 @@ def _build_server() -> FastMCP:
         `dpts` are "main" or "main.sub" strings (e.g. "9.001")."""
         result = await xknxproject_mcp.list_group_addresses(
             _require_project(),
-            xknxproject_mcp.GroupAddressFilter(
-                text=text, dpts=dpts or [], limit=limit, offset=offset
-            ),
+            xknxproject_mcp.GroupAddressFilter(text=text, dpts=dpts or [], limit=limit, offset=offset),
         )
         return asdict(result)
 
@@ -358,9 +361,7 @@ def _build_server() -> FastMCP:
 
     @mcp.tool()
     @_describe(xknxproject_mcp.DeviceFilter)
-    async def list_devices(
-        text: str | None = None, limit: int = 100, offset: int = 0
-    ) -> dict[str, Any]:
+    async def list_devices(text: str | None = None, limit: int = 100, offset: int = 0) -> dict[str, Any]:
         """List project devices. `text` matches individual address/name/manufacturer."""
         result = await xknxproject_mcp.list_devices(
             _require_project(),
@@ -413,9 +414,7 @@ def _build_server() -> FastMCP:
         `space_id` restricts to a specific space/room."""
         result = await xknxproject_mcp.list_functions(
             _require_project(),
-            xknxproject_mcp.FunctionFilter(
-                text=text, space_id=space_id, limit=limit, offset=offset
-            ),
+            xknxproject_mcp.FunctionFilter(text=text, space_id=space_id, limit=limit, offset=offset),
         )
         return asdict(result)
 
@@ -437,9 +436,7 @@ def _build_server() -> FastMCP:
     ) -> dict[str, Any]:
         """List known KNX data point types. `main` restricts to a DPT main
         number; `text` matches the DPT number/value type/unit."""
-        result = await xknx_mcp.list_dpts(
-            xknx_mcp.DptFilter(main=main, text=text, limit=limit, offset=offset)
-        )
+        result = await xknx_mcp.list_dpts(xknx_mcp.DptFilter(main=main, text=text, limit=limit, offset=offset))
         return asdict(result)
 
     @mcp.tool()
@@ -459,9 +456,7 @@ def _build_server() -> FastMCP:
     async def encode_value(value: Any, value_type: str) -> dict[str, Any]:
         """Encode a value using a specific DPT into its raw payload bytes.
         `value` is the Python native value; `value_type` is DPT number (e.g. "9.001") or name."""
-        result = await xknx_mcp.encode_dpt_payload(
-            xknx_mcp.EncodeDptPayloadInput(value=value, value_type=value_type)
-        )
+        result = await xknx_mcp.encode_dpt_payload(xknx_mcp.EncodeDptPayloadInput(value=value, value_type=value_type))
         return asdict(result)
 
     @mcp.tool()
@@ -489,9 +484,7 @@ def _register_bus_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @_describe(xknx_mcp.GroupValueReadInput)
-    async def read_group_value(
-        group_address: str, value_type: str | None = None
-    ) -> dict[str, Any]:
+    async def read_group_value(group_address: str, value_type: str | None = None) -> dict[str, Any]:
         """Read a group address live from the bus (sends a GroupValueRead and
         waits). `value_type` is a DPT number ("9.001") or value type name
         ("temperature"); without it the raw payload is returned."""
@@ -522,9 +515,7 @@ def _register_bus_tools(mcp: FastMCP) -> None:
         6-bit payload and a list of ints as a byte array."""
         result = await xknx_mcp.send_group_value_write(
             _require_xknx(),
-            xknx_mcp.GroupValueWriteInput(
-                group_address=group_address, value=value, value_type=value_type
-            ),
+            xknx_mcp.GroupValueWriteInput(group_address=group_address, value=value, value_type=value_type),
         )
         return asdict(result)
 
