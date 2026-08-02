@@ -1,3 +1,4 @@
+import asyncio
 import os
 import subprocess
 from datetime import datetime
@@ -223,15 +224,16 @@ async def upload_project(file: UploadFile = File(...), password: str = Form(""))
     default_file = os.path.join(default_dir, "knx_project.knxproj")
     default_pwd = os.path.join(default_dir, "knx_project_password")
 
-    os.makedirs(default_dir, exist_ok=True)
-
     content = await file.read()
 
-    with open(default_file, "wb") as f:
-        f.write(content)
+    def save_project_files():
+        os.makedirs(default_dir, exist_ok=True)
+        with open(default_file, "wb") as f:
+            f.write(content)
+        with open(default_pwd, "w", encoding="utf-8") as f:
+            f.write(password)
 
-    with open(default_pwd, "w", encoding="utf-8") as f:
-        f.write(password)
+    await asyncio.to_thread(save_project_files)
 
     # Trigger reload
     success = await knx_daemon._load_project_data()
@@ -285,16 +287,18 @@ async def upload_knxkeys(file: UploadFile = File(...), password: str = Form(""))
         raise HTTPException(status_code=400, detail="File must be a .knxkeys file")
 
     default_dir = "/project"
-    os.makedirs(default_dir, exist_ok=True)
-
     content = await file.read()
 
-    with open(knx_daemon.DEFAULT_KNXKEYS_FILE, "wb") as f:
-        f.write(content)
+    def save_knxkeys_files():
+        os.makedirs(default_dir, exist_ok=True)
+        with open(knx_daemon.DEFAULT_KNXKEYS_FILE, "wb") as f:
+            f.write(content)
 
-    if password:
-        with open(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE, "w", encoding="utf-8") as f:
-            f.write(password)
+        if password:
+            with open(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE, "w", encoding="utf-8") as f:
+                f.write(password)
+
+    await asyncio.to_thread(save_knxkeys_files)
 
     # Trigger reconnection with new credentials
     await knx_daemon._reconnect_knx()
