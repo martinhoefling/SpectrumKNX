@@ -52,15 +52,12 @@ from database import store
 MCP_MODE = os.getenv("MCP_MODE", "read-only").strip().lower()
 _VALID_MODES = ("off", "read-only", "read-write")
 
-# Raw parsed-project sections exposed as `knx://project/<section>` resources.
-_PROJECT_SECTIONS = ("group_addresses", "devices", "topology", "locations", "functions")
-
 # Shared domain primer prepended to the canned prompts so an agent has KNX context
 # even on a fresh conversation.
 _KNX_CONTEXT = """\
 You are working with a KNX building-automation installation via SpectrumKNX's MCP \
 tools and resources. Key concepts:
-- Group addresses (GAs, e.g. "1/2/3") are the communication endpoints; each carries a \
+- Group addresses (GAs, e.g. "1/2/3") are communication endpoints; each carries a \
 Data Point Type (DPT, e.g. 9.001 = temperature in °C) defining its value format.
 - Devices have individual addresses (IAs, e.g. "1.1.5"); their communication objects \
 link to GAs.
@@ -68,36 +65,31 @@ link to GAs.
 - The loaded ETS project defines the topology, locations and functions that group \
 related GAs.
 
-Read the `knx://project*` resources for installation structure, and use the query / \
-statistics / last-value tools for stored telegrams. Bus write tools exist only when \
-the server is configured in read-write mode."""
+Use the `knx://project` resource for a high-level project overview, and use discovery tools \
+for searching and inspecting details:
+- `list_group_addresses` and `describe_group_address` to find/inspect GAs.
+- `list_devices` and `list_communication_objects` for devices and hardware.
+- `list_locations`, `list_functions`, and `get_topology` for building structure & functions.
+- `list_dpts` and `describe_dpt` for DPT definitions.
+- `query_telegrams`, `get_store_stats`, `get_last_values` for stored bus telegrams.
+Bus write tools exist only when the server is configured in read-write mode."""
 
 
 def _project_overview() -> str:
-    """A compact index of the loaded ETS project: metadata + per-section counts.
-
-    Kept light so it is a cheap entry point; the per-section resources carry detail.
-    """
+    """A compact index of the loaded ETS project: metadata + per-section counts."""
     project = knx_daemon.global_knx_project
     if not project:
         return json.dumps({"status": "no_project_loaded"})
+    sections = ("group_addresses", "devices", "topology", "locations", "functions")
     return json.dumps(
         {
             "status": "ok",
             "info": project.get("info", {}),
-            "counts": {name: len(project.get(name) or {}) for name in _PROJECT_SECTIONS},
+            "counts": {name: len(project.get(name) or {}) for name in sections},
         },
         default=str,
         sort_keys=True,
     )
-
-
-def _project_section(section: str) -> str:
-    """A stable, read-only JSON view of one parsed-project section."""
-    project = knx_daemon.global_knx_project
-    if not project:
-        return json.dumps({"status": "no_project_loaded", section: {}})
-    return json.dumps({"status": "ok", section: project.get(section, {})}, default=str, sort_keys=True)
 
 
 def mcp_enabled() -> bool:
@@ -178,8 +170,8 @@ def _build_server() -> FastMCP:
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
 
-    # ── Project resources (#335) ────────────────────────────────────────────────
-    # Read-only snapshots of the loaded ETS project. All degrade to a stable
+    # ── Project resource ────────────────────────────────────────────────────────
+    # A lightweight index overview of the loaded ETS project. Degrades to a stable
     # {"status": "no_project_loaded"} payload when no project is configured.
 
     @mcp.resource(
@@ -190,51 +182,6 @@ def _build_server() -> FastMCP:
     )
     def project_overview() -> str:
         return _project_overview()
-
-    @mcp.resource(
-        "knx://project/group-addresses",
-        name="ETS group addresses",
-        description="Group addresses with their names, DPTs and metadata.",
-        mime_type="application/json",
-    )
-    def project_group_addresses() -> str:
-        return _project_section("group_addresses")
-
-    @mcp.resource(
-        "knx://project/devices",
-        name="ETS devices",
-        description="Devices keyed by KNX individual address.",
-        mime_type="application/json",
-    )
-    def project_devices() -> str:
-        return _project_section("devices")
-
-    @mcp.resource(
-        "knx://project/topology",
-        name="ETS topology",
-        description="Area and line topology.",
-        mime_type="application/json",
-    )
-    def project_topology() -> str:
-        return _project_section("topology")
-
-    @mcp.resource(
-        "knx://project/locations",
-        name="ETS locations",
-        description="Building and room structure.",
-        mime_type="application/json",
-    )
-    def project_locations() -> str:
-        return _project_section("locations")
-
-    @mcp.resource(
-        "knx://project/functions",
-        name="ETS functions",
-        description="Functions / functional blocks and their group-address roles.",
-        mime_type="application/json",
-    )
-    def project_functions() -> str:
-        return _project_section("functions")
 
     # ── Canned prompts (#335) ───────────────────────────────────────────────────
 
@@ -254,10 +201,10 @@ def _build_server() -> FastMCP:
         """Find ETS group addresses that have no assigned DPT."""
         return (
             f"{_KNX_CONTEXT}\n\n"
-            "Read the `knx://project/group-addresses` resource and list every group address "
-            "with no assigned DPT. Group the results by project range or function where that "
-            "metadata is available. Do not infer a DPT; suggest candidates separately and state "
-            "what evidence (e.g. observed telegram payloads) would confirm them."
+            "Use the `list_group_addresses` tool to search and list group addresses in the project. "
+            "Find every group address with no assigned DPT. Group the results by project range or function "
+            "where that metadata is available. Do not infer a DPT; suggest candidates separately and state "
+            "what evidence (e.g. observed telegram payloads from `query_telegrams`) would confirm them."
         )
 
     @mcp.tool()

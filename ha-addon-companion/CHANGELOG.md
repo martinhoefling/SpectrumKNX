@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.4
+
+### Changed
+
+- **MCP Context Optimization**: Removed high-cardinality project resources (`group-addresses`, `devices`, `topology`, `locations`, `functions`) to prevent LLM context bloat. Kept lightweight `knx://project` overview index and updated canned prompts to instruct agents to use paginated discovery tools.
+
 ## 2.0.0-beta.3
 
 ### Fixed

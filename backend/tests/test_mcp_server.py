@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from knx_telegram_store import StoredTelegram
 from knx_telegram_store.backends.memory import MemoryStore
 from xknx import XKNX
 from xknx.dpt import DPTArray
@@ -11,6 +10,7 @@ from xknx.telegram import GroupAddress, Telegram, apci
 
 import knx_daemon
 import mcp_server
+from knx_telegram_store import StoredTelegram
 
 NOW = datetime(2026, 7, 23, 12, 0, 0, tzinfo=UTC)
 
@@ -215,36 +215,23 @@ async def test_lists_read_only_tools(server):
 @pytest.mark.asyncio
 async def test_lists_project_resources_and_prompts(server):
     uris = {str(r.uri) for r in await server.list_resources()}
-    assert {
-        "knx://project",
-        "knx://project/group-addresses",
-        "knx://project/devices",
-        "knx://project/topology",
-        "knx://project/locations",
-        "knx://project/functions",
-    } <= uris
+    assert uris == {"knx://project"}
 
     prompts = {p.name for p in await server.list_prompts()}
     assert {"analyze_bus_traffic", "find_group_addresses_without_dpts"} <= prompts
 
 
 @pytest.mark.asyncio
-async def test_project_overview_and_sections(server, monkeypatch):
+async def test_project_overview(server, monkeypatch):
     monkeypatch.setattr(knx_daemon, "global_knx_project", _sample_project())
 
     overview = json.loads((await server.read_resource("knx://project"))[0].content)
     assert overview["status"] == "ok"
     assert overview["info"]["name"] == "Demo"
-    # Overview is a light index: counts, not the full section dumps.
+    # Overview is a light index: metadata and section counts.
     assert overview["counts"]["group_addresses"] == 1
     assert overview["counts"]["devices"] == 1
-    assert "group_addresses" not in overview  # detail lives in the section resource
-
-    gas = json.loads((await server.read_resource("knx://project/group-addresses"))[0].content)
-    assert gas["status"] == "ok"
-    # The section resource carries the raw parsed-project shape (dpt as {main, sub}).
-    assert gas["group_addresses"]["1/0/0"]["address"] == "1/0/0"
-    assert gas["group_addresses"]["1/0/0"]["dpt"] == {"main": 1, "sub": 1}
+    assert "group_addresses" not in overview
 
 
 @pytest.mark.asyncio
@@ -253,9 +240,6 @@ async def test_project_resources_report_when_no_project_is_loaded(server, monkey
 
     overview = json.loads((await server.read_resource("knx://project"))[0].content)
     assert overview == {"status": "no_project_loaded"}
-
-    locations = json.loads((await server.read_resource("knx://project/locations"))[0].content)
-    assert locations == {"status": "no_project_loaded", "locations": {}}
 
 
 @pytest.mark.asyncio
@@ -268,7 +252,7 @@ async def test_canned_prompts_include_knx_context(server):
 
     missing = await server.get_prompt("find_group_addresses_without_dpts")
     missing_text = missing.messages[0].content.text
-    assert "knx://project/group-addresses" in missing_text
+    assert "list_group_addresses" in missing_text
     assert "Do not infer a DPT" in missing_text
 
 
