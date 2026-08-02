@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from knx_telegram_store import StoredTelegram
 from knx_telegram_store.formats import RawTelegramRecord
 from xknx.cemi import CEMIFrame, CEMILData, CEMIMessageCode
 from xknx.dpt import DPTArray, DPTBinary
@@ -18,6 +17,8 @@ from xknx.exceptions import XKNXException
 from xknx.telegram import Telegram as XknxTelegram
 from xknx.telegram.address import GroupAddress, IndividualAddress
 from xknx.telegram.apci import APCI, GroupValueRead, GroupValueResponse, GroupValueWrite
+
+from knx_telegram_store import StoredTelegram
 
 # DPT main numbers whose payload travels inside the APCI byte (DPTBinary, ≤6 bit)
 _BINARY_DPT_MAINS = {1, 2, 3, 23}

@@ -2,10 +2,10 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from knx_telegram_store import StoredTelegram, TelegramQueryResult
 
 import ha_live_bridge
 from ha_live_bridge import _as_utc, _fetch_since, _note_seen, ha_telegram_to_frontend
+from knx_telegram_store import StoredTelegram, TelegramQueryResult
 
 
 def _ha_telegram(**overrides) -> dict:

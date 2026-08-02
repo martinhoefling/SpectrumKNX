@@ -5,7 +5,6 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from knx_telegram_store import StoredTelegram
 from xknx import XKNX
 from xknx.core import XknxConnectionState
 from xknx.dpt import DPTArray, DPTBase, DPTBinary
@@ -16,6 +15,7 @@ from xknx.telegram.address import GroupAddress, IndividualAddress
 from xknx.telegram.apci import GroupValueRead, GroupValueResponse, GroupValueWrite
 
 from database import READ_ONLY, store
+from knx_telegram_store import StoredTelegram
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
 from ws_manager import manager
 

@@ -18,9 +18,9 @@ import os
 from datetime import UTC, datetime
 
 import websockets
-from knx_telegram_store import TelegramQuery
 
 from database import store
+from knx_telegram_store import TelegramQuery
 from parsers import format_dpt_name, format_value_nicely, get_simplified_type
 from ws_manager import manager
 

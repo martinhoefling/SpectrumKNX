@@ -10,11 +10,11 @@ import tempfile
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-from knx_telegram_store import StoredTelegram, TelegramQueryResult
 from knx_telegram_store.formats import RawTelegramRecord
 
 import knx_daemon
 import telegram_import as ti
+from knx_telegram_store import StoredTelegram, TelegramQueryResult
 
 
 @pytest.fixture(autouse=True)
