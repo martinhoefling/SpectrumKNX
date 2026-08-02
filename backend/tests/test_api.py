@@ -111,7 +111,7 @@ def test_get_building_with_project():
                     # As in real projects: the function ref carries no name and an
                     # opaque UUID role — the real name/DPT come from the project (#295).
                     "1/2/3": {"name": "", "role": "98139557-C86A-4134-AB91-325CF8ECFC2A"}
-                }
+                },
             }
         },
         "devices": {
