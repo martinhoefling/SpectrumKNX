@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+    purge)
+        # Config is a conffile and removed by dpkg; state must go explicitly.
+        rm -rf /var/lib/spectrum-knx
+        if getent passwd spectrum-knx > /dev/null; then
+            deluser --system --quiet spectrum-knx || true
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+esac
+
+exit 0

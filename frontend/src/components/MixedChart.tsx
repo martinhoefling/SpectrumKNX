@@ -1,32 +1,35 @@
-import React, { useRef, useLayoutEffect, useState } from 'react';
+import React, { useRef, useLayoutEffect, useState, useMemo } from 'react';
 import UplotReact from 'uplot-react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import type { ChartBucket } from '../hooks/useChartData';
+import { useThemeTick } from '../hooks/useTheme';
+import { seriesColor } from '../utils/seriesColors';
+import { isSeriesHidden, setSeriesHidden } from '../utils/legendVisibility';
+import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
 
 interface MixedChartProps {
   bucket: ChartBucket;
   minTime: number | null;
   maxTime: number | null;
+  stepped: boolean;
+  /** Draw a dot at each telegram timestamp so cyclic repeats are visible (#195). */
+  showDots: boolean;
+  /** When true (no active zoom), let the chart re-fit to new data so a telegram
+   * that extends the range stays visible instead of falling off a frozen scale
+   * (#340). When zoomed, stays false to preserve the app-controlled range (#281). */
+  autoFollow?: boolean;
+  onZoomRangeChange?: (value: [number, number] | null) => void;
 }
-
-// Generate simple distinct colors for series
-const COLORS = [
-  '#3b82f6', // blue
-  '#ef4444', // red
-  '#eab308', // yellow
-  '#22c55e', // green
-  '#a855f7', // purple
-  '#f97316', // orange
-  '#14b8a6', // teal
-];
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
+const LEFT_GUTTER = 150;
 
-export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
+export const MixedChart: React.FC<MixedChartProps> = ({ bucket, minTime, maxTime, stepped, showDots, autoFollow = false, onZoomRangeChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
+  const themeTick = useThemeTick();
 
   // Resize observer to keep chart fluid
   useLayoutEffect(() => {
@@ -40,6 +43,9 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
 
   const { unit, isBinary, timestamps, series } = bucket;
 
+  // Show a date alongside times once the visible range crosses midnight (#281).
+  const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
+
   // Prepare data array: [ [x], [y1], [y2] ]
   // We divide timestamps by 1000 since uPlot expects unix seconds by default
   const data: uPlot.AlignedData = [
@@ -47,84 +53,154 @@ export const MixedChart: React.FC<MixedChartProps> = ({ bucket }) => {
     ...series.map(s => s.data)
   ];
 
-  // Configure Y-Axis scale limits based on smart defaults
-  let scaleConfig: uPlot.Scale = {
-    // scale auto
-  };
+  // Only the chart's *structure* (size, theme, series identity, unit) should
+  // rebuild `options`; a new telegram changes `data`, not `options`, so
+  // uplot-react updates via setData instead of destroying and recreating the
+  // chart — which would drop the cursor/hover on every telegram (#207).
+  const structureKey = [
+    width, isBinary, unit, stepped, showDots, themeTick,
+    minTime, maxTime,
+    series.map(s => `${s.address}~${s.name}`).join('|'),
+  ].join('§');
 
-  if (!isBinary && (unit === '%' || unit === 'Hz' || unit === 'W')) {
-    // Smart Y bounds: these should typically floor at 0
-    scaleConfig = {
-      auto: true,
-      range: (_u, _min, max) => {
-        const hardMin = 0;
-        return [hardMin, max > hardMin ? max * 1.1 : 100];
-      }
-    };
-  } else if (isBinary) {
-    // For boolean square wave, lock to slightly outside 0-1
-    scaleConfig = {
-      auto: false,
-      range: [-0.1, 1.1]
-    };
-  }
+  // Indices (per series) where an actual telegram was received, so dots mark
+  // real receipts rather than every forward-filled column (#195). Held in a ref
+  // that is refreshed every render, so the points.filter (kept in the stable
+  // memoized options for #207) reads live data instead of a stale snapshot.
+  const realIndicesRef = useRef<number[][]>([]);
+  // Written in render (not an effect) so it is fresh before uPlot's child draw
+  // effect runs on this commit; only ever read inside the imperative points
+  // filter, never during React render.
+  // eslint-disable-next-line react-hooks/refs
+  realIndicesRef.current = series.map(s => s.real.flatMap((r, i) => (r ? [i] : [])));
 
-  const options: uPlot.Options = {
-    width,
-    height: isBinary ? Math.max(150, series.length * 50) : 300,
-    cursor: { sync: { key: syncCursor.key } },
-    scales: {
-      x: { time: true },
-      // Shared Y scale for this unit bucket
-      y: scaleConfig
-    },
-    axes: [
-      {
-        space: 50,
-        grid: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
-        stroke: '#94a3b8',
-        values: (_u, splits) => splits.map(v =>
-          new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-        )
-      },
-      {
-        space: 30,
-        grid: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
-        stroke: '#94a3b8',
-        values: isBinary
-          ? (_u, splits) => splits.map(v => v === 1 ? 'ON' : v === 0 ? 'OFF' : '')
-          : undefined
-      }
-    ],
-    series: [
-      {
-        value: (_u, v) => v == null ? '-' : new Date(v * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-      },
-      ...series.map((s, idx) => ({
-        label: s.name,
-        stroke: COLORS[idx % COLORS.length],
-        width: 2,
-        spanGaps: true, // Interpolate gaps so lines don't break on missing data
-        paths: isBinary ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
-        fill: isBinary ? COLORS[idx % COLORS.length] + '33' : undefined,
-        points: { show: false }, // Hide explicit dots for performance/cleanliness
-        value: (_u: uPlot, v: number | null) => {
-          if (v === null) return '-';
-          if (isBinary) return v === 1 ? 'On' : 'Off';
-          return v + ' ' + unit;
+  const options: uPlot.Options = useMemo(() => {
+    const style = getComputedStyle(document.documentElement);
+    const gridStroke = style.getPropertyValue('--border-subtle').trim();
+    const axisStroke = style.getPropertyValue('--text-dim').trim();
+
+    // Configure Y-Axis scale limits based on smart defaults
+    let scaleConfig: uPlot.Scale = {};
+    if (!isBinary && (unit === '%' || unit === 'Hz' || unit === 'W')) {
+      scaleConfig = {
+        auto: true,
+        range: (_u, _min, max) => {
+          const hardMin = 0;
+          return [hardMin, max > hardMin ? max * 1.1 : 100];
         }
-      }))
-    ]
-  };
+      };
+    } else if (isBinary) {
+      scaleConfig = { auto: false, range: [-0.1, 1.1] };
+    }
+
+    return {
+      width,
+      height: isBinary ? Math.max(150, series.length * 50) : 300,
+      padding: [8, 16, 8, 0],
+      cursor: {
+        sync: { key: syncCursor.key },
+        drag: { x: true, y: false, setScale: false }
+      },
+      hooks: {
+        // Record legend show/hide toggles so they survive chart recreation (#192).
+        // Use the requested value from `opts.show` rather than reading it back
+        // off `u.series[idx].show`, which uPlot only commits after this hook —
+        // reading the stale value lagged the store by one click and made the
+        // legend appear to need a second click to stick (#205).
+        setSeries: [(_u, idx, opts) => {
+          if (idx == null || idx === 0 || !('show' in opts)) return;
+          const addr = series[idx - 1]?.address;
+          if (addr) setSeriesHidden(addr, !opts.show);
+        }],
+        setSelect: [
+          (u) => {
+            if (u.select.width > 0) {
+              const min = u.posToVal(u.select.left, 'x');
+              const max = u.posToVal(u.select.left + u.select.width, 'x');
+              onZoomRangeChange?.([min * 1000, max * 1000]);
+            }
+          }
+        ],
+        ready: [
+          (u) => {
+            u.over.addEventListener('dblclick', () => {
+              onZoomRangeChange?.(null);
+            });
+          }
+        ]
+      },
+      scales: {
+        x: {
+          time: true,
+          min: minTime ? minTime / 1000 : undefined,
+          max: maxTime ? maxTime / 1000 : undefined,
+        },
+        y: scaleConfig
+      },
+      axes: [
+        {
+          // Wider minimum tick spacing when labels carry a date, so the
+          // "MM-DD HH:mm" ticks don't overlap into an unreadable ruler (#314).
+          space: multiDay ? 95 : 55,
+          grid: { stroke: gridStroke, width: 1 },
+          stroke: axisStroke,
+          values: (_u, splits) => splits.map(v => formatAxisTime(v * 1000, multiDay))
+        },
+        {
+          space: 30,
+          grid: { stroke: gridStroke, width: 1 },
+          stroke: axisStroke,
+          size: LEFT_GUTTER,
+          values: isBinary
+            ? (_u, splits) => splits.map(v => v === 1 ? 'ON' : v === 0 ? 'OFF' : '')
+            : undefined
+        }
+      ],
+      series: [
+        {
+          value: (_u, v) => v == null ? '-' : formatFullTime(v * 1000, multiDay)
+        },
+        ...series.map((s, sIdx) => ({
+          label: s.name,
+          show: !isSeriesHidden(s.address),
+          stroke: seriesColor(s.address),
+          width: 2,
+          spanGaps: true,
+          paths: (isBinary || stepped) ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
+          fill: isBinary ? seriesColor(s.address) + '33' : undefined,
+          points: showDots
+            ? { show: true, size: 5, space: 0, filter: () => realIndicesRef.current[sIdx] ?? null }
+            : { show: false },
+          value: (_u: uPlot, v: number | null) => {
+            if (v === null) return '-';
+            if (isBinary) return v === 1 ? 'On' : 'Off';
+            return v + ' ' + unit;
+          }
+        }))
+      ]
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structureKey]);
 
   return (
-    <div style={{ marginBottom: '2rem', background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+    <div style={{ marginBottom: '2rem', background: 'var(--bg-inset)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
       <h4 style={{ margin: '0 0 1rem', fontSize: '0.9rem', color: 'var(--text-main)' }}>
         {isBinary ? 'Binary States (Ein/Aus)' : `Metrics (${unit})`}
       </h4>
       <div ref={containerRef} style={{ width: '100%', overflow: 'hidden' }}>
-         <UplotReact options={options} data={data} />
+         {/* Re-fit to new data only while not zoomed (#340): keeps a new telegram
+             visible instead of dropping off a frozen scale. When the user has
+             zoomed, autoFollow is false so the range is preserved (#281). */}
+         <UplotReact options={options} data={data} resetScales={autoFollow} />
       </div>
+      {/* Always spell out the visible window's start and end, so the range is
+          readable even when the axis ticks are sparse or zoomed out (#314). */}
+      {minTime != null && maxTime != null && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', paddingLeft: `${LEFT_GUTTER}px`, paddingRight: '16px', fontSize: '0.7rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+          <span>{formatFullTime(minTime, multiDay)}</span>
+          <span>{formatFullTime(maxTime, multiDay)}</span>
+        </div>
+      )}
     </div>
   );
 };

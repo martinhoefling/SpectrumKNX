@@ -1,15 +1,26 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
+import { readSortConfigPref, writeSortConfigPref } from '../utils/sortConfig';
 import type { Telegram } from '../hooks/useWebSocket';
-import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart } from 'lucide-react';
+import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
 import { HistoryLoader } from './HistoryLoader';
 import { Visualizer } from './Visualizer';
 import { FilterPanel } from './FilterPanel';
+import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
+import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
   hasActiveFilters,
+  matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
 } from '../types/filters';
+
+export type LoaderTimeRange = {
+  relValue: number;
+  relUnit: 'seconds' | 'minutes' | 'hours' | 'days';
+  startTime: string;
+  endTime: string;
+};
 
 interface HistorySearchProps {
   visibleColumns: { [key: string]: boolean };
@@ -18,27 +29,61 @@ interface HistorySearchProps {
   activeFilters: ActiveFilters;
   onFiltersChange: (f: ActiveFilters) => void;
   onOpenSettings: () => void;
+  projectLoaded?: boolean;
   selectedVisualizationTargets: string[];
   onVisualizationTargetsChange: (targets: string[] | ((prev: string[]) => string[])) => void;
+  /** Shared-view state parsed from the URL — triggers an auto-load on mount (#150). */
+  initialView?: VizViewState | null;
 }
 
 export const HistorySearch: React.FC<HistorySearchProps> = ({
   visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings,
-  selectedVisualizationTargets, onVisualizationTargetsChange
+  projectLoaded, selectedVisualizationTargets, onVisualizationTargetsChange, initialView
 }) => {
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
   const [metadata, setMetadata] = useState<{ total_count: number; limit_reached: boolean } | null>(null);
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
-  // activeFilters and onFiltersChange come from App.tsx (shared with live view)
+
+  // Persisted time range — survives HistoryLoader open/close cycles
+  const [timeRange, setTimeRange] = useState<LoaderTimeRange>({
+    relValue: 1, relUnit: 'hours', startTime: '', endTime: '',
+  });
+
+  // Snapshot of filters at the time of the last load — used to detect stale results
+  const [filtersAtLoad, setFiltersAtLoad] = useState<ActiveFilters | null>(null);
+
+  // The time window of the last load — basis for shareable links (#150)
+  const [loadedRange, setLoadedRange] = useState<LoadedRange | null>(null);
+
+  // Auto-load a view shared via URL exactly once on mount (#150)
+  const initialViewLoaded = useRef(false);
+  useEffect(() => {
+    if (!initialView || initialViewLoaded.current) return;
+    initialViewLoaded.current = true;
+    const limit = initialView.limit ?? loadLimit;
+    loadHistoryTelegrams(initialView.range, limit, initialView.filters)
+      .then(({ telegrams: loaded, metadata: meta }) => {
+        setTelegrams(loaded);
+        setMetadata(meta);
+        setFiltersAtLoad(initialView.filters);
+        setLoadedRange(initialView.range);
+        setIsVisualizerOpen(true);
+      })
+      .catch(err => console.error('Failed to load shared view:', err));
+  }, [initialView, loadLimit]);
 
   const handleSort = (key: SortKey) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
-    }));
+    setSortConfig(prev => {
+      const next: SortConfig = {
+        key,
+        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
+      };
+      writeSortConfigPref(next);
+      return next;
+    });
   };
 
   const handleQuickFilter = (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => {
@@ -85,7 +130,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     return items;
   }, [telegrams, sortConfig]);
 
-  const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }) => {
+  const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }, range?: LoadedRange) => {
     setTelegrams(prev => {
       const existingTs = new Set(prev.map(t => t.timestamp));
       const newUnique = loaded.filter(t => !existingTs.has(t.timestamp));
@@ -99,7 +144,35 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       return next.length > loadLimit ? next.slice(0, loadLimit) : next;
     });
     setMetadata(meta || null);
+    // Snapshot the filters at load time so we can detect when they diverge
+    setFiltersAtLoad(activeFilters);
+    if (range) setLoadedRange(range);
   };
+
+  // In-memory filter pass — mirrors live view filtering so changing filters
+  // immediately applies to already-loaded data without a re-fetch.
+  const filteredSortedTelegrams = useMemo(() => {
+    if (!hasActiveFilters(activeFilters)) return sortedTelegrams;
+    return sortedTelegrams.filter(t => matchesTelegram(t, activeFilters));
+  }, [sortedTelegrams, activeFilters]);
+
+  // True when current filters are less restrictive than what was used to fetch,
+  // meaning some telegrams may be missing from the loaded set.
+  const filtersLessRestrictive = useMemo(() => {
+    const atLoad = filtersAtLoad;
+    if (!atLoad || telegrams.length === 0) return false;
+    // A category became less restrictive if it had selections at load time
+    // but now has fewer (or none) — data for the removed entries was never fetched.
+    const wasFiltered = (arr: (string | number)[]) => arr.length > 0;
+    const nowHasFewer = (now: (string | number)[], then: (string | number)[]) =>
+      then.some(v => !now.includes(v as never));
+    return (
+      (wasFiltered(atLoad.sources) && nowHasFewer(activeFilters.sources, atLoad.sources)) ||
+      (wasFiltered(atLoad.targets) && nowHasFewer(activeFilters.targets, atLoad.targets)) ||
+      (wasFiltered(atLoad.types)   && nowHasFewer(activeFilters.types,   atLoad.types))   ||
+      (wasFiltered(atLoad.dpts)    && nowHasFewer(activeFilters.dpts,    atLoad.dpts))
+    );
+  }, [activeFilters, filtersAtLoad, telegrams.length]);
 
   const activeFilterCount = hasActiveFilters(activeFilters)
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
@@ -115,10 +188,22 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {telegrams.length > 0 && (
             <span style={{
-              fontSize: '0.75rem', color: 'var(--text-dim)', background: 'rgba(255,255,255,0.05)',
+              fontSize: '0.75rem', color: 'var(--text-dim)', background: 'var(--bg-tag)',
               padding: '0.2rem 0.6rem', borderRadius: '999px', border: '1px solid var(--border-color)',
             }}>
-              {telegrams.length.toLocaleString()} telegrams
+              {hasActiveFilters(activeFilters)
+                ? <>{filteredSortedTelegrams.length.toLocaleString()}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}> / {telegrams.length.toLocaleString()}</span></>
+                : telegrams.length.toLocaleString()
+              } telegrams
+            </span>
+          )}
+          {filtersLessRestrictive && (
+            <span
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              onClick={() => setIsLoaderOpen(true)}
+              title="Filters were broadened after the last load — some matching telegrams may not be in the loaded set. Click to reload."
+            >
+              <RefreshCw size={13} /> Reload for full results
             </span>
           )}
           {metadata?.limit_reached && (
@@ -195,17 +280,19 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {/* Filter panel (slide-in) */}
         <div style={{
-          width: isFilterOpen ? '240px' : '0px',
+          width: isFilterOpen ? 'clamp(260px, 18vw, 340px)' : '0px',
           overflow: 'hidden',
           transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
           flexShrink: 0,
         }}>
-          <div style={{ width: 240, height: '100%' }}>
+          <div style={{ width: 'clamp(260px, 18vw, 340px)', height: '100%' }}>
             <FilterPanel
               options={filterOptions}
               activeFilters={activeFilters}
               onFiltersChange={onFiltersChange}
               mode="history"
+              projectLoaded={projectLoaded}
+              onUploadProject={onOpenSettings}
             />
           </div>
         </div>
@@ -218,6 +305,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               selectedTargets={selectedVisualizationTargets}
               onTargetsChange={onVisualizationTargetsChange}
               onClose={() => setIsVisualizerOpen(false)}
+              getShareLink={loadedRange ? () => buildViewUrl({
+                plot: selectedVisualizationTargets,
+                filters: activeFilters,
+                range: loadedRange,
+                limit: loadLimit,
+              }) : undefined}
             />
           ) : telegrams.length === 0 ? (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
@@ -245,7 +338,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
             </div>
           ) : (
             <TelegramTable
-              telegrams={sortedTelegrams}
+              telegrams={filteredSortedTelegrams}
               visibleColumns={visibleColumns}
               sortConfig={sortConfig}
               onSort={handleSort}
@@ -263,6 +356,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           onLoad={handleLoad}
           limit={loadLimit}
           filters={activeFilters}
+          timeRange={timeRange}
+          onTimeRangeChange={setTimeRange}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-ARG BUILD_FROM="ghcr.io/hassio-addons/debian-base/amd64:7.3.3"
+ARG BUILD_FROM="ghcr.io/hassio-addons/debian-base/amd64:9.3.0"
 
 # Stage 1: Build the React frontend
 FROM node:24-slim AS frontend-builder
@@ -24,12 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Add PostgreSQL repository
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
 # Add TimescaleDB repository
-RUN echo "deb https://packagecloud.io/timescale/timescaledb/debian/ bookworm main" > /etc/apt/sources.list.d/timescaledb.list \
-    && wget --quiet -O - https://packagecloud.io/timescale/timescaledb/gpgkey | apt-key add -
+# PackageCloud does not yet have Debian trixie packages; use bookworm which is ABI-compatible.
+RUN curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
+      -o /usr/share/keyrings/timescaledb-archive-keyring.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/timescaledb-archive-keyring.asc] https://packagecloud.io/timescale/timescaledb/debian/ bookworm main" \
+      > /etc/apt/sources.list.d/timescaledb.list
 
 # Install PostgreSQL 15 and TimescaleDB
 RUN apt-get update && apt-get install -y --no-install-recommends \

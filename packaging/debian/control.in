@@ -1,0 +1,16 @@
+Package: spectrum-knx
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Depends: python3 (>= 3.13), adduser
+Maintainer: Martin Hoefling <martinhoefling@users.noreply.github.com>
+Homepage: https://github.com/martinhoefling/SpectrumKNX
+Description: Professional KNX bus monitor and analyzer
+ Spectrum KNX records and visualizes KNX bus telegrams: live monitor,
+ history search, traffic statistics and mixed visualizations, with group
+ address names resolved from an uploaded ETS project file.
+ .
+ This package runs the analyzer as a systemd service with a local SQLite
+ database (no PostgreSQL required). It bundles a Python virtual
+ environment under /opt/spectrum-knx.

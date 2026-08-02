@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:24-alpine AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 ARG APP_VERSION=dev
 ENV VITE_APP_VERSION=$APP_VERSION
 WORKDIR /app/frontend
@@ -9,7 +9,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Serve with Python
-FROM python:3.12-slim
+FROM python:3.14-slim
 ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 WORKDIR /app
@@ -30,10 +30,13 @@ COPY backend/ .
 COPY --from=frontend-builder /app/frontend/dist ./static
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8765
 
 # Environment variables
 ENV LOG_LEVEL=INFO
+ENV BIND_HOST=0.0.0.0
+ENV BIND_PORT=8765
 
-# Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Command to run the application. `exec` keeps uvicorn as PID 1 so it receives
+# signals for graceful shutdown; the shell form lets BIND_HOST/BIND_PORT expand.
+CMD ["sh", "-c", "exec uvicorn main:app --host \"$BIND_HOST\" --port \"$BIND_PORT\""]

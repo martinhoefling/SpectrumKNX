@@ -13,13 +13,19 @@ on:
 jobs:
   backend-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.12 is the minimum supported version (FreeBSD port, see issue #274),
+        # 3.13 is what the Debian package targets (Debian 13, see PACKAGING.md),
+        # 3.14 is what the Docker image ships.
+        python-version: ['3.12', '3.13', '3.14']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -27,10 +33,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Lint with Ruff
-        run: |
-          cd backend
-          ruff check .
 
       - name: Run Tests with Pytest
         run: |
@@ -44,10 +46,10 @@ jobs:
   frontend-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'

@@ -1,5 +1,42 @@
+[project]
+name = "spectrum-knx"
+# Placeholder — release versions come from the git tag (APP_VERSION at runtime,
+# injected by the packaging pipelines). The backend is not published to PyPI.
+version = "0.0.0"
+description = "A professional KNX bus monitor and analyzer"
+readme = "../README.md"
+license = "MIT"
+requires-python = ">=3.12"
+# Direct runtime dependencies. requirements.txt is the pinned lock (including
+# transitive deps) used by the Docker image and the HA add-on — keep both in
+# sync when adding a dependency.
+dependencies = [
+    "aiosqlite",
+    "asyncpg",
+    "fastapi",
+    "httpx",
+    "knx-telegram-store>=0.11.2",
+    "mcp",
+    "pydantic",
+    "python-dotenv",
+    "python-multipart",
+    "SQLAlchemy",
+    "uvicorn",
+    "websockets",
+    "xknx>=3.18.0",
+    "xknxproject>=3.10.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
 [tool.ruff]
-# Target Python version
+# Target Python version (minimum supported, see requires-python)
 target-version = "py312"
 # Max line length for auto-format or other rules
 line-length = 120

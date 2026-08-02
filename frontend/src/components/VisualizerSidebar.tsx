@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { LineChart, X, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { OptionRow } from './FilterPanel';
+import { RAW_DPT_OPTIONS } from '../utils/rawDpt';
+import { getPref, setPref } from '../utils/prefs';
 
 interface TargetCount {
   address: string;
@@ -13,11 +15,25 @@ interface VisualizerSidebarProps {
   telegrams: Telegram[];
   selectedTargets: string[];
   onTargetsChange: (targets: string[]) => void;
-  onClose: () => void;
+  /** Selected GAs with no project DPT that need a manual datatype to plot (#315). */
+  untypedTargets?: Set<string>;
+  /** Chosen datatype key per address. */
+  dptOverrides?: Record<string, string>;
+  /** Assign (or clear, with '') the datatype for a GA. */
+  onDptOverrideChange?: (address: string, key: string) => void;
 }
 
-export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams, selectedTargets, onTargetsChange, onClose }) => {
-  const [search, setSearch] = useState('');
+export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
+  telegrams, selectedTargets, onTargetsChange,
+  untypedTargets, dptOverrides = {}, onDptOverrideChange,
+}) => {
+  // Persisted so the Targets filter survives closing/reopening the panel and
+  // reloads, like the other visualization prefs (#361).
+  const [search, setSearch] = useState(() => getPref('vizTargetSearch') ?? '');
+  const changeSearch = (value: string) => {
+    setSearch(value);
+    setPref('vizTargetSearch', value);
+  };
 
   // Extract unique targets and their counts from the currently plotted dataset
   const targetCounts = useMemo(() => {
@@ -53,12 +69,20 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
   };
 
   return (
-    <div style={{ width: 260, borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.1)' }}>
+    <div style={{ width: 260, borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'var(--bg-inset)' }}>
       <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <span style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <LineChart size={16} style={{ color: 'var(--accent-primary)' }} /> Targets
         </span>
-        <button onClick={onClose} className="icon-button" title="Close Visualization" style={{ padding: '0.2rem' }}>
+        {/* Clears the checkmarks, like the filter panel's clear-all (#347). The
+            panel itself is closed with the X in the chart-area header. */}
+        <button
+          onClick={() => onTargetsChange([])}
+          disabled={selectedTargets.length === 0}
+          className="icon-button"
+          title="Clear all selected targets"
+          style={{ padding: '0.2rem', opacity: selectedTargets.length === 0 ? 0.4 : 1 }}
+        >
           <X size={14} />
         </button>
       </div>
@@ -66,7 +90,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
       <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem',
-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
+          background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
           borderRadius: '7px', padding: '0.45rem 0.65rem'
         }}>
           <Search size={13} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
@@ -74,7 +98,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
             type="text"
             placeholder="Search targets..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => changeSearch(e.target.value)}
             style={{
               background: 'transparent', border: 'none', outline: 'none',
               color: 'var(--text-main)', fontSize: '0.8125rem', width: '100%',
@@ -88,16 +112,42 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({ telegrams,
           Select targets from the currently active {telegrams.length.toLocaleString()} telegrams to plot their metrics over time.
         </div>
 
-        {filteredTargets.map(t => (
-          <OptionRow
-            key={t.address}
-            label={t.address}
-            sublabel={t.name}
-            checked={selectedTargets.includes(t.address)}
-            count={t.count}
-            onToggle={() => toggle(t.address)}
-          />
-        ))}
+        {filteredTargets.map(t => {
+          const selected = selectedTargets.includes(t.address);
+          // Offer a datatype picker for a selected GA that has no project DPT,
+          // so its raw payload can be decoded into a plottable value (#315).
+          const needsDpt = selected && untypedTargets?.has(t.address) && onDptOverrideChange;
+          return (
+            <React.Fragment key={t.address}>
+              <OptionRow
+                label={t.address}
+                sublabel={t.name}
+                checked={selected}
+                count={t.count}
+                onToggle={() => toggle(t.address)}
+              />
+              {needsDpt && (
+                <div style={{ padding: '0 0.25rem 0.5rem 1.75rem', marginTop: '-0.25rem' }}>
+                  <select
+                    value={dptOverrides[t.address] ?? ''}
+                    onChange={e => onDptOverrideChange(t.address, e.target.value)}
+                    title="This group address has no datatype in the project. Pick one to decode and plot its raw payload."
+                    style={{
+                      width: '100%', background: 'var(--bg-tag)', color: 'var(--text-main)',
+                      border: '1px solid var(--border-color)', borderRadius: '6px',
+                      padding: '0.35rem 0.5rem', fontSize: '0.75rem',
+                    }}
+                  >
+                    <option value="">No datatype — pick to plot…</option>
+                    {RAW_DPT_OPTIONS.map(o => (
+                      <option key={o.key} value={o.key}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
     </div>
   );

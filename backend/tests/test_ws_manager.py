@@ -63,3 +63,37 @@ async def test_websocket_manager():
 
     manager.disconnect(ws1)
     assert ws1 not in manager.active_connections
+
+
+@pytest.mark.asyncio
+async def test_broadcast_event_bypasses_filters():
+    """connection_state events reach every client, even with non-matching filters (#166)."""
+    manager = ConnectionManager()
+
+    class MockWebsocket:
+        def __init__(self):
+            self.sent_data = []
+
+        async def accept(self):
+            pass
+
+        async def send_json(self, data):
+            if data.get("raise_error"):
+                raise Exception("Simulated connection error")
+            self.sent_data.append(data)
+
+    ws = MockWebsocket()
+    await manager.connect(ws)
+    await manager.update_filters(ws, {"target_address": "1/1/1"})
+
+    ts = datetime(2023, 1, 1, tzinfo=UTC)
+    await manager.broadcast_event({"type": "connection_state", "connected": False, "timestamp": ts})
+    assert len(ws.sent_data) == 1
+    assert ws.sent_data[0]["type"] == "connection_state"
+    assert ws.sent_data[0]["timestamp"] == ts.isoformat()
+
+    # Dead connections are dropped
+    dead = MockWebsocket()
+    await manager.connect(dead)
+    await manager.broadcast_event({"type": "connection_state", "raise_error": True})
+    assert dead not in manager.active_connections

@@ -31,15 +31,26 @@ def get_simplified_type(tech_type: str) -> str:
 
 def format_value_nicely(value, dpt_main=None, dpt_sub=None):
     """Formats numeric or boolean values into clean, HA-style strings."""
+    if value is None:
+        # Payload-less telegrams (GroupValueRead) and undecoded payloads carry
+        # no value — never fabricate one (#181).
+        return None
+
     if isinstance(value, bool) or (dpt_main == 1):
-        try:
-            num_str = f"{dpt_main}.{dpt_sub:03d}" if dpt_sub is not None else "1.001"
-            tc = DPTBase.parse_transcoder(num_str)
-            if tc and hasattr(tc, "value_to_str"):
-                # Note: xknx's to_str often returns the descriptive name
-                return str(tc.to_knx(value).to_str() if hasattr(tc, "to_knx") else value).lower()
-        except Exception:
-            pass
+        # DPT-1 values arrive as bools, 0/1 numerics, or already-decoded enum
+        # names ("off", "down", ...) from Home Assistant. Strings ARE the
+        # display value — truth-testing them would render "off" as "on" (#181).
+        if isinstance(value, str):
+            return value.lower()
+        if dpt_sub is not None:
+            try:
+                tc = DPTBase.parse_transcoder(f"{dpt_main or 1}.{dpt_sub:03d}")
+                data_type = getattr(tc, "data_type", None)
+                if data_type is not None:
+                    # Subtype-specific name, e.g. 1.008: False -> "up"
+                    return data_type(bool(value)).name.lower()
+            except Exception:
+                pass
         return "on" if value else "off"
 
     if isinstance(value, int | float):
@@ -120,7 +131,7 @@ def parse_telegram_payload(telegram, xknx=None):
         elif isinstance(val, bool):
             value_numeric = 1.0 if val else 0.0
         else:
-            value_json = {"value": val}
+            value_json = val
 
     # 3. Use raw string if decoding failed but payload exists
     if value_numeric is None and value_json is None and payload_val is not None:
@@ -130,9 +141,9 @@ def parse_telegram_payload(telegram, xknx=None):
         elif isinstance(v, bool):
             value_numeric = 1.0 if v else 0.0
         elif isinstance(v, tuple | list):
-            value_json = {"value": list(v)}
+            value_json = list(v)
         else:
-            value_json = {"value": str(v)}
+            value_json = str(v)
 
     raw_hex = raw_data.hex() if raw_data else None
     if raw_hex and len(raw_hex) > 1:

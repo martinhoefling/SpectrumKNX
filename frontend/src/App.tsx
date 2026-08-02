@@ -1,18 +1,49 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useWebSocket, type Telegram } from './hooks/useWebSocket';
+import { useWebSocket, type Telegram, type ConnectionStateEvent } from './hooks/useWebSocket';
+import { parseViewUrl } from './utils/viewUrl';
+import {
+  isEmbedded,
+  loadWorkspace,
+  saveWorkspace,
+  parseMonitorSearch,
+  applyWorkspaceUrl,
+  type WorkspaceState,
+  type WorkspaceView,
+} from './utils/workspaceState';
+import {
+  loadUiState,
+  saveUiState,
+  DEFAULT_UI_STATE,
+} from './utils/uiState';
+import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
-import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, ChevronDown, AlertTriangle } from 'lucide-react';
-import { getCookie, setCookie } from './utils/cookies';
+import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
+import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock, List } from 'lucide-react';
+import { getPref, setPref } from './utils/prefs';
+import { getLabel, getFileName } from './utils/labels';
+import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
+import { useTelegramCache } from './hooks/useTelegramCache';
+import { rangeToMs } from './utils/historyLoad';
 import { HistorySearch } from './components/HistorySearch';
+import { ImportExportView } from './components/ImportExportView';
 import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
 import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import { KeysUploadWizard } from './components/KeysUploadWizard';
+import { LastSeenOverlay } from './components/LastSeenOverlay';
+import { StatisticsOverlay } from './components/StatisticsOverlay';
+import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
+import { DatabaseOverlay } from './components/DatabaseOverlay';
+import { WriteToBusPanel } from './components/WriteToBusPanel';
+import { UpdateNotification } from './components/UpdateNotification';
+import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
   DEFAULT_FILTERS,
+  dptKey,
   hasActiveFilters,
+  matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
   type FilterCounts,
@@ -20,9 +51,13 @@ import {
 
 declare const __APP_VERSION__: string;
 
-const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [] };
+// Remembers the latest version the user already dismissed, so the popup shows
+// once per new release rather than on every load.
+const DISMISSED_UPDATE_PREF = 'dismissed_update_version';
 
-const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: string, isSettingsOpen: boolean, onChange: (id: string) => void }) => {
+const EMPTY_FILTER_OPTIONS: FilterOptions = { sources: [], targets: [], types: [], dpts: [], ga_group_names: {}, pa_line_names: {} };
+
+const NavDropdown = ({ activeTab, isSettingsOpen, isDatabaseOpen, onChange }: { activeTab: string, isSettingsOpen: boolean, isDatabaseOpen: boolean, onChange: (id: string) => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -39,10 +74,12 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
   const items = [
     { id: 'live', label: 'Group Monitor', icon: LayoutDashboard },
     { id: 'history', label: 'History Search', icon: History },
+    { id: 'import', label: 'Import / Export', icon: FolderInput },
+    { id: 'database', label: 'Database Maintenance', icon: Database },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
-  const currentSelection = isSettingsOpen ? 'settings' : activeTab;
+  const currentSelection = isDatabaseOpen ? 'database' : isSettingsOpen ? 'settings' : activeTab;
   const activeItem = items.find(i => i.id === currentSelection) || items[0];
   const ActiveIcon = activeItem.icon;
 
@@ -55,7 +92,7 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
           display: 'flex', alignItems: 'center', gap: '0.75rem',
           fontSize: '0.95rem', fontWeight: 600, padding: '0.5rem 1rem',
           borderRadius: '8px', border: '1px solid var(--border-color)',
-          background: isOpen ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)',
+          background: isOpen ? 'var(--bg-hover)' : 'var(--bg-tag)',
           color: 'var(--text-main)', cursor: 'pointer', outline: 'none',
           minWidth: '220px', justifyContent: 'space-between',
           transition: 'all 0.2s ease'
@@ -111,28 +148,125 @@ const NavDropdown = ({ activeTab, isSettingsOpen, onChange }: { activeTab: strin
   );
 };
 
+// The five main panels inside Group Monitor (#374). One switch selects exactly
+// one; 'list' is the default every panel's close (X) returns to.
+type MainPanel = 'list' | 'visualizer' | 'statistics' | 'building' | 'lastseen';
+
+const MAIN_PANELS: { id: MainPanel; label: string; icon: typeof List }[] = [
+  { id: 'list', label: 'Telegram List', icon: List },
+  { id: 'visualizer', label: 'Visualization', icon: LineChart },
+  { id: 'statistics', label: 'Statistics', icon: BarChart2 },
+  { id: 'building', label: 'Building Structure', icon: Building2 },
+  { id: 'lastseen', label: 'Last Seen Values', icon: Clock },
+];
+
+// Segmented switch across the five main panels, marking the active one (#374).
+const PanelSwitch = ({ active, onChange }: { active: MainPanel; onChange: (p: MainPanel) => void }) => (
+  <div
+    role="tablist"
+    aria-label="Main panel"
+    style={{
+      display: 'flex', alignItems: 'center', gap: '0.15rem',
+      padding: '0.2rem', borderRadius: '8px',
+      background: 'var(--bg-subtle)', border: '1px solid var(--border-color)',
+    }}
+  >
+    {MAIN_PANELS.map(({ id, label, icon: Icon }) => {
+      const isActive = id === active;
+      return (
+        <button
+          key={id}
+          role="tab"
+          aria-selected={isActive}
+          onClick={() => onChange(id)}
+          title={label}
+          className="icon-button"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0.4rem', borderRadius: '6px',
+            background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+            color: isActive ? 'var(--accent-primary)' : 'var(--text-dim)',
+          }}
+        >
+          <Icon size={18} />
+        </button>
+      );
+    })}
+  </div>
+);
+
 function App() {
-  const [activeTab, setActiveTab] = useState<'live' | 'history'>('live');
+  const [theme, setTheme] = useTheme();
+  // A view shared via URL (#150) starts on the History tab with its filters applied.
+  const [initialView] = useState(() => parseViewUrl(window.location.search));
+  // Workspace restore (#211): a shared viz link wins; otherwise the HA
+  // dashboard iframe restores from localStorage and a regular tab from the
+  // view=monitor URL it maintains below.
+  const [initialWorkspace] = useState(() =>
+    initialView ? null : isEmbedded() ? loadWorkspace() : parseMonitorSearch(window.location.search),
+  );
+  const [initialUiState] = useState(() => loadUiState() ?? DEFAULT_UI_STATE);
+  const [quickFilterOpen, setQuickFilterOpen] = useState(initialUiState.quickFilter.open);
+  const [quickFilterEnabled, setQuickFilterEnabled] = useState(initialUiState.quickFilter.enabled);
+  const [quickPatterns, setQuickPatterns] = useState(initialUiState.quickFilter.patterns);
+  const [listFollow, setListFollow] = useState(initialUiState.listFollow);
+  const [listAnchorKey, setListAnchorKey] = useState<string | null>(initialUiState.listAnchorKey);
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(initialUiState.zoomRange);
+  const [statsSearch, setStatsSearch] = useState(initialUiState.statsSearch);
+  const [buildingSearch, setBuildingSearch] = useState(initialUiState.buildingSearch);
+  const [lastSeenLimit, setLastSeenLimit] = useState(initialUiState.lastSeenLimit);
+  const [lastSeenLive, setLastSeenLive] = useState(initialUiState.lastSeenLive);
+  const [lastSeenSearch, setLastSeenSearch] = useState(initialUiState.lastSeenSearch);
+  // Master enable/disable of the filter set (#370): when off the list shows all
+  // telegrams while activeFilters is preserved.
+  const [filtersEnabled, setFiltersEnabled] = useState(initialUiState.filtersEnabled);
+  const [activeTab, setActiveTab] = useState<'live' | 'history' | 'import'>(
+    initialView ? 'history' : initialWorkspace?.tab ?? 'live',
+  );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(initialWorkspace?.filterOpen ?? true);
+  // The active main panel within Group Monitor (#374). Replaces the former
+  // isVisualizerOpen/isLastSeenOpen/isStatisticsOpen/isBuildingOpen booleans with
+  // one selector so exactly one panel is active and every close returns to 'list'.
+  const [activePanel, setActivePanel] = useState<MainPanel>(
+    initialWorkspace?.view && initialWorkspace.view !== 'none' && initialWorkspace.view !== 'database'
+      ? (initialWorkspace.view as MainPanel)
+      : 'list',
+  );
+  const isVisualizerOpen = activePanel === 'visualizer';
+  const isLastSeenOpen = activePanel === 'lastseen';
+  const isStatisticsOpen = activePanel === 'statistics';
+  const isBuildingOpen = activePanel === 'building';
+  const [lastSeenAddresses, setLastSeenAddresses] = useState<string[]>(initialWorkspace?.lastSeenAddresses ?? []);
+  const [lastSeenMode, setLastSeenMode] = useState<'ga' | 'pa'>(initialWorkspace?.lastSeenMode ?? 'ga');
+  const [statusDevice, setStatusDevice] = useState<DeviceNode | null>(null);
+  const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
+  const [isDatabaseOpen, setIsDatabaseOpen] = useState(initialWorkspace?.view === 'database');
+  const [isSendOpen, setIsSendOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
+    upload_writable: boolean;
     project_loaded: boolean;
     upload_required: boolean;
   } | null>(null);
   const [isUploadWizardOpen, setIsUploadWizardOpen] = useState(false);
   const [isKeysWizardOpen, setIsKeysWizardOpen] = useState(false);
   const [knxkeysStatus, setKnxkeysStatus] = useState<{ upload_feature_active: boolean; knxkeys_found: boolean } | null>(null);
+  const updateInfo = useUpdateCheck();
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false);
+  const [updateClosed, setUpdateClosed] = useState(false);
+  // Version the user has already been shown, read once at mount. Kept in state
+  // (not re-read) so persisting "seen" below doesn't retract the popup mid-view.
+  const [seenUpdateVersion] = useState(() => getPref(DISMISSED_UPDATE_PREF));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [serverConfig, setServerConfig] = useState<any>(null);
 
   // ── Settings & Persistence ──────────────────────────────────────────────────
-  const [loadLimit, setLoadLimit] = useState(Number(getCookie('loadLimit') || 25000));
+  const [loadLimit, setLoadLimit] = useState(Number(getPref('loadLimit') || 100000));
   const [visibleColumns, setVisibleColumns] = useState<{ [key: string]: boolean }>(() => {
     try {
-      const cookie = getCookie('visibleColumns');
+      const cookie = getPref('visibleColumns');
       if (cookie) return JSON.parse(cookie);
     } catch {
       // Ignore cookie parsing errors
@@ -142,16 +276,32 @@ function App() {
       target: true, targetName: true, type: true, dpt: true, data: true, value: true,
     };
   });
-  const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getCookie('rateMode') as 's' | 'm' | 'h') || 's');
+  const [rateMode, setRateMode] = useState<'s' | 'm' | 'h'>((getPref('rateMode') as 's' | 'm' | 'h') || 's');
+  // Restore the browser telegram cache (and fill the gap from the backend) on
+  // startup. On by default; when off the view starts empty and shows only live
+  // telegrams and manual history loads (#246).
+  const [restoreOnStartup, setRestoreOnStartup] = useState(() => getPref('restoreOnStartup') !== 'false');
 
   const [isHistoryLoaderOpen, setIsHistoryLoaderOpen] = useState(false);
-  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>([]);
+  const [selectedVisualizationTargets, setSelectedVisualizationTargets] = useState<string[]>(
+    initialView?.plot ?? initialWorkspace?.plot ?? [],
+  );
 
   // ── Live State ──────────────────────────────────────────────────────────────
-  const [liveTelegrams, setLiveTelegrams] = useState<Telegram[]>([]);
+  // Buffer + IndexedDB cache + coverage bookkeeping (#246): cached telegrams
+  // reappear instantly after a reload and only the gaps are fetched (#211).
+  const {
+    telegrams: liveTelegrams,
+    addLive,
+    setConnected: setCacheConnected,
+    setPaused: setCachePaused,
+    pausedCount,
+    loadRange,
+    isLoading: isHistoryLoading,
+    loadError: historyLoadError,
+    clear: clearTelegrams,
+  } = useTelegramCache(loadLimit, restoreOnStartup);
   const [isPaused, setIsPaused] = useState(false);
-  const bufferRef = useRef<Telegram[]>([]);
-  const [bufferedCount, setBufferedCount] = useState(0);
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -159,32 +309,21 @@ function App() {
 
   // ── Filter State ────────────────────────────────────────────────────────────
   const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
-  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(
+    initialView?.filters ?? initialWorkspace?.filters ?? DEFAULT_FILTERS,
+  );
 
+  // The Visualization is independent of the main filter (#361): editing the
+  // filter changes only the telegram list, never the plotted target selection.
   const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
-    setActiveFilters((prevFilters) => {
-      const updatedFilters = typeof newFilters === 'function' ? newFilters(prevFilters) : newFilters;
+    setActiveFilters(newFilters);
+  }, []);
 
-      const addedTargets = updatedFilters.targets.filter(t => !prevFilters.targets.includes(t));
-      const removedTargets = prevFilters.targets.filter(t => !updatedFilters.targets.includes(t));
-
-      const addedSources = updatedFilters.sources.filter(s => !prevFilters.sources.includes(s));
-      const removedSources = prevFilters.sources.filter(s => !updatedFilters.sources.includes(s));
-
-      const added = [...addedTargets, ...addedSources];
-      const removed = [...removedTargets, ...removedSources];
-
-      if (added.length > 0 || removed.length > 0) {
-        setSelectedVisualizationTargets(prevSelected => {
-          let next = [...prevSelected];
-          added.forEach(a => { if (!next.includes(a)) next.push(a); });
-          removed.forEach(r => { next = next.filter(t => t !== r); });
-          return next;
-        });
-      }
-
-      return updatedFilters;
-    });
+  const refreshServerConfig = useCallback(() => {
+    fetch(apiUrl('/api/server/config'))
+      .then(r => r.json())
+      .then(data => setServerConfig(data))
+      .catch(err => console.error("Failed to load server config", err));
   }, []);
 
   // Load filter options from backend on mount
@@ -196,6 +335,8 @@ function App() {
         targets: data.targets || [],
         types: data.types || ['Write', 'Read', 'Response'],
         dpts: data.dpts || [],
+        ga_group_names: data.ga_group_names || {},
+        pa_line_names: data.pa_line_names || {},
       }))
       .catch(() => {
         // Fallback: populate only the static types
@@ -226,14 +367,29 @@ function App() {
       .catch(err => console.error("Failed to check knxkeys status", err));
 
     // Load server config
-    fetch(apiUrl('/api/server/config'))
-      .then(r => r.json())
-      .then(data => setServerConfig(data))
-      .catch(err => console.error("Failed to load server config", err));
-  }, []);
+    refreshServerConfig();
+  }, [refreshServerConfig]);
+
+  // A new release the user hasn't been shown yet (seenUpdateVersion is frozen
+  // at mount, so it stays true for the session once detected). Auto-shows once;
+  // updateClosed hides it after the user dismisses it, the chip can reopen it.
+  const hasNewUpdate =
+    !!updateInfo?.update_available && !!updateInfo.latest && updateInfo.latest !== seenUpdateVersion;
+  const showUpdate = isUpdateOpen || (hasNewUpdate && !updateClosed);
+
+  // Persist "seen" as soon as a new release is detected, so the popup appears
+  // only once across reloads even if the user navigates away without closing it.
+  useEffect(() => {
+    if (hasNewUpdate && updateInfo?.latest) {
+      setPref(DISMISSED_UPDATE_PREF, updateInfo.latest);
+    }
+  }, [hasNewUpdate, updateInfo?.latest]);
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
   const handleTelegram = useCallback((t: Telegram) => {
+    // Track the newest telegram even while paused — the device status view (#153)
+    // stays live independently of the table.
+    setLatestTelegram(t);
     const now = Date.now();
     arrivalTimesRef.current.push(now);
     const oneHourAgo = now - 3_600_000;
@@ -241,26 +397,105 @@ function App() {
       arrivalTimesRef.current.shift();
     }
 
-    if (!isPaused) {
-      setLiveTelegrams(prev => {
-        const next = [t, ...prev];
-        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-      });
-    } else {
-      bufferRef.current.push(t);
-      setBufferedCount(prev => prev + 1);
-    }
-  }, [isPaused, loadLimit]);
+    // The cache keeps ingesting while paused; only the snapshot is frozen, so
+    // nothing is lost and resume simply reveals what arrived in between.
+    addLive(t);
+  }, [addLive]);
+
+  const handleConnectionState = useCallback((e: ConnectionStateEvent) => {
+    // Flip the badge immediately, then refetch for authoritative state
+    // (write_enabled depends on the connection and is recomputed server-side).
+    setServerConfig((prev: { status?: { connected?: boolean; write_enabled?: boolean } } | null) => prev
+      ? {
+          ...prev,
+          status: {
+            ...prev.status,
+            connected: e.connected,
+            write_enabled: prev.status?.write_enabled && e.connected,
+          },
+        }
+      : prev);
+    refreshServerConfig();
+  }, [refreshServerConfig]);
 
   const wsEndpoint = wsUrl('/ws/telegrams');
-  const { isConnected } = useWebSocket(wsEndpoint, handleTelegram);
+  const { isConnected } = useWebSocket(wsEndpoint, handleTelegram, handleConnectionState);
 
-  // ── Persist settings to cookies ─────────────────────────────────────────────
+  // Mirror the WS state into the cache so offline windows become coverage
+  // gaps that are automatically re-fetched on reconnect.
   useEffect(() => {
-    setCookie('loadLimit', loadLimit.toString());
-    setCookie('visibleColumns', JSON.stringify(visibleColumns));
-    setCookie('rateMode', rateMode);
-  }, [loadLimit, visibleColumns, rateMode]);
+    setCacheConnected(isConnected);
+  }, [isConnected, setCacheConnected]);
+
+  // ── Persist settings ────────────────────────────────────────────────────────
+  useEffect(() => {
+    setPref('loadLimit', loadLimit.toString());
+    setPref('visibleColumns', JSON.stringify(visibleColumns));
+    setPref('rateMode', rateMode);
+    setPref('restoreOnStartup', String(restoreOnStartup));
+  }, [loadLimit, visibleColumns, rateMode, restoreOnStartup]);
+
+  // ── Persist workspace (#211) ────────────────────────────────────────────────
+  const workspaceView: WorkspaceView = isDatabaseOpen
+    ? 'database'
+    : activePanel === 'list'
+      ? 'none'
+      : activePanel;
+  useEffect(() => {
+    // A shared viz link owns the URL for this session; don't overwrite it or
+    // persist its transient state as the workspace.
+    if (initialView) return;
+    const workspace: WorkspaceState = {
+      tab: activeTab,
+      view: workspaceView,
+      filterOpen: isFilterOpen,
+      filters: activeFilters,
+      plot: selectedVisualizationTargets,
+      lastSeenAddresses,
+      lastSeenMode,
+    };
+    const handle = setTimeout(() => {
+      if (isEmbedded()) saveWorkspace(workspace);
+      else applyWorkspaceUrl(workspace);
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [initialView, activeTab, workspaceView, isFilterOpen, activeFilters, selectedVisualizationTargets, lastSeenAddresses, lastSeenMode]);
+
+  // ── Persist UI Session State (#341) ──────────────────────────────────────────
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      saveUiState({
+        quickFilter: {
+          open: quickFilterOpen,
+          enabled: quickFilterEnabled,
+          patterns: quickPatterns,
+        },
+        listFollow,
+        listAnchorKey,
+        zoomRange,
+        statsSearch,
+        buildingSearch,
+        lastSeenLimit,
+        lastSeenLive,
+        lastSeenSearch,
+        filtersEnabled,
+      });
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [
+    quickFilterOpen,
+    quickFilterEnabled,
+    quickPatterns,
+    listFollow,
+    listAnchorKey,
+    zoomRange,
+    statsSearch,
+    buildingSearch,
+    lastSeenLimit,
+    lastSeenLive,
+    lastSeenSearch,
+    filtersEnabled,
+  ]);
 
   // ── Rate Calculation Loop ───────────────────────────────────────────────────
   useEffect(() => {
@@ -279,36 +514,31 @@ function App() {
 
   // ── Pause / Resume ──────────────────────────────────────────────────────────
   const togglePause = () => {
-    if (isPaused) {
-      setLiveTelegrams(prev => {
-        const next = [...bufferRef.current, ...prev];
-        return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-      });
-      bufferRef.current = [];
-      setBufferedCount(0);
-    }
-    setIsPaused(!isPaused);
+    const next = !isPaused;
+    setCachePaused(next);
+    setIsPaused(next);
   };
 
   const toggleColumn = (col: string) =>
     setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }));
 
-  const handleHistoricalLoad = (newTelegrams: Telegram[]) => {
-    setLiveTelegrams(prev => {
-      const existingTs = new Set(prev.map(t => t.timestamp));
-      const deduped = newTelegrams.filter(t => !existingTs.has(t.timestamp));
-      const next = [...deduped, ...prev];
-      return next.length > loadLimit ? next.slice(0, loadLimit) : next;
-    });
-  };
+  // ── Telegram list marks (#310) ──────────────────────────────────────────────
+  // Lifted above the conditionally-rendered panels so marked rows survive
+  // main-panel navigation. Keyed by the table's anchorKey identity.
+  const [markedTelegramKeys, setMarkedTelegramKeys] = useState<string[]>([]);
+  const [lastMarkedTelegramKey, setLastMarkedTelegramKey] = useState<string | null>(null);
 
   // ── Sorting ─────────────────────────────────────────────────────────────────
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'timestamp', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   const handleSort = (key: SortKey) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
-    }));
+    setSortConfig(prev => {
+      const next: SortConfig = {
+        key,
+        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
+      };
+      writeSortConfigPref(next);
+      return next;
+    });
   };
 
   const handleQuickFilter = (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => {
@@ -327,9 +557,25 @@ function App() {
     setSelectedVisualizationTargets(prev =>
       prev.includes(targetAddress) ? prev : [...prev, targetAddress]
     );
-    setIsVisualizerOpen(true);
-    setIsFilterOpen(false);
+    setActivePanel('visualizer');
+    setIsDatabaseOpen(false);
   };
+
+  const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
+    setLastSeenAddresses(Array.isArray(address) ? address : [address]);
+    setLastSeenMode(mode);
+    setActivePanel('lastseen');
+    setIsDatabaseOpen(false);
+  }, []);
+
+  // Add all of a KO's connected group addresses to the target filter (union).
+  const handleFilterGAs = useCallback((addresses: string[]) => {
+    handleFiltersChange(prev => ({
+      ...prev,
+      targets: [...new Set([...prev.targets, ...addresses])],
+    }));
+    setIsFilterOpen(true);
+  }, [handleFiltersChange]);
 
   const sortedLiveTelegrams = useMemo(() => {
     const items = [...liveTelegrams];
@@ -354,21 +600,19 @@ function App() {
   // ── In-memory filtering (live view) ────────────────────────────────────────
   const filteredLiveTelegrams = useMemo(() => {
     const f = activeFilters;
+    // Master toggle off (#370): show everything, keep the filter set intact.
     const noFilter =
-      f.sources.length === 0 &&
+      !filtersEnabled ||
+      (f.sources.length === 0 &&
       f.targets.length === 0 &&
       f.types.length === 0 &&
-      f.dpts.length === 0;
+      f.directions.length === 0 &&
+      f.dpts.length === 0);
 
     // Step 1: mark each row as matching / not-matching
-    const matches = sortedLiveTelegrams.map(t => {
-      if (noFilter) return true;
-      const srcOk = f.sources.length === 0 || f.sources.includes(t.source_address);
-      const tgtOk = f.targets.length === 0 || f.targets.includes(t.target_address);
-      const typeOk = f.types.length === 0 || f.types.includes(t.simplified_type ?? '');
-      const dptOk = f.dpts.length === 0 || (t.dpt_main != null && f.dpts.includes(t.dpt_main));
-      return srcOk && tgtOk && typeOk && dptOk;
-    });
+    const matches = sortedLiveTelegrams.map(t =>
+      noFilter ? true : matchesTelegram(t, f)
+    );
 
     const hasDelta = f.deltaBeforeMs > 0 || f.deltaAfterMs > 0;
 
@@ -390,27 +634,53 @@ function App() {
         (ts >= mts - f.deltaBeforeMs) && (ts <= mts + f.deltaAfterMs)
       );
     });
-  }, [sortedLiveTelegrams, activeFilters]);
+  }, [sortedLiveTelegrams, activeFilters, filtersEnabled]);
 
   // ── Count bubbles (live only) ───────────────────────────────────────────────
   const filterCounts = useMemo((): FilterCounts => {
     const sources: Record<string, number> = {};
     const targets: Record<string, number> = {};
     const types: Record<string, number> = {};
-    const dpts: Record<number, number> = {};
+    const directions: Record<string, number> = {};
+    const dpts: Record<string, number> = {};
 
     for (const t of sortedLiveTelegrams) {
       sources[t.source_address] = (sources[t.source_address] ?? 0) + 1;
       targets[t.target_address] = (targets[t.target_address] ?? 0) + 1;
       if (t.simplified_type) types[t.simplified_type] = (types[t.simplified_type] ?? 0) + 1;
-      if (t.dpt_main != null) dpts[t.dpt_main] = (dpts[t.dpt_main] ?? 0) + 1;
+      if (t.direction) directions[t.direction] = (directions[t.direction] ?? 0) + 1;
+      if (t.dpt_main != null) {
+        const key = dptKey(t.dpt_main, t.dpt_sub);
+        dpts[key] = (dpts[key] ?? 0) + 1;
+        // A bare-main option ("all 1.x") counts every subtype
+        if (t.dpt_sub != null) dpts[`${t.dpt_main}`] = (dpts[`${t.dpt_main}`] ?? 0) + 1;
+      }
     }
-    return { sources, targets, types, dpts };
+    return { sources, targets, types, directions, dpts };
   }, [sortedLiveTelegrams]);
 
   const activeFilterCount = hasActiveFilters(activeFilters)
-    ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
+    ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.directions.length + activeFilters.dpts.length
     : 0;
+
+  // The filter pane and its toggle are tied to the Telegram List (#374): only
+  // that panel consumes the main filter, so the pane shows only when it is active.
+  const showFilterPane = activePanel === 'list' && isFilterOpen;
+
+  // The buffer holds at most `loadLimit` (newest) telegrams; once it is at
+  // capacity there is no room to load older history (#313).
+  const bufferFull = liveTelegrams.length >= loadLimit;
+
+  // Inline "buffer full" marker shown next to the count in the stats pill (#284).
+  const bufferLimitWarning = filteredLiveTelegrams.length >= loadLimit ? (
+    <span
+      onClick={() => setIsSettingsOpen(true)}
+      title={`Buffer full (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
+      style={{ display: 'inline-flex', alignItems: 'center', color: '#fbbf24', cursor: 'pointer' }}
+    >
+      <AlertTriangle size={13} />
+    </span>
+  ) : null;
 
   return (
     <div className="container dashboard-grid" style={{ padding: '1.5rem', gap: '1.5rem' }}>
@@ -419,98 +689,126 @@ function App() {
       <main style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, borderRadius: '12px' }} className="glass">
 
         {/* === GLOBAL HEADER === */}
-        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
           {/* Left: App Section Dropdown */}
-          <div style={{ display: 'flex', alignItems: 'center', zIndex: 50 }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, zIndex: 50 }}>
             <NavDropdown
               activeTab={activeTab}
               isSettingsOpen={isSettingsOpen}
+              isDatabaseOpen={isDatabaseOpen}
               onChange={(id) => {
                 if (id === 'settings') {
                   setIsSettingsOpen(true);
-                  if (activeTab === 'history') setActiveTab('live');
+                  setIsDatabaseOpen(false);
+                  if (activeTab !== 'live') setActiveTab('live');
+                } else if (id === 'database') {
+                  setIsDatabaseOpen(true);
+                  setIsSettingsOpen(false);
+                  setActivePanel('list');
                 } else {
                   setIsSettingsOpen(false);
-                  setActiveTab(id as 'live' | 'history');
+                  setIsDatabaseOpen(false);
+                  setActiveTab(id as 'live' | 'history' | 'import');
                 }
               }}
             />
           </div>
 
-          {/* Center: Brand */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-            <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="Spectrum KNX" style={{ width: 22, height: 22 }} />
-            <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Spectrum KNX</h1>
+          {/* Center: Brand — flexible middle column, clips gracefully instead of overlapping the actions */}
+          <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', padding: '0 0.75rem', pointerEvents: 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexShrink: 0 }}>
+              <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="Spectrum KNX" style={{ width: 22, height: 22 }} />
+              <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>Spectrum KNX</h1>
+            </div>
           </div>
 
           {/* Right: Actions */}
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexShrink: 0 }}>
             {activeTab === 'live' && !isSettingsOpen && (
               <>
                 {/* Embedded Stats */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginRight: '1rem', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginRight: '1rem', background: 'var(--bg-subtle)', padding: '0.4rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     Rate: <span onClick={() => setRateMode(m => m === 's' ? 'm' : m === 'm' ? 'h' : 's')} style={{ color: 'var(--accent-primary)', fontWeight: 600, cursor: 'pointer' }}>{busRate.toFixed(1)}/{rateMode}</span>
                   </span>
-                  <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
-                    Buffer: <span style={{ color: 'var(--text-main)', fontWeight: 500 }}>{filteredLiveTelegrams.length}</span>
+                  <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)' }}>
+                    Buffer:
+                    {/* Buffer-related actions live with the count (#284): clear + load history */}
+                    <button
+                      className="icon-button"
+                      onClick={() => { void clearTelegrams(); }}
+                      title="Clear (also wipes the local telegram cache)"
+                      style={{ color: 'var(--text-dim)', padding: '0.15rem' }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      onClick={() => setIsHistoryLoaderOpen(true)}
+                      disabled={bufferFull}
+                      title={
+                        bufferFull
+                          ? `Buffer full (${loadLimit.toLocaleString()}); clear it or raise the limit to load more history`
+                          : isHistoryLoading
+                            ? 'History read in progress…'
+                            : 'Load history'
+                      }
+                      style={{
+                        color: isHistoryLoading ? 'var(--accent-primary)' : 'var(--text-dim)',
+                        padding: '0.15rem',
+                        opacity: bufferFull ? 0.4 : 1,
+                        cursor: bufferFull ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      <Download size={15} />
+                    </button>
+                    <span style={{ color: 'var(--text-main)', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                      {activeFilterCount
+                        ? <>{filteredLiveTelegrams.length}{bufferLimitWarning}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}> / {liveTelegrams.length}</span></>
+                        : <>{liveTelegrams.length}{bufferLimitWarning}</>}
+                    </span>
                   </span>
                   {isPaused && (
                     <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24' }}>
-                      Paused: <span style={{ fontWeight: 600 }}>{bufferedCount}</span>
+                      Paused: <span style={{ fontWeight: 600 }}>{pausedCount}</span>
                     </span>
                   )}
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     WS: <span style={{ color: isConnected ? 'var(--success)' : 'var(--error)', fontWeight: 500 }}>{isConnected ? 'Active' : 'Offline'}</span>
                   </span>
-                  {filteredLiveTelegrams.length >= loadLimit && (
+                  {/* Background history reads run without blocking the UI (#222) */}
+                  {isHistoryLoading && (
+                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-primary)' }}>
+                      <span className="chip-spinner" /> History: loading…
+                    </span>
+                  )}
+                  {!isHistoryLoading && historyLoadError && (
                     <span
-                      style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#fbbf24', cursor: 'pointer' }}
-                      onClick={() => setIsSettingsOpen(true)}
-                      title={`Buffer full (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
+                      title={historyLoadError}
+                      style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--error)' }}
                     >
-                      <AlertTriangle size={13} /> Limit reached
+                      <AlertTriangle size={13} /> History: failed
                     </span>
                   )}
                 </div>
 
-                <button
-                  className="icon-button"
-                  onClick={() => setIsFilterOpen(o => { const next = !o; if (next) setIsVisualizerOpen(false); return next; })}
-                  title="Toggle filter panel"
-                  style={{ position: 'relative', color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <SlidersHorizontal size={18} />
-                  {activeFilterCount > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -5, right: -5,
-                      fontSize: '0.55rem', fontWeight: 700, minWidth: 14, height: 14,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'var(--accent-primary)', color: 'white', borderRadius: '999px',
-                    }}>{activeFilterCount}</span>
-                  )}
-                </button>
+                {/* Main-panel switch (#374): the five panels close back to the
+                    list; the Building opener also clears any drilled-in device. */}
+                <PanelSwitch
+                  active={activePanel}
+                  onChange={(p) => { if (p !== 'building') setStatusDevice(null); setActivePanel(p); setIsDatabaseOpen(false); }}
+                />
 
-                <button
-                  className="icon-button"
-                  onClick={() => setIsVisualizerOpen(v => { const next = !v; if (next) setIsFilterOpen(false); return next; })}
-                  title="Visualize data"
-                  style={{ color: isVisualizerOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                >
-                  <LineChart size={18} />
-                </button>
-                <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
-
-                <button className="icon-button" onClick={togglePause} title={isPaused ? 'Resume' : 'Pause'}>
-                  {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
-                </button>
-                <button className="icon-button" onClick={() => setIsHistoryLoaderOpen(true)} title="Load history">
-                  <Download size={18} />
-                </button>
-                <div style={{ width: 1, height: 18, background: 'var(--border-color)' }} />
-                <button className="icon-button" onClick={() => { setLiveTelegrams([]); bufferRef.current = []; setBufferedCount(0); }} title="Clear" style={{ color: 'var(--text-dim)' }}>
-                  <Trash2 size={18} />
-                </button>
+                {serverConfig?.status?.write_enabled && (
+                  <button
+                    className="icon-button"
+                    onClick={() => setIsSendOpen(o => !o)}
+                    title="Send / read telegrams"
+                    style={{ color: isSendOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                  >
+                    <Send size={18} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -522,12 +820,44 @@ function App() {
             <div className="glass-card" style={{ padding: '1.5rem', maxWidth: 600, margin: '0 auto' }}>
                <h2 style={{ marginBottom: '1.5rem', fontSize: '1.1rem' }}>Application Settings</h2>
 
+              <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
+                Appearance
+              </h3>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}>
+                {([
+                  { id: 'system', label: 'System', Icon: Monitor },
+                  { id: 'light',  label: 'Light',  Icon: Sun },
+                  { id: 'dark',   label: 'Dark',   Icon: Moon },
+                ] as const).map(({ id, label, Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setTheme(id)}
+                    style={{
+                      flex: 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+                      padding: '0.5rem',
+                      borderRadius: 6,
+                      border: `1px solid ${theme === id ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                      background: theme === id ? 'rgba(99,102,241,0.15)' : 'var(--bg-subtle)',
+                      color: theme === id ? 'var(--accent-primary)' : 'var(--text-dim)',
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                      fontWeight: theme === id ? 600 : 400,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Icon size={14} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
                <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
                 Table Columns
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '2rem' }}>
                 {Object.keys(visibleColumns).map(col => (
-                  <button key={col} className="setting-item" onClick={() => toggleColumn(col)} style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                  <button key={col} className="setting-item" onClick={() => toggleColumn(col)} style={{ padding: '0.5rem', background: 'var(--bg-subtle)', borderRadius: 6 }}>
                     <div className={`checkbox ${visibleColumns[col] ? 'checked' : ''}`} style={{ width: 14, height: 14, border: '1px solid var(--border-color)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {visibleColumns[col] && <div style={{ width: 8, height: 8, background: 'white', borderRadius: 2 }} />}
                     </div>
@@ -550,11 +880,30 @@ function App() {
                 />
               </div>
 
-              {projectStatus?.upload_feature_active && (
-                <>
-                  <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
-                    Project File
-                  </h3>
+              <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
+                Startup
+              </h3>
+              <button
+                className="setting-item"
+                onClick={() => setRestoreOnStartup(v => !v)}
+                title="Restore recent telegrams from the browser cache and fill the gap from the server on load. When off, the view starts empty and shows only live telegrams and manual history loads."
+                style={{ padding: '0.5rem', background: 'var(--bg-subtle)', borderRadius: 6, marginBottom: '2rem' }}
+              >
+                <div className={`checkbox ${restoreOnStartup ? 'checked' : ''}`} style={{ width: 14, height: 14, border: '1px solid var(--border-color)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {restoreOnStartup && <div style={{ width: 8, height: 8, background: 'white', borderRadius: 2 }} />}
+                </div>
+                <span style={{ fontSize: '0.85rem' }}>Load cached telegrams on startup</span>
+              </button>
+
+              <>
+                <h3 style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.05em', marginTop: '1.5rem' }}>
+                  Project File
+                </h3>
+                {projectStatus?.upload_writable === false ? (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                    Project file is not writable. Mount the project directory as a writable volume to enable browser upload.
+                  </div>
+                ) : (
                   <button
                     className="glass-input"
                     onClick={() => setIsUploadWizardOpen(true)}
@@ -562,8 +911,8 @@ function App() {
                   >
                     Upload / Replace ETS Project File
                   </button>
-                </>
-              )}
+                )}
+              </>
 
               {knxkeysStatus?.upload_feature_active && (
                 <>
@@ -587,9 +936,12 @@ function App() {
                 </h3>
                 {serverConfig ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
-                    {/* Connection Status */}
+                    {/* Connection Status — in companion mode Home Assistant owns the
+                        bus; what matters is whether our live feed from HA works (#184) */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: 'var(--text-dim)' }}>KNX Connection:</span>
+                      <span style={{ color: 'var(--text-dim)' }}>
+                        {serverConfig.mode === 'companion' ? 'Home Assistant Feed:' : 'KNX Connection:'}
+                      </span>
                       <span style={{
                         color: serverConfig.status?.connected ? 'var(--success)' : 'var(--error)',
                         fontWeight: 600
@@ -602,8 +954,8 @@ function App() {
                     {Object.entries(serverConfig.connection || {}).map(([key, value]) => (
                       value != null && (
                         <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
-                          <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                          <span style={{ color: 'var(--text-dim)' }}>{getLabel('connection', key)}:</span>
+                          <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
                             {String(value)}
                           </span>
                         </div>
@@ -611,29 +963,45 @@ function App() {
                     ))}
 
                     {/* Files */}
-                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ color: 'var(--text-dim)' }}>Project file:</span>
-                        <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
-                          {serverConfig.files?.project_loaded ? '● Loaded' : '○ Not loaded'}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {serverConfig.files?.project_file && (
+                            <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                              {getFileName(serverConfig.files.project_file)}
+                            </span>
+                          )}
+                          <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                            {serverConfig.files?.project_loaded ? '● Loaded' : '○ Not loaded'}
+                          </span>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                        <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>
-                        <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
-                          {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
-                        </span>
-                      </div>
+                      {serverConfig.files?.knxkeys_found !== undefined && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                          <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {serverConfig.files?.knxkeys_file && (
+                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                                {getFileName(serverConfig.files.knxkeys_file)}
+                              </span>
+                            )}
+                            <span style={{ color: serverConfig.files?.knxkeys_found ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
+                              {serverConfig.files?.knxkeys_found ? '● Found' : '○ Not found'}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Security */}
                     {Object.entries(serverConfig.security || {}).some(([, v]) => v != null) && (
-                      <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
                         {Object.entries(serverConfig.security || {}).map(([key, value]) => (
                           value != null && (
                             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                              <span style={{ color: 'var(--text-dim)' }}>{key.replace(/_/g, ' ')}:</span>
-                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                              <span style={{ color: 'var(--text-dim)' }}>{getLabel('security', key)}:</span>
+                              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
                                 {String(value)}
                               </span>
                             </div>
@@ -653,16 +1021,39 @@ function App() {
                 </h3>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
                   <span style={{ color: 'var(--text-dim)' }}>Frontend Version:</span>
-                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
                     {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'unknown'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
                   <span style={{ color: 'var(--text-dim)' }}>Backend Version:</span>
-                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.2rem 0.4rem', borderRadius: 4 }}>
                     {backendVersion}
                   </span>
                 </div>
+                {updateInfo?.enabled && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                    <span style={{ color: 'var(--text-dim)' }}>Updates:</span>
+                    {updateInfo.update_available ? (
+                      <button
+                        onClick={() => setIsUpdateOpen(true)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer',
+                          fontFamily: '"JetBrains Mono", monospace', fontSize: '0.8rem', fontWeight: 600,
+                          padding: '0.2rem 0.5rem', borderRadius: 4,
+                          border: '1px solid var(--accent-primary)', background: 'rgba(99,102,241,0.12)',
+                          color: 'var(--accent-primary)',
+                        }}
+                      >
+                        <Sparkles size={13} /> {updateInfo.latest} available
+                      </button>
+                    ) : (
+                      <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>
+                        {updateInfo.error ? 'Check failed' : 'Up to date'}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -671,38 +1062,139 @@ function App() {
             {/* Content row: filter panel + table */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
 
-              {/* Filter panel (slide-in) */}
+              {/* Filter panel (slide-in). Filters apply to the Telegram List only,
+                  so the pane is list-only now (#374; contents redesign is #370). */}
               <div style={{
-                width: isFilterOpen ? '260px' : '0px',
+                width: showFilterPane ? 'clamp(260px, 18vw, 340px)' : '0px',
                 overflow: 'hidden',
                 transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
                 flexShrink: 0,
-                borderRight: isFilterOpen ? '1px solid var(--border-color)' : 'none',
+                borderRight: showFilterPane ? '1px solid var(--border-color)' : 'none',
                 display: 'flex',
                 flexDirection: 'column'
               }}>
-                <div style={{ width: 260, flex: 1, overflow: 'hidden' }}>
+                <div style={{ width: 'clamp(260px, 18vw, 340px)', flex: 1, overflow: 'hidden' }}>
                   <FilterPanel
                     options={filterOptions}
                     activeFilters={activeFilters}
                     onFiltersChange={handleFiltersChange}
                     counts={filterCounts}
+                    onQuickLastSeen={handleQuickLastSeen}
                     mode="live"
+                    projectLoaded={projectStatus?.project_loaded}
+                    onUploadProject={() => setIsSettingsOpen(true)}
+                    writeEnabled={serverConfig?.status?.write_enabled}
+                    filtersEnabled={filtersEnabled}
+                    onFiltersEnabledChange={setFiltersEnabled}
                   />
                 </div>
               </div>
 
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {isSendOpen && serverConfig?.status?.write_enabled && (
+                  <WriteToBusPanel
+                    targets={filterOptions.targets}
+                    onClose={() => setIsSendOpen(false)}
+                  />
+                )}
                 {isVisualizerOpen ? (
                   <Visualizer
-                    telegrams={filteredLiveTelegrams}
+                    // The main filter applies to the telegram list only; the
+                    // Visualization Targets list every GA in the buffer (#361).
+                    telegrams={liveTelegrams}
                     selectedTargets={selectedVisualizationTargets}
                     onTargetsChange={setSelectedVisualizationTargets}
-                    onClose={() => setIsVisualizerOpen(false)}
+                    onClose={() => setActivePanel('list')}
+                    zoomRange={zoomRange}
+                    onZoomRangeChange={setZoomRange}
                   />
+                ) : isLastSeenOpen ? (
+                  <LastSeenOverlay
+                    filterOptions={filterOptions}
+                    initialAddresses={lastSeenAddresses}
+                    initialMode={lastSeenMode}
+                    writeEnabled={serverConfig?.status?.write_enabled}
+                    latestTelegram={latestTelegram}
+                    onClose={() => setActivePanel('list')}
+                    limit={lastSeenLimit}
+                    onLimitChange={setLastSeenLimit}
+                    autoRefresh={lastSeenLive}
+                    onAutoRefreshChange={setLastSeenLive}
+                    search={lastSeenSearch}
+                    onSearchChange={setLastSeenSearch}
+                    onSelectionChange={(mode, addresses) => {
+                      setLastSeenMode(mode);
+                      setLastSeenAddresses(addresses);
+                    }}
+                  />
+                ) : isStatisticsOpen ? (
+                  <StatisticsOverlay
+                    filterOptions={filterOptions}
+                    onClose={() => setActivePanel('list')}
+                    searchQuery={statsSearch}
+                    onSearchQueryChange={setStatsSearch}
+                  />
+                ) : isBuildingOpen && statusDevice ? (
+                  <DeviceStatusOverlay
+                    device={statusDevice}
+                    latestTelegram={latestTelegram}
+                    onClose={() => setStatusDevice(null)}
+                    onLastSeen={handleQuickLastSeen}
+                  />
+                ) : isBuildingOpen ? (
+                  <BuildingOverlay
+                    onClose={() => setActivePanel('list')}
+                    onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
+                    onFilterGAs={handleFilterGAs}
+                    onLastSeen={handleQuickLastSeen}
+                    onDeviceStatus={setStatusDevice}
+                    writeEnabled={serverConfig?.status?.write_enabled}
+                    latestTelegram={latestTelegram}
+                    searchQuery={buildingSearch}
+                    onSearchQueryChange={setBuildingSearch}
+                  />
+                ) : isDatabaseOpen ? (
+                  <DatabaseOverlay onClose={() => setIsDatabaseOpen(false)} />
                 ) : (
-                  <TelegramTable
+                  <>
+                    {/* Telegram List panel header (#374): its own filter toggle
+                        (top-left) and the live play/pause it governs. */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '0.5rem',
+                      padding: '0.4rem 0.75rem', flexShrink: 0,
+                      borderBottom: '1px solid var(--border-color)',
+                    }}>
+                      <button
+                        className="icon-button"
+                        onClick={() => setIsFilterOpen(o => !o)}
+                        title="Toggle filter panel"
+                        style={{
+                          position: 'relative',
+                          color: isFilterOpen || (hasActiveFilters(activeFilters) && filtersEnabled) ? 'var(--accent-primary)' : 'var(--text-dim)',
+                        }}
+                      >
+                        <SlidersHorizontal size={18} />
+                        {activeFilterCount > 0 && (
+                          <span style={{
+                            position: 'absolute', top: -5, right: -5,
+                            fontSize: '0.55rem', fontWeight: 700, minWidth: 14, height: 14,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
+                            color: 'white', borderRadius: '999px',
+                          }}>{activeFilterCount}</span>
+                        )}
+                      </button>
+                      <button
+                        className="icon-button"
+                        onClick={togglePause}
+                        title={isPaused ? 'Resume' : 'Pause'}
+                        style={{ color: isPaused ? 'var(--accent-primary)' : 'var(--text-dim)' }}
+                      >
+                        {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
+                      </button>
+                    </div>
+                    <TelegramTable
                     telegrams={filteredLiveTelegrams}
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
@@ -710,11 +1202,30 @@ function App() {
                     activeFilters={activeFilters}
                     onQuickFilter={handleQuickFilter}
                     onQuickVisualize={handleQuickVisualize}
+                    onQuickLastSeen={handleQuickLastSeen}
+                    canSend={serverConfig?.status?.write_enabled}
+                    quickFilterOpen={quickFilterOpen}
+                    onQuickFilterOpenChange={setQuickFilterOpen}
+                    quickFilterEnabled={quickFilterEnabled}
+                    onQuickFilterEnabledChange={setQuickFilterEnabled}
+                    quickPatterns={quickPatterns}
+                    onQuickPatternsChange={setQuickPatterns}
+                    listFollow={listFollow}
+                    onListFollowChange={setListFollow}
+                    listAnchorKey={listAnchorKey}
+                    onListAnchorKeyChange={setListAnchorKey}
+                    markedKeys={markedTelegramKeys}
+                    onMarkedKeysChange={setMarkedTelegramKeys}
+                    lastMarkedKey={lastMarkedTelegramKey}
+                    onLastMarkedKeyChange={setLastMarkedTelegramKey}
                   />
+                  </>
                 )}
               </div>
             </div>
           </div>
+        ) : activeTab === 'import' ? (
+          <ImportExportView />
         ) : (
           <HistorySearch
             visibleColumns={visibleColumns}
@@ -723,8 +1234,10 @@ function App() {
             activeFilters={activeFilters}
             onFiltersChange={handleFiltersChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            projectLoaded={projectStatus?.project_loaded}
             selectedVisualizationTargets={selectedVisualizationTargets}
             onVisualizationTargetsChange={setSelectedVisualizationTargets}
+            initialView={initialView}
           />
         )}
       </main>
@@ -732,7 +1245,12 @@ function App() {
       {isHistoryLoaderOpen && (
         <HistoryLoader
           onClose={() => setIsHistoryLoaderOpen(false)}
-          onLoad={handleHistoricalLoad}
+          onAsyncLoad={(range) => {
+            // Fire-and-forget: the modal closes and the header chip shows
+            // progress; cached sub-ranges appear instantly (#222).
+            const { startMs, endMs } = rangeToMs(range);
+            void loadRange(startMs, endMs);
+          }}
           limit={loadLimit}
           mode="monitor"
         />
@@ -767,11 +1285,24 @@ function App() {
         />
       )}
 
+      {showUpdate && updateInfo && (
+        <UpdateNotification
+          info={updateInfo}
+          onClose={() => {
+            if (updateInfo.latest) setPref(DISMISSED_UPDATE_PREF, updateInfo.latest);
+            setUpdateClosed(true);
+            setIsUpdateOpen(false);
+          }}
+        />
+      )}
+
       <style>{`
         .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-weight: 500; transition: all 0.2s ease; width: 100%; text-align: left; }
-        .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); }
+        .nav-item:hover { background: var(--bg-hover); color: var(--text-main); }
         .nav-item.active { background: rgba(99,102,241,0.1); color: var(--accent-primary); }
         .icon-button { background: transparent; border: none; cursor: pointer; color: var(--text-dim); transition: all 0.2s; }
+        .chip-spinner { width: 12px; height: 12px; border: 2px solid rgba(99,102,241,0.2); border-top-color: var(--accent-primary); border-radius: 50%; animation: chip-spin 0.8s linear infinite; display: inline-block; }
+        @keyframes chip-spin { to { transform: rotate(360deg); } }
         .icon-button:hover { color: var(--text-main); transform: scale(1.1); }
         .setting-item { display: flex; align-items: center; gap: 0.6rem; background: transparent; border: none; color: var(--text-main); cursor: pointer; width: 100%; padding: 0.35rem 0; text-align: left; }
         .checkbox.checked { background: var(--accent-primary); border-color: var(--accent-primary); }
@@ -780,7 +1311,7 @@ function App() {
         .highlight { color: var(--text-dim); }
         .highlight-target { color: var(--accent-primary); font-weight: 500; }
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .raw-badge { background: rgba(255,255,255,0.05); padding: 0.15rem 0.4rem; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); display: inline-block; border: 1px solid rgba(255,255,255,0.05); }
+        .raw-badge { background: var(--bg-tag); padding: 0.15rem 0.4rem; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); display: inline-block; border: 1px solid var(--border-subtle); }
       `}</style>
     </div>
   );

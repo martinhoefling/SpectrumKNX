@@ -8,6 +8,11 @@ updates:
       dependencies:
         patterns:
           - "*"
+    # TypeScript 7 is a Go-based rewrite without the programmatic Compiler API;
+    # typescript-eslint and other tooling do not support it yet.
+    ignore:
+      - dependency-name: "typescript"
+        versions: [">=7.0.0"]
 
   - package-ecosystem: "pip"
     directory: "/backend"
@@ -17,6 +22,11 @@ updates:
       dependencies:
         patterns:
           - "*"
+    # pydantic-core is not pinned in requirements.txt (pydantic pins it
+    # exactly itself); ignore it in case it ever shows up transitively.
+    ignore:
+      - dependency-name: "pydantic-core"
+      - dependency-name: "pydantic_core"
 
   - package-ecosystem: "docker"
     directory: "/"

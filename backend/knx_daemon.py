@@ -1,15 +1,21 @@
 import asyncio
+import contextlib
 import logging
 import os
 from datetime import UTC, datetime
+from typing import Any
 
-from knx_telegram_store import StoredTelegram
 from xknx import XKNX
+from xknx.core import XknxConnectionState
+from xknx.dpt import DPTArray, DPTBase, DPTBinary
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
-from xknx.telegram.address import IndividualAddress
+from xknx.telegram import TelegramDirection
+from xknx.telegram.address import GroupAddress, IndividualAddress
+from xknx.telegram.apci import GroupValueRead, GroupValueResponse, GroupValueWrite
 
-from database import store
+from database import READ_ONLY, store
+from knx_telegram_store import StoredTelegram
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
 from ws_manager import manager
 
@@ -18,9 +24,15 @@ logging.basicConfig(level=getattr(logging, log_level_str, logging.INFO))
 logger = logging.getLogger("knx_daemon")
 logger.setLevel(getattr(logging, log_level_str, logging.INFO))
 
-xknx_instance = None
-global_knx_project = None
-project_name_map = {"ga": {}, "ia": {}}
+# Sending to the bus is only meaningful in standalone mode with a live
+# connection. It is on by default; set KNX_ALLOW_WRITE=false to forbid it.
+ALLOW_WRITE = os.getenv("KNX_ALLOW_WRITE", "true").lower() == "true"
+
+xknx_instance: XKNX | None = None
+global_knx_project: Any | None = None
+project_name_map: dict[str, dict[str, str | None]] = {"ga": {}, "ia": {}}
+_connect_task: asyncio.Task | None = None
+_watch_task: asyncio.Task | None = None
 
 
 async def _load_project_data() -> bool:
@@ -51,14 +63,14 @@ async def _load_project_data() -> bool:
         logger.info(f"Successfully loaded KNX project from {ets_project_file}")
 
         # Pre-populate name lookup maps
-        new_name_map = {"ga": {}, "ia": {}}
-        gas = global_knx_project.get("group_addresses", {})
+        new_name_map: dict[str, dict[str, str | None]] = {"ga": {}, "ia": {}}
+        gas = parsed_project.get("group_addresses", {})
         for ga, data in gas.items():
             new_name_map["ga"][ga] = data.get("name")
 
         # Individual addresses (devices)
-        devices = global_knx_project.get("devices", {})
-        for addr, data in devices.items():
+        devices = parsed_project.get("devices", {})
+        for addr, data in devices.items():  # type: ignore[assignment]
             name = data.get("name")
             if addr:
                 try:
@@ -71,9 +83,9 @@ async def _load_project_data() -> bool:
 
         if xknx_instance:
             dpt_dict = {
-                ga: data["dpt"] for ga, data in global_knx_project["group_addresses"].items() if data["dpt"] is not None
+                ga: data["dpt"] for ga, data in parsed_project["group_addresses"].items() if data["dpt"] is not None
             }
-            xknx_instance.group_address_dpt.set(dpt_dict)
+            xknx_instance.group_address_dpt.set(dpt_dict)  # type: ignore[arg-type]
             logger.info("Updated XKNX DPT mappings from project.")
 
         return True
@@ -82,9 +94,84 @@ async def _load_project_data() -> bool:
         return False
 
 
+def _register_connection_state_cb(instance: XKNX) -> None:
+    """Log connection state changes and push them to websocket clients."""
+
+    def _on_state_change(state: XknxConnectionState) -> None:
+        if xknx_instance is not instance:
+            return  # event from a replaced instance
+        logger.info(f"KNX connection state changed: {state.name}")
+        asyncio.get_running_loop().create_task(
+            manager.broadcast_event(
+                {
+                    "type": "connection_state",
+                    "connected": state == XknxConnectionState.CONNECTED,
+                    "state": state.name.lower(),
+                    "timestamp": datetime.now(UTC),
+                }
+            )
+        )
+
+    instance.connection_manager.register_connection_state_changed_cb(_on_state_change)
+
+
+def _create_xknx_instance() -> XKNX:
+    """Create a configured XKNX instance with telegram and state callbacks registered."""
+    connection_config = _build_connection_config()
+    logger.info(
+        f"Connecting to KNX bus: type={connection_config.connection_type.name}, "
+        f"gateway={connection_config.gateway_ip if connection_config.gateway_ip else 'AUTO'}, "
+        f"port={connection_config.gateway_port}, "
+        f"local_ip={connection_config.local_ip if connection_config.local_ip else 'default'}, "
+        f"route_back={connection_config.route_back}, "
+        f"secure={'yes' if connection_config.secure_config else 'no'}"
+    )
+    instance = XKNX(connection_config=connection_config)
+
+    if global_knx_project:
+        dpt_dict = {
+            ga: data["dpt"] for ga, data in global_knx_project["group_addresses"].items() if data["dpt"] is not None
+        }
+        instance.group_address_dpt.set(dpt_dict)
+
+    # match_for_outgoing=True so telegrams we send to the bus are stored/broadcast too (#161).
+    instance.telegram_queue.register_telegram_received_cb(telegram_received_cb, match_for_outgoing=True)
+    _register_connection_state_cb(instance)
+    return instance
+
+
+async def _start_with_retry():
+    """Connect to the bus, retrying with backoff until it succeeds (#166).
+
+    Only the initial connect needs this: once connected, xknx's built-in
+    auto_reconnect recovers dropped tunnels on its own.
+    """
+    global xknx_instance
+    backoff = 1.0
+    while True:
+        try:
+            await xknx_instance.start()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"Could not connect to KNX bus: {e} - retrying in {backoff:.0f}s")
+            with contextlib.suppress(Exception):
+                await xknx_instance.stop()
+            xknx_instance = _create_xknx_instance()
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+        else:
+            logger.info("KNX Daemon connected to bus and listening.")
+            return
+
+
 async def _reconnect_knx():
     """Reconnect to KNX bus with rebuilt configuration (e.g. after knxkeys change)."""
-    global xknx_instance
+    global xknx_instance, _connect_task
+    if _connect_task and not _connect_task.done():
+        _connect_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _connect_task
     if xknx_instance:
         logger.info("Reconnecting to KNX bus with updated configuration...")
         try:
@@ -92,21 +179,8 @@ async def _reconnect_knx():
         except Exception as e:
             logger.warning(f"Error stopping previous connection: {e}")
 
-    connection_config = _build_connection_config()
-    xknx_instance = XKNX(connection_config=connection_config)
-
-    if global_knx_project:
-        dpt_dict = {
-            ga: data["dpt"] for ga, data in global_knx_project["group_addresses"].items() if data["dpt"] is not None
-        }
-        xknx_instance.group_address_dpt.set(dpt_dict)
-
-    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb)
-    try:
-        await xknx_instance.start()
-        logger.info("KNX Daemon reconnected to bus successfully.")
-    except Exception as e:
-        logger.error(f"Failed to reconnect to KNX bus: {e}")
+    xknx_instance = _create_xknx_instance()
+    _connect_task = asyncio.create_task(_start_with_retry())
 
 
 async def _watch_files():
@@ -157,6 +231,7 @@ async def process_telegram_async(telegram: XknxTelegram):
         source_addr = str(telegram.source_address)
         target_addr = str(telegram.destination_address) if telegram.destination_address else "0/0/0"
         telegram_type_name = type(telegram.payload).__name__
+        direction = "Outgoing" if telegram.direction == TelegramDirection.OUTGOING else "Incoming"
 
         value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
             parse_telegram_payload(telegram, xknx_instance)
@@ -173,7 +248,7 @@ async def process_telegram_async(telegram: XknxTelegram):
                 source=source_addr,
                 destination=target_addr,
                 telegramtype=telegram_type_name,
-                direction="Incoming",  # Default for daemon received telegrams
+                direction=direction,
                 dpt_main=dpt_main,
                 dpt_sub=dpt_sub,
                 payload=value_json,
@@ -192,6 +267,7 @@ async def process_telegram_async(telegram: XknxTelegram):
             "source_name": source_name,
             "target_address": target_addr,
             "target_name": target_name,
+            "direction": direction,
             "telegram_type": telegram_type_name,
             "simplified_type": get_simplified_type(telegram_type_name),
             "dpt": dpt_str,
@@ -324,6 +400,110 @@ def _build_connection_config() -> ConnectionConfig:
     )
 
 
+def is_connected() -> bool:
+    """Whether the KNX daemon currently holds a live connection to the bus."""
+    if xknx_instance is None:
+        return False
+    try:
+        return xknx_instance.connection_manager.connected.is_set()
+    except Exception:
+        return False
+
+
+def write_enabled() -> bool:
+    """Whether outbound telegrams (send/read) can be sent to the bus right now.
+
+    Requires standalone mode (our own live connection), an active connection,
+    and that writing has not been forbidden via KNX_ALLOW_WRITE=false.
+    """
+    return ALLOW_WRITE and not READ_ONLY and is_connected()
+
+
+def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
+    """Encode a value into a KNX payload. With a DPT the value is transcoded;
+    without one the payload is treated as raw bytes (int -> DPTBinary)."""
+    if dpt is not None:
+        if isinstance(payload, str):
+            payload_str = payload.strip()
+            if dpt.startswith("10"):
+                parts = payload_str.split(":")
+                if len(parts) >= 2:
+                    try:
+                        hour = int(parts[0])
+                        minutes = int(parts[1])
+                        seconds = int(parts[2]) if len(parts) > 2 else 0
+                        payload = {"hour": hour, "minutes": minutes, "seconds": seconds}
+                    except ValueError:
+                        pass
+            elif dpt.startswith("11"):
+                parts = payload_str.split("-")
+                if len(parts) == 3:
+                    try:
+                        year = int(parts[0])
+                        month = int(parts[1])
+                        day = int(parts[2])
+                        payload = {"year": year, "month": month, "day": day}
+                    except ValueError:
+                        pass
+            elif dpt.startswith("19"):
+                if "T" in payload_str:
+                    date_part, time_part = payload_str.split("T", 1)
+                    date_parts = date_part.split("-")
+                    time_parts = time_part.split(":")
+                    if len(date_parts) == 3 and len(time_parts) >= 2:
+                        try:
+                            year = int(date_parts[0])
+                            month = int(date_parts[1])
+                            day = int(date_parts[2])
+                            hour = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            seconds = int(time_parts[2]) if len(time_parts) > 2 else 0
+                            payload = {
+                                "year": year,
+                                "month": month,
+                                "day": day,
+                                "hour": hour,
+                                "minutes": minutes,
+                                "seconds": seconds,
+                            }
+                        except ValueError:
+                            pass
+
+        transcoder = DPTBase.parse_transcoder(dpt)
+        if transcoder is None:
+            raise ValueError(f"Unknown DPT type: {dpt}")
+        return transcoder.to_knx(payload)
+    if isinstance(payload, int):
+        return DPTBinary(payload)
+    return DPTArray(payload)
+
+
+async def send_group_value(address: str, payload: Any, dpt: str | None = None, response: bool = False) -> None:
+    """Send a GroupValueWrite (or GroupValueResponse) telegram to the bus."""
+    if xknx_instance is None:
+        raise RuntimeError("Not connected to the KNX bus")
+    encoded = _encode_payload(payload, dpt)
+    telegram = XknxTelegram(
+        destination_address=GroupAddress(address),
+        payload=GroupValueResponse(encoded) if response else GroupValueWrite(encoded),
+        source_address=xknx_instance.current_address,
+    )
+    await xknx_instance.telegrams.put(telegram)
+
+
+async def read_group_value(address: str) -> None:
+    """Send a GroupValueRead telegram; the device's response arrives via the
+    normal receive path and updates the stored last value for the GA."""
+    if xknx_instance is None:
+        raise RuntimeError("Not connected to the KNX bus")
+    telegram = XknxTelegram(
+        destination_address=GroupAddress(address),
+        payload=GroupValueRead(),
+        source_address=xknx_instance.current_address,
+    )
+    await xknx_instance.telegrams.put(telegram)
+
+
 def get_server_config() -> dict:
     """Return the effective server configuration for the status API, with passwords masked."""
 
@@ -339,14 +519,33 @@ def get_server_config() -> dict:
         if os.path.exists(default_file):
             ets_project_file = default_file
 
-    connected = False
-    if xknx_instance is not None:
-        try:
-            connected = xknx_instance.connection_manager.connected.is_set()
-        except Exception:
-            connected = False
+    if READ_ONLY:
+        # Companion mode: Home Assistant owns the bus connection and the
+        # telegram store — reporting the daemon's (nonexistent) bus connection
+        # as "Disconnected" here was misleading (#184). Report the live-feed
+        # state instead and drop the gateway/security settings that don't apply.
+        import ha_live_bridge
+
+        feed = ha_live_bridge.live_feed_status()
+        return {
+            "mode": "companion",
+            "connection": {
+                "type": "HOME_ASSISTANT",
+                "live_source": feed["source"],
+            },
+            "security": {},
+            "files": {
+                "project_file": ets_project_file,
+                "project_loaded": global_knx_project is not None,
+            },
+            "status": {
+                "connected": feed["connected"],
+                "write_enabled": False,
+            },
+        }
 
     return {
+        "mode": "standalone",
         "connection": {
             "type": os.getenv("KNX_CONNECTION_TYPE", "AUTOMATIC"),
             "gateway_ip": os.getenv("KNX_GATEWAY_IP", "AUTO"),
@@ -373,52 +572,48 @@ def get_server_config() -> dict:
             "knxkeys_found": knxkeys_file is not None and os.path.exists(knxkeys_file),
         },
         "status": {
-            "connected": connected,
+            "connected": is_connected(),
+            "write_enabled": write_enabled(),
         },
     }
 
 
 async def knx_startup():
-    global xknx_instance, global_knx_project, project_name_map
+    global xknx_instance, global_knx_project, project_name_map, _connect_task, _watch_task
     logger.info("Starting KNX Daemon...")
+
+    # Check the database connection first
+    conn_check = await store.check_connection()
+    if not conn_check.ok:
+        logger.error(f"Database connection check failed: {conn_check.message}")
+        if conn_check.detail:
+            logger.error(f"Database connection details: {conn_check.detail}")
+        raise RuntimeError(f"Database connection check failed: {conn_check.message}")
+
+    logger.info("Database connection check succeeded.")
 
     # Initialize the Telegram Store (including schema creation/renames)
     await store.initialize()
-
-    connection_config = _build_connection_config()
-
-    logger.info(
-        f"Connecting to KNX bus: type={connection_config.connection_type.name}, "
-        f"gateway={connection_config.gateway_ip if connection_config.gateway_ip else 'AUTO'}, "
-        f"port={connection_config.gateway_port}, "
-        f"local_ip={connection_config.local_ip if connection_config.local_ip else 'default'}, "
-        f"route_back={connection_config.route_back}, "
-        f"secure={'yes' if connection_config.secure_config else 'no'}"
-    )
+    store.start()
 
     await _load_project_data()
 
-    xknx_instance = XKNX(connection_config=connection_config)
-
-    if global_knx_project:
-        dpt_dict = {
-            ga: data["dpt"] for ga, data in global_knx_project["group_addresses"].items() if data["dpt"] is not None
-        }
-        xknx_instance.group_address_dpt.set(dpt_dict)
-
-    xknx_instance.telegram_queue.register_telegram_received_cb(telegram_received_cb)
-    try:
-        await xknx_instance.start()
-        logger.info("KNX Daemon connected to bus and listening.")
-        # Start background file watcher (project + knxkeys)
-        asyncio.create_task(_watch_files())
-    except Exception as e:
-        logger.error(f"Failed to connect to KNX bus: {e}")
+    xknx_instance = _create_xknx_instance()
+    _connect_task = asyncio.create_task(_start_with_retry())
+    # Start background file watcher (project + knxkeys) even while disconnected
+    _watch_task = asyncio.create_task(_watch_files())
 
 
 async def knx_shutdown():
-    global xknx_instance
+    global xknx_instance, _connect_task, _watch_task
+    for task in (_connect_task, _watch_task):
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    _connect_task = None
+    _watch_task = None
     if xknx_instance:
         logger.info("Stopping KNX Daemon...")
         await xknx_instance.stop()
-    await store.close()
+    await store.stop()

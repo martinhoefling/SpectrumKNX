@@ -235,7 +235,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
                     <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
                       {t.simplified_type || t.telegram_type}
                     </div>
-                    <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>Incoming</div>
+                    <div style={{ fontSize: '0.65rem', color: t.direction === 'Outgoing' ? '#f59e0b' : '#10b981', marginTop: '0.1rem', opacity: 0.8 }}>{t.direction === 'Outgoing' ? 'Outgoing' : 'Incoming'}</div>
                   </td>
                 )}
 

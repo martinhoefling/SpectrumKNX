@@ -3,6 +3,7 @@ from unittest.mock import patch
 from parsers import (
     convert_value_for_db,
     format_dpt_name,
+    format_value_nicely,
     get_simplified_type,
     parse_telegram_dpt,
     parse_telegram_payload,
@@ -150,9 +151,9 @@ def test_parse_telegram_payload_with_dpt_array():
         parse_telegram_payload(MockTelegram())
     )
 
-    # 0xfc = 252
+    # 0xfc = 252 — stored as plain list, not wrapped
     assert raw_data == b"\xfc"
-    assert value_json == {"value": [252]}
+    assert value_json == [252]
     assert value_numeric is None
     assert dpt_main is None
 
@@ -183,6 +184,80 @@ def test_parse_telegram_payload_with_dpt_binary():
     assert dpt_main is None
 
 
+def test_parse_telegram_payload_string_value_not_wrapped():
+    """String values decoded from DPT should be stored directly, not wrapped in {"value": ...}."""
+
+    class MockTranscoder:
+        dpt_main_number = 16
+        dpt_sub_number = 1
+        value_type = "string"
+        __name__ = "DPTString"
+
+    class MockDecoded:
+        transcoder = MockTranscoder()
+        value = "hello world"
+
+    class MockPayload:
+        value = None
+
+    class MockTelegram:
+        payload = MockPayload()
+        decoded_data = MockDecoded()
+        destination_address = "1/1/1"
+
+    value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
+        parse_telegram_payload(MockTelegram())
+    )
+
+    assert value_numeric is None
+    assert value_json == "hello world"
+    assert value_formatted == "hello world"
+
+
+def test_parse_telegram_payload_fallback_string_not_wrapped():
+    """Fallback string extraction (no decoded_data) should also store directly."""
+
+    class MockInnerPayload:
+        value = "raw string"
+
+    class MockPayload:
+        value = MockInnerPayload()
+
+    class MockTelegram:
+        payload = MockPayload()
+        decoded_data = None
+        destination_address = "1/1/2"
+
+    value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
+        parse_telegram_payload(MockTelegram())
+    )
+
+    assert value_numeric is None
+    assert value_json == "raw string"
+
+
+def test_parse_telegram_payload_fallback_list_not_wrapped():
+    """Fallback list values should be stored as plain list, not wrapped."""
+
+    class MockDPTArray:
+        value = (0x01, 0x02)
+
+    class MockPayload:
+        value = MockDPTArray()
+
+    class MockTelegram:
+        payload = MockPayload()
+        decoded_data = None
+        destination_address = "1/1/3"
+
+    value_numeric, value_json, raw_data, dpt_str, dpt_main, dpt_sub, unit, value_formatted, raw_hex = (
+        parse_telegram_payload(MockTelegram())
+    )
+
+    assert value_json == [1, 2]
+    assert value_numeric is None
+
+
 def test_format_dpt_name():
     # Test common DPTs (assuming xknx is present in the environment where tests run)
     # 1.001 -> "1.001 - Switch"
@@ -198,6 +273,41 @@ def test_format_dpt_name():
     assert "9.001" in name
 
     assert format_dpt_name(None, None) == (None, None)
+
+
+def test_format_value_nicely_none_is_not_fabricated():
+    # GroupValueRead telegrams carry no payload: no "None"/"off" values (#181)
+    assert format_value_nicely(None) is None
+    assert format_value_nicely(None, 1, 1) is None
+    assert format_value_nicely(None, 5, 1) is None
+
+
+def test_format_value_nicely_bools_and_numerics():
+    assert format_value_nicely(True, 1, 1) == "on"
+    assert format_value_nicely(False, 1, 1) == "off"
+    assert format_value_nicely(0, 1, 1) == "off"
+    assert format_value_nicely(1.0, 1, 1) == "on"
+    # Subtype-specific enum names
+    assert format_value_nicely(False, 1, 8) == "up"
+    assert format_value_nicely(True, 1, 8) == "down"
+    assert format_value_nicely(True, 1, 100) == "heat"
+    # Bool without a known DPT-1 subtype falls back to on/off
+    assert format_value_nicely(True) == "on"
+    assert format_value_nicely(False, 1, None) == "off"
+
+
+def test_format_value_nicely_ha_enum_strings_not_truth_tested():
+    # HA decodes DPT-1 to enum name strings; "off" must not render as "on" (#181)
+    assert format_value_nicely("off", 1, 1) == "off"
+    assert format_value_nicely("on", 1, 1) == "on"
+    assert format_value_nicely("up", 1, 8) == "up"
+    assert format_value_nicely("down", 1, 8) == "down"
+
+
+def test_format_value_nicely_other_types():
+    assert format_value_nicely(21.60, 9, 1) == "21.6"
+    assert format_value_nicely(100.00, 5, 1) == "100"
+    assert format_value_nicely("hello", 16, 0) == "hello"
 
 
 def test_format_dpt_name_invalid_inputs():

@@ -1,17 +1,47 @@
 #!/usr/bin/with-contenv bashio
 
-# Wait for Postgres to be ready
-bashio::log.info "Waiting for PostgreSQL to start..."
-until s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_isready -h 127.0.0.1 -p 5432; do
-    sleep 1
-done
-bashio::log.info "PostgreSQL is ready!"
+# Companion add-on (ha-addon-companion): read Home Assistant's own KNX telegram
+# store instead of running a bus connection and database of our own.
+COMPANION_MODE=$(bashio::config 'COMPANION_MODE' 'false')
+# Read DB_BACKEND early — it controls whether we wait for PostgreSQL
+DB_BACKEND=$(bashio::config 'DB_BACKEND' 'POSTGRES')
 
-# DB Configuration
-export POSTGRES_HOST=127.0.0.1
+if [ "$COMPANION_MODE" = "true" ]; then
+    bashio::log.info "Companion mode — reading Home Assistant's KNX telegram store."
+    export STORE_MODE="external-readonly"
+    export LIVE_SOURCE="$(bashio::config 'LIVE_SOURCE' 'ha_websocket')"
+
+    DB_PATH="$(bashio::config 'TELEGRAM_DB_PATH' '')"
+    if [ -z "$DB_PATH" ]; then
+        # Supervisor mounts homeassistant_config at /homeassistant (older: /config)
+        for candidate in /homeassistant/.storage/knx/telegrams.db /config/.storage/knx/telegrams.db; do
+            if [ -f "$candidate" ]; then
+                DB_PATH="$candidate"
+                break
+            fi
+        done
+    fi
+    if [ -z "$DB_PATH" ] || [ ! -f "$DB_PATH" ]; then
+        bashio::log.fatal "Home Assistant's KNX telegram database was not found."
+        bashio::log.fatal "Set up the KNX integration in Home Assistant first, or set TELEGRAM_DB_PATH."
+        exit 1
+    fi
+    export DATABASE_URL="sqlite+aiosqlite:///${DB_PATH}"
+elif [ "$DB_BACKEND" = "SQLITE" ]; then
+    bashio::log.info "SQLite backend selected — skipping PostgreSQL wait."
+    export DATABASE_URL="sqlite+aiosqlite:////data/spectrum_knx.db"
+else
+    # Wait for Postgres to be ready
+    bashio::log.info "Waiting for PostgreSQL to start..."
+    until s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_isready -h 127.0.0.1 -p 5432; do
+        sleep 1
+    done
+    bashio::log.info "PostgreSQL is ready!"
+    export POSTGRES_HOST=127.0.0.1
+fi
 
 # Read KNX options from Add-on config if provided
-for var in KNX_PROJECT_PATH KNX_PASSWORD KNX_GATEWAY_IP KNX_GATEWAY_PORT KNX_CONNECTION_TYPE KNX_LOCAL_IP KNX_INDIVIDUAL_ADDRESS KNX_ROUTE_BACK KNX_MULTICAST_GROUP KNX_MULTICAST_PORT KNX_KNXKEYS_FILE KNX_KNXKEYS_PASSWORD KNX_SECURE_USER_ID KNX_SECURE_USER_PASSWORD KNX_SECURE_DEVICE_PASSWORD KNX_SECURE_BACKBONE_KEY KNX_SECURE_LATENCY_MS LOG_LEVEL; do
+for var in KNX_PROJECT_PATH KNX_PASSWORD KNX_GATEWAY_IP KNX_GATEWAY_PORT KNX_CONNECTION_TYPE KNX_LOCAL_IP KNX_INDIVIDUAL_ADDRESS KNX_ROUTE_BACK KNX_MULTICAST_GROUP KNX_MULTICAST_PORT KNX_KNXKEYS_FILE KNX_KNXKEYS_PASSWORD KNX_SECURE_USER_ID KNX_SECURE_USER_PASSWORD KNX_SECURE_DEVICE_PASSWORD KNX_SECURE_BACKBONE_KEY KNX_SECURE_LATENCY_MS LOG_LEVEL UPDATE_CHECK; do
     if bashio::config.has_value "$var"; then
         export "$var"="$(bashio::config "$var")"
     fi
@@ -21,10 +51,18 @@ if [ -z "$LOG_LEVEL" ]; then
     export LOG_LEVEL="INFO"
 fi
 
+# Persist uploaded ETS project files across restarts/updates. Home Assistant
+# keeps /data across the container lifecycle, so point the backend's default
+# project directory (/project) at it. This runs in every mode — including
+# companion mode, where it's the only writable place to store the project so
+# group/individual address names (and thus filtering) become available.
+mkdir -p /data/project
+ln -sfn /data/project /project
+
 # Ingress support path (provided by Home Assistant)
 if bashio::config.has_value 'ingress_port'; then
     # We serve directly on the port and Home Assistant handles the Ingress proxying
-    export PORT=8000
+    export PORT=8765
 fi
 
 # Set root path if running under HA Ingress
@@ -35,4 +73,4 @@ fi
 
 cd /app/backend
 bashio::log.info "Starting Spectrum KNX Backend..."
-exec /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+exec /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8765

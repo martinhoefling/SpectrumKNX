@@ -1,0 +1,440 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Send, Radio, X, Plus, AlertTriangle, CheckCircle2, Timer, RotateCcw } from 'lucide-react';
+
+import type { FilterOption } from '../types/filters';
+import {
+  formatDpt,
+  parseDptMain,
+  readTelegram,
+  sendTelegram,
+  startScheduledSend,
+  getScheduledSendStatus,
+  cancelScheduledSend,
+  type ScheduledSendStatus,
+} from '../utils/knxSend';
+import { GaCombobox } from './GaCombobox';
+import { WriteControls } from './WriteControls';
+import { secondaryBtn } from '../utils/buttonStyles';
+import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
+
+interface Props {
+  /** Group addresses from the loaded project (with optional DPT main/sub). */
+  targets: FilterOption[];
+  onClose: () => void;
+}
+
+interface Row {
+  id: string;
+  address: string;
+  dpt: string;
+  value: string;
+  delay: string;
+  every: string;
+  busy: boolean;
+  feedback: { ok: boolean; msg: string } | null;
+}
+
+const GA_RE = /^\d{1,2}\/\d{1,2}\/\d{1,3}$|^\d{1,2}\/\d{1,4}$|^\d{1,5}$/;
+const POLL_INTERVAL_MS = 1000;
+
+// Common DPTs offered as datalist hints when overriding a GA's type (#342).
+// The input stays free-text; these just guide the frequent cases.
+const COMMON_DPTS = [
+  '1.001', '1.002', '2.001', '3.007', '4.001', '5.001', '5.004', '5.010',
+  '6.010', '7.001', '8.001', '9.001', '9.004', '10.001', '11.001', '12.001',
+  '13.001', '14.056', '16.000', '17.001', '18.001', '19.001', '20.102', '232.600',
+];
+
+let rowSeq = 0;
+const newRow = (): Row => ({
+  id: `row-${rowSeq++}`, address: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
+});
+
+// ── Row persistence (#254) ───────────────────────────────────────────────────
+// The panel unmounts when toggled off; without this every configured row would
+// be lost. Only the durable inputs are stored — busy/feedback are transient,
+// and scheduled jobs live server-side (re-attached via the status poll).
+
+const ROWS_STORAGE_KEY = 'spectrumknx-write-panel-rows';
+const MAX_STORED_ROWS = 20;
+
+type StoredRow = Pick<Row, 'address' | 'dpt' | 'value' | 'delay' | 'every'>;
+
+function loadStoredRows(): Row[] | null {
+  try {
+    const raw = localStorage.getItem(ROWS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    return parsed.slice(0, MAX_STORED_ROWS).map(p => {
+      const s = p as Partial<StoredRow> | null;
+      return {
+        ...newRow(),
+        address: str(s?.address),
+        dpt: str(s?.dpt),
+        value: str(s?.value),
+        delay: str(s?.delay),
+        every: str(s?.every),
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+function saveRows(rows: Row[]): void {
+  try {
+    const stored: StoredRow[] = rows.map(({ address, dpt, value, delay, every }) => ({
+      address, dpt, value, delay, every,
+    }));
+    localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // Storage unavailable — the rows just won't survive the next toggle.
+  }
+}
+
+/**
+ * "Write to bus" panel: send to several group addresses from stacked rows,
+ * each with its own GA/DPT/value/Write/Read and optional delay/cyclic
+ * scheduling, plus per-row add/remove (#215).
+ *
+ * The backend runs a single scheduled (delayed/cyclic) job at a time, so at
+ * most one row can have an active timer; immediate writes/reads work on any
+ * row regardless. Removing the row that owns the active job cancels it first.
+ *
+ * Rows persist to localStorage so toggling the panel keeps its state (#254).
+ */
+export function WriteToBusPanel({ targets, onClose }: Props) {
+  const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
+  const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
+  const [job, setJob] = useState<ScheduledSendStatus | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const watchingRef = useRef(false);
+
+  const byAddress = useMemo(() => {
+    const m = new Map<string, FilterOption>();
+    for (const t of targets) if (t.address) m.set(t.address, t);
+    return m;
+  }, [targets]);
+
+  // DPT hints for the editable DPT field (#342): common types plus every DPT
+  // present in the loaded project, sorted numerically by main then sub.
+  const dptOptions = useMemo(() => {
+    const set = new Set<string>(COMMON_DPTS);
+    for (const t of targets) if (t.main != null) set.add(formatDpt(t.main, t.sub));
+    return [...set].sort((a, b) => {
+      const [am, as = 0] = a.split('.').map(Number);
+      const [bm, bs = 0] = b.split('.').map(Number);
+      return am - bm || as - bs;
+    });
+  }, [targets]);
+
+  const jobActive = job != null && (job.state === 'waiting' || job.state === 'running');
+
+  // Pick up an already-active job (e.g. after a page reload) and clean up the poller.
+  useEffect(() => {
+    void refreshJob();
+    return stopPolling;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    saveRows(rows);
+  }, [rows]);
+
+  const updateRow = (id: string, patch: Partial<Row>) =>
+    setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
+
+  const addRow = () => setRows(rs => [...rs, newRow()]);
+
+  const removeRow = async (id: string) => {
+    const row = rows.find(r => r.id === id);
+    // Removing the row that owns the running timer must cancel it, so we don't
+    // leave an untracked cyclic send firing (TabSel, forum post #130).
+    if (row && jobActive && job?.address === row.address.trim()) {
+      await cancelScheduledSend().catch(() => {});
+      await refreshJob();
+    }
+    setRows(rs => (rs.length > 1 ? rs.filter(r => r.id !== id) : rs));
+  };
+
+  const onAddressChange = (id: string, next: string, option?: FilterOption) => {
+    const match = option ?? byAddress.get(next.trim());
+    updateRow(id, {
+      address: next,
+      feedback: null,
+      dpt: match && match.main != null ? formatDpt(match.main, match.sub) : '',
+    });
+  };
+
+  // Editable DPT (#342): overriding the project default. When the DPT *main*
+  // changes the write widget switches (On/Off ↔ pickers ↔ free value), so a
+  // stale value must be cleared to avoid sending it to the new widget.
+  const onDptChange = (id: string, next: string) => {
+    const row = rows.find(r => r.id === id);
+    const mainChanged = row && parseDptMain(row.dpt) !== parseDptMain(next);
+    updateRow(id, { dpt: next, feedback: null, ...(mainChanged ? { value: '' } : {}) });
+  };
+
+  const write = async (row: Row, payload: boolean | number | string) => {
+    const delaySeconds = parseFloat(row.delay) || 0;
+    const intervalSeconds = parseFloat(row.every) || 0;
+    const scheduled = delaySeconds > 0 || intervalSeconds > 0;
+    updateRow(row.id, { busy: true, feedback: null });
+    try {
+      if (scheduled) {
+        await startScheduled(row, payload, delaySeconds, intervalSeconds);
+      } else {
+        await sendTelegram(row.address.trim(), payload, row.dpt.trim() || undefined);
+        const shown = typeof payload === 'boolean' ? (payload ? 'on' : 'off') : row.value || '(raw)';
+        updateRow(row.id, { feedback: { ok: true, msg: `Sent ${shown} to ${row.address.trim()}` } });
+      }
+      setRecentGas(pushRecentGa(row.address.trim()));
+    } catch (err) {
+      updateRow(row.id, { feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' } });
+    } finally {
+      updateRow(row.id, { busy: false });
+    }
+  };
+
+  const read = async (row: Row) => {
+    updateRow(row.id, { busy: true, feedback: null });
+    try {
+      await readTelegram(row.address.trim());
+      updateRow(row.id, { feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` } });
+      setRecentGas(pushRecentGa(row.address.trim()));
+    } catch (err) {
+      updateRow(row.id, { feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' } });
+    } finally {
+      updateRow(row.id, { busy: false });
+    }
+  };
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: '0.5rem',
+      padding: '0.6rem 0.85rem', marginBottom: '0.6rem',
+      background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: '8px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
+          <Send size={15} /> Write to bus
+        </span>
+        <button className="icon-button" onClick={onClose} title="Close write panel" style={{ marginLeft: 'auto', color: 'var(--text-dim)' }}>
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* DPT hints shared by every row's editable DPT field (#342) */}
+      <datalist id="wtb-dpt-options">
+        {dptOptions.map(d => <option key={d} value={d} />)}
+      </datalist>
+
+      {rows.map(row => {
+        const known = byAddress.get(row.address.trim());
+        // The write widget follows the row's *effective* (possibly overridden)
+        // DPT, not the project default (#342).
+        const dptMain = parseDptMain(row.dpt);
+        const projectDpt = known && known.main != null ? formatDpt(known.main, known.sub) : '';
+        const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
+        const addressValid = GA_RE.test(row.address.trim());
+        const scheduledDisabled = row.busy || !addressValid;
+        return (
+          <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', width: '100%' }}>
+              {/* Left Group: GA input + Resolved Name */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 auto', minWidth: '180px' }}>
+                <GaCombobox
+                  value={row.address}
+                  onChange={(next, option) => onAddressChange(row.id, next, option)}
+                  options={targets}
+                  recentAddresses={recentGas}
+                  placeholder="Group address (e.g. 1/2/3)"
+                  width={150}
+                />
+                {known?.name && (
+                  <span
+                    style={{ fontSize: '0.72rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}
+                    title={known.name}
+                  >
+                    — {known.name}
+                  </span>
+                )}
+              </div>
+
+              {/* Right Group: Action controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', flexShrink: 0 }}>
+                <WriteControls
+                  dptMain={dptMain}
+                  dptKey={row.dpt || null}
+                  address={row.address || null}
+                  value={row.value}
+                  onValueChange={v => updateRow(row.id, { value: v, feedback: null })}
+                  onWrite={payload => void write(row, payload)}
+                  disabled={scheduledDisabled}
+                />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>DPT</span>
+                  <input
+                    className="glass-input"
+                    list="wtb-dpt-options"
+                    value={row.dpt}
+                    onChange={e => onDptChange(row.id, e.target.value)}
+                    placeholder="—"
+                    title={overridden ? `Overriding project DPT ${projectDpt}` : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'}
+                    style={{
+                      width: 78,
+                      padding: '0.2rem 0.35rem',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.72rem',
+                      borderColor: overridden ? 'var(--accent-primary)' : undefined,
+                    }}
+                  />
+                  {overridden && (
+                    <button
+                      className="icon-button"
+                      onClick={() => updateRow(row.id, { dpt: projectDpt, value: '', feedback: null })}
+                      title={`Reset to project DPT ${projectDpt}`}
+                      style={{ color: 'var(--text-dim)', padding: '0.1rem' }}
+                    >
+                      <RotateCcw size={13} />
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  className="glass-input"
+                  placeholder="Delay s"
+                  value={row.delay}
+                  onChange={e => updateRow(row.id, { delay: e.target.value, feedback: null })}
+                  title="Wait this many seconds before sending"
+                  style={{ width: 70 }}
+                />
+
+                <input
+                  className="glass-input"
+                  placeholder="Every s"
+                  value={row.every}
+                  onChange={e => updateRow(row.id, { every: e.target.value, feedback: null })}
+                  title="Repeat the send at this interval in seconds (min 1) until cancelled"
+                  style={{ width: 70 }}
+                />
+
+                <button
+                  onClick={() => void read(row)}
+                  disabled={row.busy || !addressValid}
+                  style={secondaryBtn(row.busy || !addressValid)}
+                  title="Send a GroupValueRead; the response updates the last value"
+                >
+                  <Radio size={14} /> Read
+                </button>
+
+                <button
+                  className="icon-button"
+                  onClick={() => void removeRow(row.id)}
+                  disabled={rows.length === 1}
+                  title={rows.length === 1 ? 'At least one row is required' : 'Remove this row'}
+                  style={{ color: 'var(--text-dim)', opacity: rows.length === 1 ? 0.4 : 1 }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+
+            {row.feedback && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: row.feedback.ok ? 'var(--success)' : 'var(--error)' }}>
+                {row.feedback.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {row.feedback.msg}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div>
+        <button onClick={addRow} style={secondaryBtn(false)} title="Add another send row">
+          <Plus size={14} /> Add row
+        </button>
+      </div>
+
+      {jobActive && job && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--accent-primary)' }}>
+          <Timer size={13} />
+          <span>{describeJob(job)}</span>
+          <button onClick={() => void cancelJob()} style={secondaryBtn(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  async function startScheduled(row: Row, payload: unknown, delaySeconds: number, intervalSeconds: number) {
+    if (jobActive) {
+      updateRow(row.id, { feedback: { ok: false, msg: 'A scheduled send is already active — cancel it first' } });
+      return;
+    }
+    if (intervalSeconds > 0 && intervalSeconds < 1) {
+      updateRow(row.id, { feedback: { ok: false, msg: 'Interval must be at least 1 second' } });
+      return;
+    }
+    const status = await startScheduledSend(row.address.trim(), payload, row.dpt.trim() || undefined, {
+      delaySeconds: delaySeconds > 0 ? delaySeconds : undefined,
+      intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
+    });
+    watchingRef.current = true;
+    setJob(status);
+    startPolling();
+  }
+
+  async function refreshJob() {
+    let status: ScheduledSendStatus;
+    try {
+      status = await getScheduledSendStatus();
+    } catch {
+      return; // transient fetch error — keep polling
+    }
+    if (status.state === 'waiting' || status.state === 'running') {
+      watchingRef.current = true;
+      setJob(status);
+      if (pollRef.current == null) startPolling();
+      return;
+    }
+    stopPolling();
+    setJob(null);
+  }
+
+  async function cancelJob() {
+    try {
+      await cancelScheduledSend();
+    } catch {
+      // ignore — refreshJob reflects the real state
+    }
+    await refreshJob();
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollRef.current = window.setInterval(() => void refreshJob(), POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+}
+
+function describeJob(job: ScheduledSendStatus): string {
+  if (job.state === 'waiting') {
+    const at = job.next_send_at ? ` at ${new Date(job.next_send_at).toLocaleTimeString()}` : '';
+    return `Delayed send to ${job.address} — first send${at}`;
+  }
+  if (job.interval_seconds) {
+    const skipped = job.sends_skipped ? ` (${job.sends_skipped} skipped)` : '';
+    return `Cyclic send to ${job.address} every ${job.interval_seconds}s — ${job.sends_done ?? 0} sent${skipped}`;
+  }
+  return `Sending to ${job.address}…`;
+}

@@ -2,21 +2,23 @@ import React, { useState, useCallback } from 'react';
 import { X, Clock, Database, AlertCircle, CheckCircle2, Calendar, Search } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { ActiveFilters } from '../types/filters';
-import { apiUrl } from '../utils/basePath';
-
-interface Metadata {
-  total_count: number;
-  limit_reached: boolean;
-}
+import type { LoaderTimeRange } from './HistorySearch';
+import { loadHistoryTelegrams, type HistoryMetadata, type LoadedRange } from '../utils/historyLoad';
 
 interface HistoryLoaderProps {
   onClose: () => void;
-  onLoad: (telegrams: Telegram[], metadata?: Metadata) => void;
+  onLoad?: (telegrams: Telegram[], metadata?: HistoryMetadata, range?: LoadedRange) => void;
+  /** Fire-and-forget alternative to onLoad: the modal closes immediately and
+   * the caller loads the range in the background (Group Monitor, #222). */
+  onAsyncLoad?: (range: LoadedRange) => void;
   limit: number;
   /** 'monitor' = no date range pickers (Group Monitor); 'search' = full options (History Search) */
   mode?: 'monitor' | 'search';
   /** Active filter state — appended as query params for backend-side filtering (History Search) */
   filters?: ActiveFilters;
+  /** Persisted time range values — retained across open/close cycles */
+  timeRange?: LoaderTimeRange;
+  onTimeRangeChange?: (r: LoaderTimeRange) => void;
 }
 
 type Unit = 'seconds' | 'minutes' | 'hours' | 'days';
@@ -28,47 +30,69 @@ const UNIT_TO_SECONDS: Record<Unit, number> = {
   days: 86400,
 };
 
-/** Appends active filter state as query params to a base URL string. */
-function applyFilterParams(url: string, filters?: ActiveFilters): string {
-  if (!filters) return url;
-  const params: string[] = [];
-  if (filters.sources.length > 0) params.push(`source_address=${encodeURIComponent(filters.sources.join(','))}`);
-  if (filters.targets.length > 0) params.push(`target_address=${encodeURIComponent(filters.targets.join(','))}`);
-  if (filters.types.length > 0) params.push(`telegram_type=${encodeURIComponent(filters.types.join(','))}`);
-  if (filters.dpts.length > 0) params.push(`dpt_main=${encodeURIComponent(filters.dpts.join(','))}`);
-  if (filters.deltaBeforeMs > 0) params.push(`delta_before_ms=${filters.deltaBeforeMs}`);
-  if (filters.deltaAfterMs > 0) params.push(`delta_after_ms=${filters.deltaAfterMs}`);
-  if (params.length === 0) return url;
-  return url + (url.includes('?') ? '&' : '?') + params.join('&');
-}
-
-export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, limit, mode = 'search', filters }) => {
+export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, onAsyncLoad, limit, mode = 'search', filters, timeRange, onTimeRangeChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
-  const [resultMeta, setResultMeta] = useState<Metadata | null>(null);
+  const [resultMeta, setResultMeta] = useState<HistoryMetadata | null>(null);
 
-  // Custom relative
-  const [relValue, setRelValue] = useState<number>(1);
-  const [relUnit, setRelUnit] = useState<Unit>('hours');
+  // Custom relative — initialised from persisted timeRange if provided
+  const [relValue, setRelValue] = useState<number>(timeRange?.relValue ?? 1);
+  const [relUnit, setRelUnit] = useState<Unit>(timeRange?.relUnit ?? 'hours');
 
   // Custom absolute (history search only)
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
+  const [startTime, setStartTime] = useState(timeRange?.startTime ?? '');
+  const [endTime, setEndTime] = useState(timeRange?.endTime ?? '');
 
-  const doFetch = useCallback(async (url: string) => {
+  // Persist state changes back to parent whenever values change
+  const persistTimeRange = (patch: Partial<LoaderTimeRange>) => {
+    onTimeRangeChange?.({ relValue, relUnit, startTime, endTime, ...patch });
+  };
+
+  // Some browsers allow typing more than 4 digits into the year segment of a
+  // datetime-local input. Clamp to 4 digits to prevent e.g. "202600-01-01T00:00".
+  const clampYear = (value: string) => {
+    const match = value.match(/^(\d{5,})(-.+)$/);
+    return match ? match[1].slice(0, 4) + match[2] : value;
+  };
+
+  const handleStartTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const clamped = clampYear(val);
+    if (clamped !== val) {
+      e.target.value = clamped;
+    }
+    setStartTime(clamped);
+    persistTimeRange({ startTime: clamped });
+  };
+
+  const handleEndTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const clamped = clampYear(val);
+    if (clamped !== val) {
+      e.target.value = clamped;
+    }
+    setEndTime(clamped);
+    persistTimeRange({ endTime: clamped });
+  };
+
+  const doFetch = useCallback(async (range: LoadedRange) => {
+    if (onAsyncLoad) {
+      // Background mode: hand the range off and close — progress is shown in
+      // the caller's status area instead of blocking this modal (#222).
+      onAsyncLoad(range);
+      onClose();
+      return;
+    }
     setIsLoading(true);
     setError(null);
     setStatus('loading');
     setResultMeta(null);
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      const meta: Metadata = data.metadata || { total_count: 0, limit_reached: false };
-      setResultMeta(meta);
+      const { telegrams, metadata } = await loadHistoryTelegrams(range, limit, filters);
+      setResultMeta(metadata);
       setStatus('success');
-      onLoad(data.telegrams || [], meta);
+      onLoad?.(telegrams, metadata, range);
       setTimeout(onClose, 1500);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
@@ -77,13 +101,11 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
     } finally {
       setIsLoading(false);
     }
-  }, [limit, filters, onLoad, onClose]);
+  }, [filters, limit, onLoad, onAsyncLoad, onClose]);
 
   const handleLoadRelative = useCallback((seconds: number) => {
-    const start = new Date(Date.now() - seconds * 1000).toISOString();
-    const base = apiUrl(`/api/telegrams?limit=${limit}&start_time=${encodeURIComponent(start)}`);
-    doFetch(applyFilterParams(base, filters));
-  }, [limit, filters, doFetch]);
+    doFetch({ kind: 'relative', seconds });
+  }, [doFetch]);
 
   const handleLoadCustomRelative = useCallback(() => {
     if (!relValue || relValue <= 0) { setError('Enter a positive value.'); return; }
@@ -92,11 +114,8 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
 
   const handleLoadCustomAbsolute = useCallback(() => {
     if (!startTime && !endTime) { setError('Enter at least a start or end time.'); return; }
-    let url = apiUrl(`/api/telegrams?limit=${limit}`);
-    if (startTime) url += `&start_time=${encodeURIComponent(startTime + ':00Z')}`;
-    if (endTime) url += `&end_time=${encodeURIComponent(endTime + ':00Z')}`;
-    doFetch(applyFilterParams(url, filters));
-  }, [limit, startTime, endTime, filters, doFetch]);
+    doFetch({ kind: 'absolute', startTime, endTime });
+  }, [startTime, endTime, doFetch]);
 
   return (
     <div className="modal-overlay">
@@ -128,13 +147,13 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
               <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>{t}</span>
             ))}
             {filters.dpts.map(d => (
-              <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>
+              <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>
             ))}
             {filters.deltaBeforeMs > 0 && (
-              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>−{filters.deltaBeforeMs}ms before</span>
+              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>−{filters.deltaBeforeMs}ms before</span>
             )}
             {filters.deltaAfterMs > 0 && (
-              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>+{filters.deltaAfterMs}ms after</span>
+              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>+{filters.deltaAfterMs}ms after</span>
             )}
           </div>
         )}
@@ -163,13 +182,13 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
             type="number"
             min={1}
             value={relValue}
-            onChange={e => setRelValue(Number(e.target.value))}
+            onChange={e => { const v = Number(e.target.value); setRelValue(v); persistTimeRange({ relValue: v }); }}
             className="glass-input"
             style={{ width: '90px', flexShrink: 0 }}
           />
           <select
             value={relUnit}
-            onChange={e => setRelUnit(e.target.value as Unit)}
+            onChange={e => { const v = e.target.value as Unit; setRelUnit(v); persistTimeRange({ relUnit: v }); }}
             className="glass-input"
             style={{ flex: 1 }}
           >
@@ -196,14 +215,40 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
               <span className="section-label" style={{ marginBottom: 0 }}><Calendar size={12} /> Date Range</span>
               <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>From</label>
-                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={startTime} onChange={e => setStartTime(e.target.value)} />
+                <input
+                  type="datetime-local"
+                  max="9999-12-31T23:59"
+                  className="glass-input"
+                  style={{ width: '100%' }}
+                  value={startTime}
+                  onChange={handleStartTimeChange}
+                  onBlur={e => {
+                    const v = clampYear(e.target.value);
+                    if (v !== e.target.value) { e.target.value = v; }
+                    setStartTime(v);
+                    persistTimeRange({ startTime: v });
+                  }}
+                />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>To</label>
-                <input type="datetime-local" className="glass-input" style={{ width: '100%' }} value={endTime} onChange={e => setEndTime(e.target.value)} />
+                <input
+                  type="datetime-local"
+                  max="9999-12-31T23:59"
+                  className="glass-input"
+                  style={{ width: '100%' }}
+                  value={endTime}
+                  onChange={handleEndTimeChange}
+                  onBlur={e => {
+                    const v = clampYear(e.target.value);
+                    if (v !== e.target.value) { e.target.value = v; }
+                    setEndTime(v);
+                    persistTimeRange({ endTime: v });
+                  }}
+                />
               </div>
             </div>
             <button
@@ -244,10 +289,10 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, l
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 1000; animation: fade-in 0.15s ease-out; }
         .modal-content { width: 480px; max-height: 90vh; overflow-y: auto; padding: 2rem; border-radius: 14px; animation: scale-in 0.2s cubic-bezier(0.16,1,0.3,1); }
         .section-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.65rem; }
-        .quick-load-btn { display: flex; align-items: center; justify-content: center; padding: 0.65rem 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 0.8125rem; cursor: pointer; transition: all 0.2s; }
+        .quick-load-btn { display: flex; align-items: center; justify-content: center; padding: 0.65rem 0.5rem; background: var(--bg-subtle); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 0.8125rem; cursor: pointer; transition: all 0.2s; }
         .quick-load-btn:hover:not(:disabled) { background: rgba(99,102,241,0.1); border-color: var(--accent-primary); color: var(--accent-primary); }
         .quick-load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .glass-input { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem 0.75rem; color: var(--text-main); font-family: inherit; font-size: 0.8125rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
+        .glass-input { background: var(--bg-tag); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem 0.75rem; color: var(--text-main); font-family: inherit; font-size: 0.8125rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
         .glass-input:focus { border-color: var(--accent-primary); }
         .glass-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
         .search-submit-btn { display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 0.8rem; background: rgba(99,102,241,0.12); border: 1px solid var(--accent-primary); border-radius: 8px; color: var(--accent-primary); font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.2s; }
