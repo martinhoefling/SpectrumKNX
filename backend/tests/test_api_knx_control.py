@@ -26,6 +26,28 @@ def test_send_rejected_when_not_connected():
     assert response.status_code == 409
 
 
+def test_send_allowed_in_postgres_readonly_when_connected():
+    """Bus writes must not be blocked by the telegram store's read-only-ness.
+
+    postgres-readonly keeps a live daemon connection for writes even though
+    READ_ONLY (store) is True in that mode.
+    """
+    import api
+
+    with (
+        patch.object(api, "READ_ONLY", True),
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(knx_daemon, "send_group_value", new=AsyncMock()) as send,
+    ):
+        response = client.post(
+            "/api/knx/send",
+            json={"address": "1/2/3", "payload": 50, "dpt": "5.001", "response": False},
+        )
+    assert response.status_code == 200
+    send.assert_awaited_once_with("1/2/3", 50, "5.001", False)
+
+
 def test_send_writes_to_bus():
     with (
         patch.object(knx_daemon, "ALLOW_WRITE", True),

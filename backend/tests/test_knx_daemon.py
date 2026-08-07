@@ -321,20 +321,19 @@ def test_encode_payload_unknown_dpt_raises():
 
 
 @pytest.mark.parametrize(
-    ("allow_write", "read_only", "connected", "expected"),
+    ("allow_write", "connected", "expected"),
     [
-        (True, False, True, True),
-        (False, False, True, False),
-        (True, True, True, False),
-        (True, False, False, False),
+        (True, True, True),
+        (False, True, False),
+        (True, False, False),
     ],
 )
-def test_write_enabled(allow_write, read_only, connected, expected):
+def test_write_enabled(allow_write, connected, expected):
+    """Independent of the telegram store's read-only-ness (postgres-readonly can write)."""
     import knx_daemon
 
     with (
         patch.object(knx_daemon, "ALLOW_WRITE", allow_write),
-        patch.object(knx_daemon, "READ_ONLY", read_only),
         patch.object(knx_daemon, "is_connected", return_value=connected),
     ):
         assert knx_daemon.write_enabled() is expected
@@ -388,22 +387,23 @@ async def test_send_group_value_without_connection_raises():
 def test_get_server_config_standalone_reports_mode():
     import knx_daemon
 
-    with patch.object(knx_daemon, "READ_ONLY", False):
+    with patch.object(knx_daemon, "STORE_MODE", "standalone"):
         config = knx_daemon.get_server_config()
 
     assert config["mode"] == "standalone"
     assert "gateway_ip" in config["connection"]
     assert "knxkeys_found" in config["files"]
+    assert "telegram_store" not in config["status"]
 
 
 @pytest.mark.parametrize("feed_connected", [True, False])
 def test_get_server_config_companion_reports_live_feed(feed_connected):
-    """Companion mode must not report the daemon's bus connection (#184)."""
+    """Sqlite companion mode must not report the daemon's bus connection (#184)."""
     import ha_live_bridge
     import knx_daemon
 
     with (
-        patch.object(knx_daemon, "READ_ONLY", True),
+        patch.object(knx_daemon, "STORE_MODE", "external-readonly"),
         patch.object(ha_live_bridge, "_active_source", "ha_websocket"),
         patch.object(ha_live_bridge, "_connected", feed_connected),
     ):
@@ -416,3 +416,28 @@ def test_get_server_config_companion_reports_live_feed(feed_connected):
     # No gateway/security noise that doesn't apply in companion mode
     assert config["security"] == {}
     assert "knxkeys_found" not in config["files"]
+
+
+@pytest.mark.parametrize("feed_connected", [True, False])
+def test_get_server_config_postgres_readonly_reports_bus_and_store(feed_connected):
+    """postgres-readonly reports a real bus connection (own daemon) alongside the shared store."""
+    import knx_daemon
+    import pg_listen_bridge
+
+    with (
+        patch.object(knx_daemon, "STORE_MODE", "postgres-readonly"),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(knx_daemon, "write_enabled", return_value=True),
+        patch.object(pg_listen_bridge, "_connected", feed_connected),
+    ):
+        config = knx_daemon.get_server_config()
+
+    assert config["mode"] == "postgres-companion"
+    # Same connection/security shape as standalone — it is our own bus connection.
+    assert "gateway_ip" in config["connection"]
+    assert "knxkeys_found" in config["files"]
+    assert config["status"]["connected"] is True
+    assert config["status"]["write_enabled"] is True
+    assert config["status"]["telegram_store"] == "shared-postgres-readonly"
+    assert config["status"]["live_source"] == "postgres-listen-notify"
+    assert config["status"]["live_connected"] is feed_connected

@@ -20,7 +20,7 @@ import knx_daemon  # import global config
 import telegram_export
 import telegram_import
 import update_check
-from database import READ_ONLY, engine, store
+from database import READ_ONLY, STORE_MODE, engine, store
 from parsers import (
     format_dpt_name,
     format_value_nicely,
@@ -379,8 +379,13 @@ class KnxReadRequest(BaseModel):
 
 
 def _require_bus_write() -> None:
-    """Guard for the send/read endpoints: standalone mode, connected, and allowed."""
-    if READ_ONLY or not knx_daemon.ALLOW_WRITE:
+    """Guard for the send/read endpoints: a live bus connection and writing not forbidden.
+
+    external-readonly never starts a daemon, so is_connected() is always
+    False there without needing a separate check; postgres-readonly's daemon
+    can be connected and write, even though its telegram store is read-only.
+    """
+    if not knx_daemon.ALLOW_WRITE:
         raise HTTPException(status_code=403, detail="Sending to the KNX bus is disabled")
     if not knx_daemon.is_connected():
         raise HTTPException(status_code=409, detail="Not connected to the KNX bus")
@@ -913,8 +918,10 @@ async def export_telegrams(
 @router.websocket("/ws/telegrams")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
-    if not READ_ONLY:
-        # Initial state so (re)connecting clients don't have to wait for a change
+    if STORE_MODE != "external-readonly":
+        # A daemon (and thus a bus connection state) exists in both standalone
+        # and postgres-readonly mode. Initial state so (re)connecting clients
+        # don't have to wait for a change.
         connected = knx_daemon.is_connected()
         await websocket.send_json(
             {

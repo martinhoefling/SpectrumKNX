@@ -5,6 +5,7 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
+from knx_telegram_store import StoredTelegram
 from xknx import XKNX
 from xknx.core import XknxConnectionState
 from xknx.dpt import DPTArray, DPTBase, DPTBinary
@@ -14,8 +15,7 @@ from xknx.telegram import TelegramDirection
 from xknx.telegram.address import GroupAddress, IndividualAddress
 from xknx.telegram.apci import GroupValueRead, GroupValueResponse, GroupValueWrite
 
-from database import READ_ONLY, store
-from knx_telegram_store import StoredTelegram
+from database import STORE_MODE, store
 from parsers import format_dpt_name, get_simplified_type, parse_telegram_payload
 from ws_manager import manager
 
@@ -225,6 +225,13 @@ async def _watch_files():
 
 
 async def process_telegram_async(telegram: XknxTelegram):
+    if STORE_MODE == "postgres-readonly":
+        # The daemon is connected only to enable outbound bus writes here; the
+        # telegram store is a shared, read-only view of what the writer (e.g.
+        # Home Assistant) already persists. Recording it again would duplicate
+        # rows in a store we must not write to, and the live feed is driven by
+        # pg_listen_bridge (LISTEN/NOTIFY on the writer's inserts) instead.
+        return
     try:
         ts = datetime.now(UTC)
 
@@ -413,10 +420,12 @@ def is_connected() -> bool:
 def write_enabled() -> bool:
     """Whether outbound telegrams (send/read) can be sent to the bus right now.
 
-    Requires standalone mode (our own live connection), an active connection,
-    and that writing has not been forbidden via KNX_ALLOW_WRITE=false.
+    Requires a live daemon connection (standalone or postgres-readonly mode;
+    external-readonly never starts a daemon) and that writing has not been
+    forbidden via KNX_ALLOW_WRITE=false. Independent of whether the telegram
+    store itself is read-only — see database.STORE_MODE.
     """
-    return ALLOW_WRITE and not READ_ONLY and is_connected()
+    return ALLOW_WRITE and is_connected()
 
 
 def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
@@ -519,11 +528,12 @@ def get_server_config() -> dict:
         if os.path.exists(default_file):
             ets_project_file = default_file
 
-    if READ_ONLY:
-        # Companion mode: Home Assistant owns the bus connection and the
-        # telegram store — reporting the daemon's (nonexistent) bus connection
-        # as "Disconnected" here was misleading (#184). Report the live-feed
-        # state instead and drop the gateway/security settings that don't apply.
+    if STORE_MODE == "external-readonly":
+        # Sqlite companion mode: Home Assistant owns the bus connection and
+        # the telegram store — reporting the daemon's (nonexistent) bus
+        # connection as "Disconnected" here was misleading (#184). Report the
+        # live-feed state instead and drop the gateway/security settings that
+        # don't apply.
         import ha_live_bridge
 
         feed = ha_live_bridge.live_feed_status()
@@ -544,8 +554,8 @@ def get_server_config() -> dict:
             },
         }
 
-    return {
-        "mode": "standalone",
+    config = {
+        "mode": "postgres-companion" if STORE_MODE == "postgres-readonly" else "standalone",
         "connection": {
             "type": os.getenv("KNX_CONNECTION_TYPE", "AUTOMATIC"),
             "gateway_ip": os.getenv("KNX_GATEWAY_IP", "AUTO"),
@@ -576,6 +586,16 @@ def get_server_config() -> dict:
             "write_enabled": write_enabled(),
         },
     }
+    if STORE_MODE == "postgres-readonly":
+        # The bus connection above is ours (for writes); the telegram store
+        # itself is a shared, read-only database another process owns and
+        # writes to, fed to the live view via LISTEN/NOTIFY.
+        import pg_listen_bridge
+
+        config["status"]["telegram_store"] = "shared-postgres-readonly"
+        config["status"]["live_source"] = "postgres-listen-notify"
+        config["status"]["live_connected"] = pg_listen_bridge.live_feed_status()["connected"]
+    return config
 
 
 async def knx_startup():
@@ -594,7 +614,17 @@ async def knx_startup():
 
     # Initialize the Telegram Store (including schema creation/renames)
     await store.initialize()
-    store.start()
+    if STORE_MODE == "postgres-readonly":
+        # A plain (unbuffered) read-only PostgresStore has no write-flush loop
+        # to start — the writer (e.g. Home Assistant) owns the schema and all
+        # writes.
+        if await store.needs_migration():
+            logger.warning(
+                "The telegram store schema needs a migration that only its "
+                "owner may run — queries may fail or miss data until then."
+            )
+    else:
+        store.start()
 
     await _load_project_data()
 
@@ -616,4 +646,7 @@ async def knx_shutdown():
     if xknx_instance:
         logger.info("Stopping KNX Daemon...")
         await xknx_instance.stop()
-    await store.stop()
+    if STORE_MODE == "postgres-readonly":
+        await store.close()
+    else:
+        await store.stop()

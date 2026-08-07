@@ -46,9 +46,11 @@ Key variables:
 - `APP_IMAGE`: Docker image to use for production stacks.
 - `VITE_BACKEND_URL`: (Frontend only) The URL of the backend API (default: `http://localhost:8765`).
 
-Companion mode (read an external telegram store instead of running the KNX daemon):
-- `STORE_MODE`: `standalone` (default) or `external-readonly` — read a sqlite store owned and written by another process (e.g. Home Assistant's KNX integration). Requires a `sqlite+aiosqlite://` `DATABASE_URL`; the KNX daemon is not started, and purge/optimize are disabled.
-- `LIVE_SOURCE`: Live-feed source in companion mode: `ha_websocket` (default — subscribe to HA's `knx/subscribe_telegrams`), `poll` (interval-poll the store; no HA required) or `none`.
+Companion modes (read an external telegram store instead of writing our own):
+- `STORE_MODE`: `standalone` (default), `external-readonly`, or `postgres-readonly`.
+  - `external-readonly` reads a sqlite store owned and written by another process (e.g. Home Assistant's KNX integration). Requires a `sqlite+aiosqlite://` `DATABASE_URL`; the KNX daemon is not started, and purge/optimize are disabled.
+  - `postgres-readonly` reads a shared PostgreSQL database owned and written by another process. Requires a `postgresql+asyncpg://` `DATABASE_URL` pointing at that database. Unlike `external-readonly`, our own KNX daemon still starts and connects to the bus (for outbound writes via the API/MCP tools) — it just never writes telegrams itself, since the writer already does. Live updates come from PostgreSQL `LISTEN`/`NOTIFY` (requires `knx-telegram-store>=0.12`), not `LIVE_SOURCE`/polling.
+- `LIVE_SOURCE`: Live-feed source in `external-readonly` mode: `ha_websocket` (default — subscribe to HA's `knx/subscribe_telegrams`), `poll` (interval-poll the store; no HA required) or `none`. Not used by `postgres-readonly`, which always uses `LISTEN`/`NOTIFY`.
 - `HA_WS_URL`: Home Assistant websocket URL (default `ws://supervisor/core/websocket`; for local dev e.g. `ws://localhost:8123/api/websocket`).
 - `HA_TOKEN` / `SUPERVISOR_TOKEN`: Access token for the HA websocket (a long-lived token in dev; the Supervisor injects `SUPERVISOR_TOKEN` in the add-on). Without a token, `ha_websocket` falls back to polling.
 - `LIVE_POLL_INTERVAL`: Poll interval in seconds for `LIVE_SOURCE=poll` (default `1.0`).
@@ -66,11 +68,17 @@ docker-compose up -d db
 export DATABASE_URL="sqlite+aiosqlite:///spectrum_knx.db"
 ```
 
-**External read-only (companion mode):** Point at a sqlite store written by another process — no database of our own, no KNX daemon. Useful for developing against a copy of Home Assistant's `.storage/knx/telegrams.db`:
+**External read-only (sqlite companion mode):** Point at a sqlite store written by another process — no database of our own, no KNX daemon. Useful for developing against a copy of Home Assistant's `.storage/knx/telegrams.db`:
 ```bash
 export STORE_MODE="external-readonly"
 export DATABASE_URL="sqlite+aiosqlite:////path/to/telegrams.db"
 export LIVE_SOURCE="poll"   # or ha_websocket + HA_WS_URL + HA_TOKEN
+```
+
+**Shared PostgreSQL (postgres-readonly companion mode):** Point at a PostgreSQL database written by another process (e.g. Home Assistant with `telegram_db_backend: postgres`). Our own KNX daemon still connects to the bus for outbound writes; live updates come from `LISTEN`/`NOTIFY`, no polling:
+```bash
+export STORE_MODE="postgres-readonly"
+export DATABASE_URL="postgresql+asyncpg://user:pass@host/db"
 ```
 
 ### 4. Running the Backend

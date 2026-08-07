@@ -15,7 +15,7 @@ dependencies = [
     "asyncpg",
     "fastapi",
     "httpx",
-    "knx-telegram-store>=0.11.2",
+    "knx-telegram-store>=0.12.0",
     "mcp",
     "pydantic",
     "python-dotenv",

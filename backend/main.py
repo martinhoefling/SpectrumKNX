@@ -14,9 +14,10 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 import cyclic_send  # noqa: E402
 import mcp_server  # noqa: E402
+import pg_listen_bridge  # noqa: E402
 from api import get_backend_version  # noqa: E402
 from api import router as api_router  # noqa: E402
-from database import READ_ONLY, engine  # noqa: E402
+from database import STORE_MODE, engine  # noqa: E402
 from ha_live_bridge import companion_shutdown, companion_startup  # noqa: E402
 from knx_daemon import knx_shutdown, knx_startup  # noqa: E402
 from security import is_safe_path  # noqa: E402
@@ -29,10 +30,16 @@ async def lifespan(app: FastAPI):
     # Startup
     version = get_backend_version()
     logger.info(f"Starting Spectrum KNX Backend (Version: {version})")
-    if READ_ONLY:
-        # Companion mode: no KNX daemon — another process (Home Assistant)
-        # owns the bus connection and writes the store we read.
+    if STORE_MODE == "external-readonly":
+        # Sqlite companion mode: no KNX daemon — another process (Home
+        # Assistant) owns the bus connection and writes the store we read.
         await companion_startup()
+    elif STORE_MODE == "postgres-readonly":
+        # Shared-Postgres companion mode: our own daemon still connects to
+        # the bus (for writes), but never touches the store — the writer
+        # already does. Live updates come from LISTEN/NOTIFY instead.
+        await knx_startup()
+        await pg_listen_bridge.postgres_listen_startup()
     else:
         await knx_startup()
 
@@ -43,8 +50,12 @@ async def lifespan(app: FastAPI):
         yield
 
     # Shutdown
-    if READ_ONLY:
+    if STORE_MODE == "external-readonly":
         await companion_shutdown()
+    elif STORE_MODE == "postgres-readonly":
+        await pg_listen_bridge.postgres_listen_shutdown()
+        await cyclic_send.shutdown()
+        await knx_shutdown()
     else:
         await cyclic_send.shutdown()
         await knx_shutdown()
