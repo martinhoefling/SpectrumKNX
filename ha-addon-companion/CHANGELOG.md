@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0-beta.5
+
+### Added
+
+- **Shared PostgreSQL companion mode**: New `STORE_MODE=postgres-readonly` reads a PostgreSQL database owned and written by another process (e.g. Home Assistant's KNX integration), with live updates via PostgreSQL `LISTEN`/`NOTIFY` instead of polling. Unlike the existing sqlite companion mode, the KNX daemon still connects to the bus for outbound writes; it never writes telegrams itself in this mode.
+
+### Changed
+
+- **Performance**: Offloaded blocking file I/O (project/knxkeys uploads) to a thread pool so it no longer stalls the async event loop.
+- **Performance**: `get_statistics` reuses precomputed project name maps instead of rebuilding them on every request.
+
+### Fixed
+
+- **Security**: Restricted CORS to specific configured origins instead of allowing `*` together with credentials.
+
 ## 2.0.0-beta.4
 
 ### Changed
