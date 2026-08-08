@@ -1,6 +1,7 @@
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import { GaValuesTable, type GaTableEntry } from './GaValuesTable';
+import { GaNameWidthContext } from '../utils/gaNameWidth';
 import type { Telegram } from '../hooks/useWebSocket';
 
 const ENTRIES: GaTableEntry[] = [
@@ -31,7 +32,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('fetches last values for its addresses and marks never-seen GAs', async () => {
+test('fetches last values for its addresses and leaves never-seen GAs blank', async () => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     expect(url).toContain('/api/telegrams/last');
@@ -42,7 +43,11 @@ test('fetches last values for its addresses and marks never-seen GAs', async () 
   render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />);
 
   await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
-  expect(screen.getByText('never seen')).toBeInTheDocument();
+  const neverSeenRow = screen.getByText('Kitchen Status').closest('tr')!;
+  const cells = within(neverSeenRow).getAllByRole('cell');
+  expect(cells[3]).toHaveTextContent(''); // TIME
+  expect(cells[3]).toHaveAttribute('title', 'Never updated');
+  expect(cells[4]).toHaveTextContent(''); // VALUE
 });
 
 test('updates a value live from the websocket feed and ignores unrelated GAs', async () => {
@@ -54,13 +59,12 @@ test('updates a value live from the websocket feed and ignores unrelated GAs', a
     <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />
   );
   await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
-  expect(screen.getByText('never seen')).toBeInTheDocument();
+  expect(within(screen.getByText('Kitchen Status').closest('tr')!).getAllByRole('cell')[4]).toHaveTextContent('');
 
   rerender(
     <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={telegram('1/2/10', 'Off')} onFilterGAs={() => {}} onLastSeen={() => {}} />
   );
   await waitFor(() => expect(screen.getByText('Off')).toBeInTheDocument());
-  expect(screen.queryByText('never seen')).not.toBeInTheDocument();
 
   rerender(
     <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={telegram('9/9/9', 'Ignored')} onFilterGAs={() => {}} onLastSeen={() => {}} />
@@ -101,4 +105,37 @@ test('highlights the sending group address', async () => {
   expect(screen.getByLabelText('sending')).toBeInTheDocument();
   const sendingRow = screen.getByTitle('Sending group address');
   expect(within(sendingRow).getByText('1/2/3')).toBeInTheDocument();
+});
+
+test('highlights the hovered row and restores the sending tint on leave', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
+
+  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />);
+  await waitFor(() => expect(screen.getByText('1/2/3')).toBeInTheDocument());
+
+  const sendingRow = screen.getByTitle('Sending group address');
+  fireEvent.mouseEnter(sendingRow);
+  expect(sendingRow.style.background).toBe('var(--bg-hover)');
+  fireEvent.mouseLeave(sendingRow);
+  expect(sendingRow.style.background).toBe('rgba(99, 102, 241, 0.08)');
+
+  const otherRow = screen.getByText('Kitchen Status').closest('tr')!;
+  fireEvent.mouseEnter(otherRow);
+  expect(otherRow.style.background).toBe('var(--bg-hover)');
+  fireEvent.mouseLeave(otherRow);
+  expect(otherRow.style.background).toBe('transparent');
+});
+
+test('sizes the NAME column from GaNameWidthContext when provided', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
+
+  render(
+    <GaNameWidthContext.Provider value={24}>
+      <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />
+    </GaNameWidthContext.Provider>
+  );
+  await waitFor(() => expect(screen.getByText('Kitchen Light')).toBeInTheDocument());
+
+  const nameCell = screen.getByText('Kitchen Light').closest('td')!;
+  expect(nameCell.style.width).toBe('24ch');
 });

@@ -4,9 +4,16 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import { useExpanded } from '../utils/buildingExpansion';
+import { GaNameWidthContext } from '../utils/gaNameWidth';
 import { SendToGaPopover } from './SendToGaPopover';
 import { GaValuesTable } from './GaValuesTable';
 import type { Telegram } from '../hooks/useWebSocket';
+
+// GA name column width is clamped to keep a single very long name from blowing
+// up the shared table layout, while still giving short project names their
+// natural width (#306).
+const MIN_GA_NAME_WIDTH_CH = 8;
+const MAX_GA_NAME_WIDTH_CH = 60;
 
 // ── Types (mirror /api/building response) ──────────────────────────────────────
 
@@ -134,6 +141,30 @@ const functionMatches = (func: FunctionNode, q: string): boolean =>
   func.group_addresses.some(g =>
     g.address.toLowerCase().includes(q) || (g.name ?? '').toLowerCase().includes(q)
   );
+
+// Widest GA name across the whole project, so every GaValuesTable instance in
+// the tree (comm objects and functions alike) aligns its DPT/TIME/VALUE
+// columns at the same x position (#306).
+const collectMaxGaNameLength = (data: BuildingData): number => {
+  let maxLen = 0;
+  const consider = (name: string | null | undefined) => {
+    if (name && name.length > maxLen) maxLen = name.length;
+  };
+  const walkKo = (ko: Ko) => ko.group_addresses.forEach(g => consider(g.name));
+  const walkDevice = (d: DeviceNode) => {
+    d.channels.forEach(c => c.kos.forEach(walkKo));
+    d.kos.forEach(walkKo);
+  };
+  const walkFunc = (f: FunctionNode) => f.group_addresses.forEach(g => consider(g.name));
+  const walkSpace = (s: SpaceNode) => {
+    s.spaces.forEach(walkSpace);
+    s.devices.forEach(walkDevice);
+    (s.functions ?? []).forEach(walkFunc);
+  };
+  data.tree.forEach(walkSpace);
+  data.unassigned_devices.forEach(walkDevice);
+  return maxLen;
+};
 
 const spaceMatches = (s: SpaceNode, q: string): boolean =>
   s.name.toLowerCase().includes(q) ||
@@ -664,6 +695,13 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
 
   const isEmpty = data && data.tree.length === 0 && data.unassigned_devices.length === 0;
 
+  const gaNameWidthCh = useMemo(() => {
+    if (!data) return null;
+    const maxLen = collectMaxGaNameLength(data);
+    if (maxLen === 0) return null;
+    return Math.min(Math.max(maxLen, MIN_GA_NAME_WIDTH_CH), MAX_GA_NAME_WIDTH_CH) + 1;
+  }, [data]);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
@@ -706,6 +744,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
+          <GaNameWidthContext.Provider value={gaNameWidthCh}>
           {sortSpaces(data.tree).map((space, i) => (
             <SpaceRow
               key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
@@ -728,6 +767,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
               ))}
             </div>
           )}
+          </GaNameWidthContext.Provider>
         </div>
       )}
 
