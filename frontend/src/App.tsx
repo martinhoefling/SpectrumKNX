@@ -561,6 +561,14 @@ function App() {
     setIsDatabaseOpen(false);
   };
 
+  // Add a function's/device's/comm-object's group addresses to the visualization
+  // selection (union, like handleFilterGAs) and open the visualizer (#307).
+  const handleVisualizeGAs = useCallback((addresses: string[]) => {
+    setSelectedVisualizationTargets(prev => [...new Set([...prev, ...addresses])]);
+    setActivePanel('visualizer');
+    setIsDatabaseOpen(false);
+  }, []);
+
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
     setLastSeenMode(mode);
@@ -1148,6 +1156,7 @@ function App() {
                     onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
                     onFilterGAs={handleFilterGAs}
                     onLastSeen={handleQuickLastSeen}
+                    onVisualizeGAs={handleVisualizeGAs}
                     onDeviceStatus={setStatusDevice}
                     writeEnabled={serverConfig?.status?.write_enabled}
                     latestTelegram={latestTelegram}

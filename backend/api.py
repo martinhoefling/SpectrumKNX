@@ -521,9 +521,27 @@ async def get_project():
 
 def _build_ko(co: dict, gas: dict) -> dict:
     """Serialize a communication object (KO) with its connected group addresses."""
-    group_addresses = [
-        {"address": ga, "name": gas.get(ga, {}).get("name", "")} for ga in co.get("group_address_links") or []
-    ]
+    group_addresses = []
+    for ga_addr in co.get("group_address_links") or []:
+        ga_master = gas.get(ga_addr) or {}
+        # Each GA's own DPT, resolved from the project — may differ from the KO's
+        # own DPT declaration even within the same main category (#307).
+        ga_dpt = ga_master.get("dpt")
+        group_addresses.append(
+            {
+                "address": ga_addr,
+                "name": ga_master.get("name", ""),
+                "dpt": (
+                    {
+                        "main": ga_dpt.get("main"),
+                        "sub": ga_dpt.get("sub"),
+                        "name": format_dpt_name(ga_dpt.get("main"), ga_dpt.get("sub"))[0],
+                    }
+                    if ga_dpt
+                    else None
+                ),
+            }
+        )
     # Resolve each DPT's descriptive name (e.g. "5.001 - Percent") so the building
     # view can show it like the group monitor does, not just the raw numbers.
     dpts = [
@@ -630,6 +648,9 @@ def _build_space(space: dict, devices: dict, cos: dict, gas: dict, functions_dic
                     "id": func_id,
                     "name": func.get("name", ""),
                     "type": func.get("function_type", ""),
+                    # ETS function-type name (e.g. FT-1 -> "Licht schalten"), resolved by
+                    # xknxproject from ETS master data (#307).
+                    "type_name": func.get("usage_text", ""),
                     "group_addresses": group_addresses,
                 }
             )

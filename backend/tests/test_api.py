@@ -107,6 +107,7 @@ def test_get_building_with_project():
             "Func-1": {
                 "name": "Dimming Light",
                 "function_type": "Dimming",
+                "usage_text": "Licht dimmen",
                 "group_addresses": {
                     # As in real projects: the function ref carries no name and an
                     # opaque UUID role — the real name/DPT come from the project (#295).
@@ -167,6 +168,7 @@ def test_get_building_with_project():
     assert func["id"] == "Func-1"
     assert func["name"] == "Dimming Light"
     assert func["type"] == "Dimming"
+    assert func["type_name"] == "Licht dimmen"  # resolved by xknxproject from ETS master data (#307)
     ga = func["group_addresses"][0]
     assert ga["address"] == "1/2/3"
     assert ga["name"] == "Light On/Off"  # resolved from the project, not the empty ref (#295)
@@ -182,7 +184,13 @@ def test_get_building_with_project():
     assert len(device["channels"]) == 1
     assert device["channels"][0]["name"] == "Channel A"
     assert device["channels"][0]["kos"][0]["number"] == 1
-    assert device["channels"][0]["kos"][0]["group_addresses"][0] == {"address": "1/2/3", "name": "Light On/Off"}
+    assert device["channels"][0]["kos"][0]["group_addresses"][0] == {
+        "address": "1/2/3",
+        "name": "Light On/Off",
+        # Each GA's own DPT, resolved from the project (#307) — may differ from
+        # the KO's own declared DPT even within the same main category.
+        "dpt": {"main": 1, "sub": 1, "name": "1.001 - Switch"},
+    }
     # DPTs carry a resolved descriptive name for the building view (#160).
     assert device["channels"][0]["kos"][0]["dpts"] == [{"main": 1, "sub": 1, "name": "1.001 - Switch"}]
     assert len(device["kos"]) == 1

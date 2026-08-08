@@ -40,7 +40,7 @@ test('fetches last values for its addresses and leaves never-seen GAs blank', as
     return { ok: true, json: async () => ({ telegrams: [telegram('1/2/3', 'On')] }) } as Response;
   }));
 
-  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />);
+  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />);
 
   await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
   const neverSeenRow = screen.getByText('Kitchen Status').closest('tr')!;
@@ -56,18 +56,18 @@ test('updates a value live from the websocket feed and ignores unrelated GAs', a
   )));
 
   const { rerender } = render(
-    <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />
+    <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />
   );
   await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
   expect(within(screen.getByText('Kitchen Status').closest('tr')!).getAllByRole('cell')[4]).toHaveTextContent('');
 
   rerender(
-    <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={telegram('1/2/10', 'Off')} onFilterGAs={() => {}} onLastSeen={() => {}} />
+    <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={telegram('1/2/10', 'Off')} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />
   );
   await waitFor(() => expect(screen.getByText('Off')).toBeInTheDocument());
 
   rerender(
-    <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={telegram('9/9/9', 'Ignored')} onFilterGAs={() => {}} onLastSeen={() => {}} />
+    <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={telegram('9/9/9', 'Ignored')} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />
   );
   expect(screen.queryByText('Ignored')).not.toBeInTheDocument();
 });
@@ -75,7 +75,7 @@ test('updates a value live from the websocket feed and ignores unrelated GAs', a
 test('sorts by group address ascending, descending, then back to ETS order', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
 
-  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />);
+  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />);
   await waitFor(() => expect(screen.getByText('1/2/3')).toBeInTheDocument());
 
   const gaCell = (row: HTMLElement) => within(row).getAllByRole('cell')[0].textContent;
@@ -99,7 +99,7 @@ test('sorts by group address ascending, descending, then back to ETS order', asy
 test('highlights the sending group address', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
 
-  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />);
+  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />);
   await waitFor(() => expect(screen.getByText('1/2/3')).toBeInTheDocument());
 
   expect(screen.getByLabelText('sending')).toBeInTheDocument();
@@ -110,7 +110,7 @@ test('highlights the sending group address', async () => {
 test('highlights the hovered row and restores the sending tint on leave', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
 
-  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />);
+  render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />);
   await waitFor(() => expect(screen.getByText('1/2/3')).toBeInTheDocument());
 
   const sendingRow = screen.getByTitle('Sending group address');
@@ -126,12 +126,29 @@ test('highlights the hovered row and restores the sending tint on leave', async 
   expect(otherRow.style.background).toBe('transparent');
 });
 
+test('visualizes a single GA row (#307)', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
+  const onVisualizeGAs = vi.fn();
+
+  render(
+    <GaValuesTable
+      entries={ENTRIES} depth={0} latestTelegram={null}
+      onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={onVisualizeGAs}
+    />
+  );
+  await waitFor(() => expect(screen.getByText('1/2/3')).toBeInTheDocument());
+
+  const row = screen.getByText('Kitchen Status').closest('tr')!;
+  fireEvent.click(within(row).getByTitle('Visualize this group address'));
+  expect(onVisualizeGAs).toHaveBeenCalledWith(['1/2/10']);
+});
+
 test('sizes the NAME column from GaNameWidthContext when provided', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ telegrams: [] }) } as Response)));
 
   render(
     <GaNameWidthContext.Provider value={24}>
-      <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} />
+      <GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />
     </GaNameWidthContext.Provider>
   );
   await waitFor(() => expect(screen.getByText('Kitchen Light')).toBeInTheDocument());
