@@ -164,7 +164,7 @@ test('the TIME row restricts to a from/to range', () => {
   expect(rowCount(container)).toBe(1);
 });
 
-test('the DELTA TIME toggle disables/enables the context window without losing the entered values (#318)', () => {
+test('ctrl/cmd-click on the DELTA TIME toggle disables/enables the window without losing the entered values (#318)', () => {
   const onDeltaContextChange = vi.fn();
   const onDeltaContextEnabledChange = vi.fn();
   render(
@@ -186,10 +186,50 @@ test('the DELTA TIME toggle disables/enables the context window without losing t
   expect(screen.getByLabelText('Time-Delta-Context before (ms)')).toHaveValue(500);
   expect(screen.getByLabelText('Time-Delta-Context after (ms)')).toHaveValue(250);
 
-  fireEvent.click(screen.getByTitle('Disable Time-Delta-Context (keeps the entered before/after values)'));
+  const toggleBtn = screen.getByTitle(/Time-Delta-Context:/);
+  fireEvent.click(toggleBtn, { ctrlKey: true });
   expect(onDeltaContextEnabledChange).toHaveBeenCalledWith(false);
 
   // Editing a value while enabled still goes through onDeltaContextChange, preserving the other field.
   fireEvent.change(screen.getByLabelText('Time-Delta-Context before (ms)'), { target: { value: '750' } });
   expect(onDeltaContextChange).toHaveBeenCalledWith(750, 250);
+});
+
+test('plain click on the DELTA TIME toggle cycles the per-message flag tristate (#319)', () => {
+  renderTable();
+  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+
+  // none -> all: flags every currently visible row.
+  fireEvent.click(screen.getByTitle(/none messages flagged/));
+  expect(screen.getByTitle(/all messages flagged/)).toBeInTheDocument();
+
+  // all -> none: clears every flag.
+  fireEvent.click(screen.getByTitle(/all messages flagged/));
+  expect(screen.getByTitle(/none messages flagged/)).toBeInTheDocument();
+});
+
+test('flagging a single row reports the tristate as "some" (#319)', () => {
+  const { container } = renderTable();
+  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+  expect(screen.getByTitle(/none messages flagged/)).toBeInTheDocument();
+
+  const row = [...container.querySelectorAll('.log-row')].find(r => r.textContent?.includes('Licht Flur'))!;
+  fireEvent.click(row.querySelector('button[title*="Always show context"]')!);
+
+  expect(screen.getByTitle(/some messages flagged/)).toBeInTheDocument();
+});
+
+test("ctrl/cmd-click on a row's flag applies its new state to every marked row (#319)", () => {
+  const { container } = renderTable();
+  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+  const rows = [...container.querySelectorAll('.log-row')];
+
+  // Mark two rows (row-marks, #310) then ctrl-click a third row's flag.
+  fireEvent.click(rows[0]);
+  fireEvent.click(rows[1], { ctrlKey: true });
+  const flagBtn = rows[2].querySelector('button[title*="Always show context"]')!;
+  fireEvent.click(flagBtn, { ctrlKey: true });
+
+  // All three (the two marked + the clicked one) are now flagged -> tristate is "all".
+  expect(screen.getByTitle(/all messages flagged/)).toBeInTheDocument();
 });

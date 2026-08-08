@@ -17,6 +17,8 @@ import {
 } from './utils/uiState';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
+import { expandWithDeltaContext } from './utils/deltaContextExpansion';
+import { anchorKey } from './utils/anchorKey';
 import { readSortConfigPref, writeSortConfigPref, toggleSortLevel, sortTelegrams } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock, List } from 'lucide-react';
 import { getPref, setPref } from './utils/prefs';
@@ -195,6 +197,9 @@ const PanelSwitch = ({ active, onChange }: { active: MainPanel; onChange: (p: Ma
     })}
   </div>
 );
+
+// Stable identity so passing "no flags" doesn't churn memo deps (#319).
+const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
 
 function App() {
   const [theme, setTheme] = useTheme();
@@ -532,6 +537,11 @@ function App() {
   const [markedTelegramKeys, setMarkedTelegramKeys] = useState<string[]>([]);
   const [lastMarkedTelegramKey, setLastMarkedTelegramKey] = useState<string | null>(null);
 
+  // ── Per-message Time-Delta-Context flags (#319) ─────────────────────────────
+  // Same lifting rationale as marks; each flagged telegram always anchors a
+  // context window around itself regardless of the active filters.
+  const [flaggedTelegramKeys, setFlaggedTelegramKeys] = useState<string[]>([]);
+
   // ── Sorting (#311: multi-level, ctrl/cmd-click adds a level) ─────────────────
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   const handleSort = (key: SortKey, opts?: { additive?: boolean }) => {
@@ -614,33 +624,17 @@ function App() {
       f.directions.length === 0 &&
       f.dpts.length === 0);
 
-    // Step 1: mark each row as matching / not-matching
     const matches = sortedLiveTelegrams.map(t =>
       noFilter ? true : matchesTelegram(t, f)
     );
 
     const { before: deltaBeforeMs, after: deltaAfterMs } = effectiveDeltaContext(f);
-    const hasDelta = deltaBeforeMs > 0 || deltaAfterMs > 0;
+    // The global toggle off (#318) suppresses per-message flags too, per its
+    // "preserving all per-message flags" — inert, not cleared, while off.
+    const flags = f.deltaContextEnabled ? new Set(flaggedTelegramKeys) : EMPTY_KEY_SET;
 
-    if (!hasDelta) {
-      return sortedLiveTelegrams.filter((_, idx) => matches[idx]);
-    }
-
-    // Step 2: asymmetric time-delta expansion
-    const matchingTimestamps = sortedLiveTelegrams
-      .filter((_, idx) => matches[idx])
-      .map(t => new Date(t.timestamp).getTime());
-
-    if (matchingTimestamps.length === 0) return [];
-
-    return sortedLiveTelegrams.filter((t, idx) => {
-      if (matches[idx]) return true;
-      const ts = new Date(t.timestamp).getTime();
-      return matchingTimestamps.some(mts =>
-        (ts >= mts - deltaBeforeMs) && (ts <= mts + deltaAfterMs)
-      );
-    });
-  }, [sortedLiveTelegrams, activeFilters, filtersEnabled]);
+    return expandWithDeltaContext(sortedLiveTelegrams, matches, anchorKey, flags, deltaBeforeMs, deltaAfterMs);
+  }, [sortedLiveTelegrams, activeFilters, filtersEnabled, flaggedTelegramKeys]);
 
   // ── Count bubbles (live only) ───────────────────────────────────────────────
   const filterCounts = useMemo((): FilterCounts => {
@@ -1227,6 +1221,8 @@ function App() {
                     onMarkedKeysChange={setMarkedTelegramKeys}
                     lastMarkedKey={lastMarkedTelegramKey}
                     onLastMarkedKeyChange={setLastMarkedTelegramKey}
+                    flaggedKeys={flaggedTelegramKeys}
+                    onFlaggedKeysChange={setFlaggedTelegramKeys}
                     infoBarOpen={infoBarOpen}
                     onInfoBarOpenChange={setInfoBarOpen}
                   />

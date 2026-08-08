@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
@@ -10,6 +10,7 @@ import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
 import { makeAddressPatternMatcher } from '../utils/addressPattern';
 import { makeValueMatcher } from '../utils/valuePattern';
+import { anchorKey } from '../utils/anchorKey';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -55,6 +56,11 @@ interface TelegramTableProps {
   // Lifted Quick Info Bar open state (#311, #341)
   infoBarOpen?: boolean;
   onInfoBarOpenChange?: (open: boolean) => void;
+
+  // Lifted per-message Time-Delta-Context flags (#319): keys of telegrams
+  // individually flagged to always anchor a context window around themselves.
+  flaggedKeys?: string[];
+  onFlaggedKeysChange?: (keys: string[]) => void;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -128,12 +134,6 @@ const formatDeltaMs = (diffMs: number): string => {
 const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
 const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
-
-// Identity of a telegram for anchor tracking across list updates (#202).
-// No index fallback here — the same telegram must map to the same key in
-// consecutive lists even when its position shifts.
-const anchorKey = (t: Telegram) =>
-  `${t.timestamp}-${t.source_address}-${t.target_address}-${t.raw_hex ?? ''}`;
 
 // ── Quick filter bar (#271, #309) ────────────────────────────────────────────
 // Two rows per applicable column: a top pattern row (address/DPT-key patterns
@@ -229,6 +229,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
   markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange,
   infoBarOpen, onInfoBarOpenChange,
+  flaggedKeys, onFlaggedKeysChange,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -359,6 +360,28 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     setLastMarked(null);
   }, [setMarkedKeysList, setLastMarked]);
 
+  // ── Per-message Time-Delta-Context flags (#319) ─────────────────────────
+  const [internalFlaggedKeys, setInternalFlaggedKeys] = useState<string[]>([]);
+  const flaggedKeysList = flaggedKeys ?? internalFlaggedKeys;
+  const setFlaggedKeysList = useCallback((val: string[]) => {
+    setInternalFlaggedKeys(val);
+    onFlaggedKeysChange?.(val);
+  }, [onFlaggedKeysChange]);
+  const flaggedSet = useMemo(() => new Set(flaggedKeysList), [flaggedKeysList]);
+
+  // Toggles one row's flag; ctrl/cmd-click applies the new state to every
+  // currently marked row too (#310's marks, reused as a multi-select basis).
+  const handleFlagClick = useCallback((e: React.MouseEvent, key: string) => {
+    e.stopPropagation();
+    const nextOn = !flaggedSet.has(key);
+    const targets = (e.ctrlKey || e.metaKey) ? new Set([...markedKeysList, key]) : new Set([key]);
+    setFlaggedKeysList(
+      nextOn
+        ? [...new Set([...flaggedKeysList, ...targets])]
+        : flaggedKeysList.filter(k => !targets.has(k))
+    );
+  }, [flaggedSet, flaggedKeysList, markedKeysList, setFlaggedKeysList]);
+
   const quickFiltered = useMemo(() => {
     if (!quickOpen || !quickEnabled) return telegrams;
     const matches = compileQuickFilters(currentPatterns);
@@ -434,6 +457,26 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   }, [exitDeltaSort, onSort]);
 
   const telegramRows = deltaSortActive && deltaFrozenRows ? deltaFrozenRows : naturalTelegramRows;
+
+  // ── Global Time-Delta-Context tristate (#318, #319) ─────────────────────────
+  // Reflects the per-message flags among the currently visible rows: none set,
+  // all set, or some. Plain click cycles the flags (none/some -> flag every
+  // visible row is "all", i.e. none<->all, some->none); ctrl/cmd-click instead
+  // toggles the window fully on/off (#318), preserving flags and values.
+  const deltaFlagState: 'none' | 'some' | 'all' = useMemo(() => {
+    if (telegramRows.length === 0 || flaggedSet.size === 0) return 'none';
+    const flaggedCount = telegramRows.reduce((n, t) => n + (flaggedSet.has(anchorKey(t)) ? 1 : 0), 0);
+    if (flaggedCount === 0) return 'none';
+    return flaggedCount === telegramRows.length ? 'all' : 'some';
+  }, [telegramRows, flaggedSet]);
+
+  const handleDeltaToggleClick = useCallback((e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      onDeltaContextEnabledChange?.(!activeFilters.deltaContextEnabled);
+      return;
+    }
+    setFlaggedKeysList(deltaFlagState === 'none' ? telegramRows.map(t => anchorKey(t)) : []);
+  }, [deltaFlagState, telegramRows, activeFilters.deltaContextEnabled, onDeltaContextEnabledChange, setFlaggedKeysList]);
 
   // ── Quick info bar metrics (#311) ───────────────────────────────────────────
   // Summarizes the currently visible (sorted + filtered) rows; oldest/newest
@@ -855,9 +898,25 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           </div>
         );
 
-      case 'delta':
+      case 'delta': {
+        const key = anchorKey(t);
+        const flagged = flaggedSet.has(key);
         return (
-          <div style={{ padding: cellPadding }}>
+          <div style={{ padding: cellPadding, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <button
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: '0.15rem',
+                borderRadius: '4px', display: 'flex', alignItems: 'center', flexShrink: 0,
+                color: flagged ? 'var(--accent-primary)' : 'var(--text-dim)',
+                opacity: activeFilters.deltaContextEnabled ? (flagged ? 1 : 0.35) : 0.25,
+              }}
+              title={flagged
+                ? 'Always show context around this message — click to unflag (ctrl/cmd-click to apply to all marked rows)'
+                : 'Always show context around this message, regardless of the active filters (ctrl/cmd-click to apply to all marked rows)'}
+              onClick={e => handleFlagClick(e, key)}
+            >
+              {flagged ? <CircleDot size={12} /> : <Circle size={12} />}
+            </button>
             {t.deltaStr && (
               <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
                 {t.deltaStr}
@@ -865,6 +924,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
             )}
           </div>
         );
+      }
 
       case 'source':
         return (
@@ -1172,12 +1232,20 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               )}
               {c.id === 'delta' && (
                 <button
-                  className={`quick-filter-bar-toggle ${activeFilters.deltaContextEnabled ? 'open' : ''}`}
-                  onClick={() => onDeltaContextEnabledChange?.(!activeFilters.deltaContextEnabled)}
-                  title={activeFilters.deltaContextEnabled
-                    ? 'Disable Time-Delta-Context (keeps the entered before/after values)'
-                    : 'Enable Time-Delta-Context with the previously entered values'}
-                  style={{ marginTop: '0.2rem' }}
+                  className={`quick-filter-bar-toggle ${deltaFlagState !== 'none' ? 'open' : ''}`}
+                  onClick={handleDeltaToggleClick}
+                  title={[
+                    `Time-Delta-Context: ${deltaFlagState} messages flagged.`,
+                    deltaFlagState === 'some' ? 'Click to clear all flags.' : deltaFlagState === 'all' ? 'Click to clear all flags.' : 'Click to flag every visible message.',
+                    activeFilters.deltaContextEnabled
+                      ? 'Ctrl/cmd-click to disable the window (keeps flags and values).'
+                      : 'Ctrl/cmd-click to re-enable the window.',
+                  ].join(' ')}
+                  style={{
+                    marginTop: '0.2rem',
+                    opacity: activeFilters.deltaContextEnabled ? 1 : 0.5,
+                    color: deltaFlagState === 'all' ? 'var(--accent-primary)' : undefined,
+                  }}
                 >
                   <Power size={12} />
                 </button>

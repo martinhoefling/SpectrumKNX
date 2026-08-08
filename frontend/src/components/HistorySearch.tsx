@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
 import { readSortConfigPref, writeSortConfigPref, toggleSortLevel, sortTelegrams } from '../utils/sortConfig';
+import { expandWithDeltaContext } from '../utils/deltaContextExpansion';
+import { anchorKey } from '../utils/anchorKey';
 import type { Telegram } from '../hooks/useWebSocket';
 import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
 import { HistoryLoader } from './HistoryLoader';
@@ -9,11 +11,15 @@ import { FilterPanel } from './FilterPanel';
 import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
 import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
+  effectiveDeltaContext,
   hasActiveFilters,
   matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
 } from '../types/filters';
+
+// Stable identity so passing "no flags" doesn't churn memo deps (#319).
+const EMPTY_FLAG_SET: ReadonlySet<string> = new Set();
 
 export type LoaderTimeRange = {
   relValue: number;
@@ -44,6 +50,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
   const [metadata, setMetadata] = useState<{ total_count: number; limit_reached: boolean } | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
+  // Per-message Time-Delta-Context flags (#319) — local to this view, like marks.
+  const [flaggedKeys, setFlaggedKeys] = useState<string[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
 
@@ -137,11 +145,16 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   };
 
   // In-memory filter pass — mirrors live view filtering so changing filters
-  // immediately applies to already-loaded data without a re-fetch.
+  // immediately applies to already-loaded data without a re-fetch. Also
+  // applies the Time-Delta-Context window client-side (#309/#319), since
+  // per-message flags are set after the historical load already happened.
   const filteredSortedTelegrams = useMemo(() => {
-    if (!hasActiveFilters(activeFilters)) return sortedTelegrams;
-    return sortedTelegrams.filter(t => matchesTelegram(t, activeFilters));
-  }, [sortedTelegrams, activeFilters]);
+    const noFilter = !hasActiveFilters(activeFilters);
+    const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, activeFilters));
+    const { before, after } = effectiveDeltaContext(activeFilters);
+    const flags = activeFilters.deltaContextEnabled ? new Set(flaggedKeys) : EMPTY_FLAG_SET;
+    return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after);
+  }, [sortedTelegrams, activeFilters, flaggedKeys]);
 
   // True when current filters are less restrictive than what was used to fetch,
   // meaning some telegrams may be missing from the loaded set.
@@ -334,6 +347,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               onQuickVisualize={handleQuickVisualize}
               onDeltaContextChange={handleDeltaContextChange}
               onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
+              flaggedKeys={flaggedKeys}
+              onFlaggedKeysChange={setFlaggedKeys}
             />
           )}
         </div>
