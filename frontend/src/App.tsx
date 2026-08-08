@@ -580,6 +580,24 @@ function App() {
     setIsDatabaseOpen(false);
   }, []);
 
+  // Click a time/dot on a visualization chart: close the panel, land on the
+  // telegram nearest that timestamp with live-follow paused, and auto-flag it
+  // as a Time-Delta-Context anchor so its context window opens around it (#308).
+  const handleChartTimeClick = useCallback((ms: number) => {
+    if (liveTelegrams.length === 0) return;
+    let nearest = liveTelegrams[0];
+    let bestDiff = Infinity;
+    for (const t of liveTelegrams) {
+      const diff = Math.abs(new Date(t.timestamp).getTime() - ms);
+      if (diff < bestDiff) { bestDiff = diff; nearest = t; }
+    }
+    const key = anchorKey(nearest);
+    setFlaggedTelegramKeys(prev => prev.includes(key) ? prev : [...prev, key]);
+    setListFollow(false);
+    setListAnchorKey(key);
+    setActivePanel('list');
+  }, [liveTelegrams]);
+
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
     setLastSeenMode(mode);
@@ -1111,6 +1129,7 @@ function App() {
                     onClose={() => setActivePanel('list')}
                     zoomRange={zoomRange}
                     onZoomRangeChange={setZoomRange}
+                    onTimeClick={handleChartTimeClick}
                   />
                 ) : isLastSeenOpen ? (
                   <LastSeenOverlay

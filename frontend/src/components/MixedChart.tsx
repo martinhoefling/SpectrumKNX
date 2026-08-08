@@ -26,6 +26,9 @@ interface MixedChartProps {
   /** Whether this (the unit's currently-open) chart is locked against further GAs (#349). */
   locked?: boolean;
   onToggleLock?: () => void;
+  /** Click (not drag-select) on the chart: navigate to the telegram list around
+   * this timestamp (#308). */
+  onTimeClick?: (ms: number) => void;
 }
 
 // Ensure we have a shared sync cursor across all charts
@@ -55,12 +58,17 @@ const measureGutterWidth = (series: ChartBucket['series'], unit: string): number
 
 export const MixedChart: React.FC<MixedChartProps> = ({
   bucket, minTime, maxTime, stepped, showDots, autoFollow = false, onZoomRangeChange,
-  groupLabel, locked, onToggleLock,
+  groupLabel, locked, onToggleLock, onTimeClick,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [legendOpen, setLegendOpen] = useState(true);
   const themeTick = useThemeTick();
+  // Ref-read inside the stable `ready` hook (same pattern as realIndicesRef
+  // below) so a new onTimeClick identity each render doesn't rebuild the chart.
+  const onTimeClickRef = useRef(onTimeClick);
+  // eslint-disable-next-line react-hooks/refs
+  onTimeClickRef.current = onTimeClick;
 
   // Resize observer to keep chart fluid
   useLayoutEffect(() => {
@@ -192,7 +200,23 @@ export const MixedChart: React.FC<MixedChartProps> = ({
         ],
         ready: [
           (u) => {
+            // Click (not drag-select) navigates to the telegram list around this
+            // time (#308); a dblclick still resets the zoom. The navigation is
+            // delayed past the dblclick window so the first click of a dblclick
+            // doesn't fire it before the reset cancels it.
+            let clickTimer: ReturnType<typeof setTimeout> | null = null;
+            let downX: number | null = null;
+            u.over.addEventListener('mousedown', (e) => { downX = e.clientX; });
+            u.over.addEventListener('mouseup', (e) => {
+              const startX = downX;
+              downX = null;
+              if (startX === null || Math.abs(e.clientX - startX) >= 5) return;
+              const rect = u.over.getBoundingClientRect();
+              const ms = u.posToVal(e.clientX - rect.left, 'x') * 1000;
+              clickTimer = setTimeout(() => onTimeClickRef.current?.(ms), 250);
+            });
             u.over.addEventListener('dblclick', () => {
+              if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
               onZoomRangeChange?.(null);
             });
           }

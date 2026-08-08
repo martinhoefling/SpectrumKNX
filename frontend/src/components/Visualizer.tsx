@@ -22,11 +22,14 @@ interface VisualizerProps {
   embed?: boolean;
   zoomRange?: [number, number] | null;
   onZoomRangeChange?: (range: [number, number] | null) => void;
+  /** Click on a chart's time ruler or a telegram dot: navigate to the telegram
+   * list around that timestamp (#308). */
+  onTimeClick?: (ms: number) => void;
 }
 
 export const Visualizer: React.FC<VisualizerProps> = ({
   telegrams, selectedTargets, onTargetsChange, onClose, getShareLink, embed = false,
-  zoomRange, onZoomRangeChange,
+  zoomRange, onZoomRangeChange, onTimeClick,
 }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
@@ -162,7 +165,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {displayBuckets.map(g => (
         g.bucket.isBinary ? (
-          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} />
+          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} />
         ) : (
           <MixedChart
             key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]}
@@ -171,6 +174,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
             // Only the unit's currently-open chart is lockable; earlier ones are permanently closed (#349).
             locked={g.isLatest ? (lockThresholds[g.bucket.unit]?.at(-1) === g.bucket.series.length) : undefined}
             onToggleLock={g.isLatest ? () => toggleLock(g.bucket.unit, g.bucket.series.length) : undefined}
+            onTimeClick={onTimeClick}
           />
         )
       ))}
@@ -186,7 +190,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   if (embed) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-subtle)' }}>
-        {charts}
+        {/* Pan & zoom timeline sits above the charts it controls (#308). */}
         {minTime !== null && maxTime !== null && minTime < maxTime && (
           <TimeBrush
             minTime={minTime}
@@ -196,6 +200,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
             telegrams={telegrams}
           />
         )}
+        {charts}
       </div>
     );
   }
@@ -290,7 +295,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
             </div>
           </div>
 
-          {charts}
+          {/* Pan & zoom timeline sits above the charts it controls (#308). */}
           {minTime !== null && maxTime !== null && minTime < maxTime && (
             <TimeBrush
               minTime={minTime}
@@ -300,6 +305,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
               telegrams={telegrams}
             />
           )}
+          {charts}
         </div>
       </div>
     </div>

@@ -753,7 +753,20 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
 
   // Changing sort moves (or removes) the live edge — drop the anchor state.
+  // Skipped on mount: this effect and the restore-on-mount effect below both
+  // run in the same commit, in declaration order, and the DOM has zero
+  // scrollTop before either has scrolled anywhere — so without this guard,
+  // checkAtEdge() always reads "at edge" here first and clobbers a restored
+  // anchor (e.g. a cross-panel goto, #308) before it ever gets applied.
+  const sortEffectMounted = useRef(false);
   useEffect(() => {
+    if (!sortEffectMounted.current) {
+      sortEffectMounted.current = true;
+      // Undo the flag on cleanup so StrictMode's dev-only double-invoke
+      // (mount → cleanup → mount) still skips on both simulated mounts,
+      // instead of treating the second one as a real sortConfig change.
+      return () => { sortEffectMounted.current = false; };
+    }
     setNewSinceAnchor(0);
     setStripeOffset(0);
     anchorRef.current = null;

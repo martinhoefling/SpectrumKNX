@@ -17,11 +17,14 @@ interface TimelineChartProps {
    * (#340). When zoomed, stays false to preserve the app-controlled range (#281). */
   autoFollow?: boolean;
   onZoomRangeChange?: (value: [number, number] | null) => void;
+  /** Click (not drag-select) on the chart: navigate to the telegram list around
+   * this timestamp (#308). Omitted from the deps key since it's stable from callers. */
+  onTimeClick?: (ms: number) => void;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange, onTimeClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -34,6 +37,11 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
   const realRef = useRef<boolean[][]>([]);
   // eslint-disable-next-line react-hooks/refs
   realRef.current = bucket.series.map(s => s.real);
+  // Same "ref read inside a stable plugin/hook" pattern as realRef above, so a
+  // new onTimeClick identity each render doesn't force the chart to rebuild.
+  const onTimeClickRef = useRef(onTimeClick);
+  // eslint-disable-next-line react-hooks/refs
+  onTimeClickRef.current = onTimeClick;
 
   useLayoutEffect(() => {
     if (!containerRef.current) return;
@@ -177,7 +185,23 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
         ],
         ready: [
           (u) => {
+            // Click (not drag-select) navigates to the telegram list around this
+            // time (#308); a dblclick still resets the zoom. The navigation is
+            // delayed past the dblclick window so the first click of a dblclick
+            // doesn't fire it before the reset cancels it.
+            let clickTimer: ReturnType<typeof setTimeout> | null = null;
+            let downX: number | null = null;
+            u.over.addEventListener('mousedown', (e) => { downX = e.clientX; });
+            u.over.addEventListener('mouseup', (e) => {
+              const startX = downX;
+              downX = null;
+              if (startX === null || Math.abs(e.clientX - startX) >= 5) return;
+              const rect = u.over.getBoundingClientRect();
+              const ms = u.posToVal(e.clientX - rect.left, 'x') * 1000;
+              clickTimer = setTimeout(() => onTimeClickRef.current?.(ms), 250);
+            });
             u.over.addEventListener('dblclick', () => {
+              if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
               onZoomRangeChange?.(null);
             });
           }
