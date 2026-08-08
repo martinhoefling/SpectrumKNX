@@ -585,6 +585,12 @@ function App() {
     setIsFilterOpen(true);
   }, [handleFiltersChange]);
 
+  // Time-Delta-Context window, now edited from the telegram list's DELTA TIME
+  // quick-filter cell rather than the filter pane (#309, #371).
+  const handleDeltaContextChange = useCallback((deltaBeforeMs: number, deltaAfterMs: number) => {
+    handleFiltersChange(prev => ({ ...prev, deltaBeforeMs, deltaAfterMs }));
+  }, [handleFiltersChange]);
+
   const sortedLiveTelegrams = useMemo(
     () => sortTelegrams(liveTelegrams, sortConfig),
     [liveTelegrams, sortConfig]
@@ -1204,6 +1210,7 @@ function App() {
                     onQuickFilterEnabledChange={setQuickFilterEnabled}
                     quickPatterns={quickPatterns}
                     onQuickPatternsChange={setQuickPatterns}
+                    onDeltaContextChange={handleDeltaContextChange}
                     listFollow={listFollow}
                     onListFollowChange={setListFollow}
                     listAnchorKey={listAnchorKey}

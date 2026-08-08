@@ -597,64 +597,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           </Section>
         )}
 
-        {/* Time-delta context window */}
-        <Section title="Time-Delta Context" defaultOpen={false}>
-          <div style={{ padding: '0.25rem 0' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginBottom: '0.75rem', lineHeight: 1.5 }}>
-              Include telegrams within a window around any filter-matching telegram,
-              even if they don't match the filter.
-            </div>
-
-            {/* −delta (before) */}
-            <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>− Before (ms)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
-              <Clock size={13} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
-              <input
-                type="number"
-                min={0}
-                step={10}
-                value={activeFilters.deltaBeforeMs || ''}
-                placeholder="0 = off"
-                onChange={e => update({ deltaBeforeMs: Math.max(0, Number(e.target.value)) })}
-                style={{
-                  flex: 1, background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
-                  borderRadius: '6px', padding: '0.45rem 0.6rem', color: 'var(--text-main)',
-                  fontSize: '0.8125rem', fontFamily: 'inherit', outline: 'none',
-                }}
-              />
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', flexShrink: 0 }}>ms</span>
-            </div>
-
-            {/* +delta (after) */}
-            <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>+ After (ms)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Clock size={13} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
-              <input
-                type="number"
-                min={0}
-                step={10}
-                value={activeFilters.deltaAfterMs || ''}
-                placeholder="0 = off"
-                onChange={e => update({ deltaAfterMs: Math.max(0, Number(e.target.value)) })}
-                style={{
-                  flex: 1, background: 'var(--bg-tag)', border: '1px solid var(--border-color)',
-                  borderRadius: '6px', padding: '0.45rem 0.6rem', color: 'var(--text-main)',
-                  fontSize: '0.8125rem', fontFamily: 'inherit', outline: 'none',
-                }}
-              />
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', flexShrink: 0 }}>ms</span>
-            </div>
-
-            {(activeFilters.deltaBeforeMs > 0 || activeFilters.deltaAfterMs > 0) && (
-              <div style={{ fontSize: '0.65rem', color: 'var(--accent-primary)', marginTop: '0.5rem' }}>
-                {activeFilters.deltaBeforeMs > 0 && <span>−{activeFilters.deltaBeforeMs}ms </span>}
-                {activeFilters.deltaAfterMs > 0 && <span>+{activeFilters.deltaAfterMs}ms </span>}
-                context active
-              </div>
-            )}
-          </div>
-        </Section>
-
       </div>
       </>)}
     </div>

@@ -106,16 +106,16 @@ test('TelegramTable quick-filter and follow/anchor survive unmount/remount', () 
 
   // Open filter bar and type
   fireEvent.click(screen.getByTitle('Show quick filter bar'));
-  const input = screen.getByLabelText('Quick filter TARGET');
+  const input = screen.getByLabelText('Quick filter TARGET pattern');
   fireEvent.change(input, { target: { value: '1/1/1' } });
 
   // Unmount
   fireEvent.click(screen.getByText('Toggle Table'));
-  expect(screen.queryByLabelText('Quick filter TARGET')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Quick filter TARGET pattern')).not.toBeInTheDocument();
 
   // Remount
   fireEvent.click(screen.getByText('Toggle Table'));
-  expect(screen.getByLabelText('Quick filter TARGET')).toHaveValue('1/1/1');
+  expect(screen.getByLabelText('Quick filter TARGET pattern')).toHaveValue('1/1/1');
 });
 
 // ── 2. Visualizer Zoom Persistence Test (Task 3.2) ──

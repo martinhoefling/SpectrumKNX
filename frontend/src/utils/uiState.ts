@@ -2,7 +2,9 @@ export interface UiSessionState {
   quickFilter: {
     open: boolean;
     enabled: boolean;
-    patterns: Record<string, string>;
+    /** Each column's two quick-filter rows (#309) — e.g. an address pattern
+     * and a name regex, or a from/to range. */
+    patterns: Record<string, { top: string; bottom: string }>;
   };
   listFollow: boolean;
   listAnchorKey: string | null;
@@ -65,13 +67,16 @@ export function loadUiState(): UiSessionState | null {
 
 function sanitize(p: Partial<StoredUiState>): UiSessionState {
   const q = (p.quickFilter ?? {}) as Partial<UiSessionState['quickFilter']>;
-  const patterns = q.patterns && typeof q.patterns === 'object' && !Array.isArray(q.patterns)
-    ? Object.fromEntries(
-        Object.entries(q.patterns).filter(
-          (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'
-        )
-      )
-    : {};
+  const isCell = (v: unknown): v is { top: string; bottom: string } =>
+    !!v && typeof v === 'object' && typeof (v as { top?: unknown }).top === 'string' && typeof (v as { bottom?: unknown }).bottom === 'string';
+  const patterns: Record<string, { top: string; bottom: string }> = {};
+  if (q.patterns && typeof q.patterns === 'object' && !Array.isArray(q.patterns)) {
+    // Cells from the pre-#309 single-string shape are dropped (low-stakes UI
+    // preference) rather than guessed into top/bottom.
+    for (const [key, val] of Object.entries(q.patterns)) {
+      if (isCell(val)) patterns[key] = val;
+    }
+  }
 
   const zoom = Array.isArray(p.zoomRange) && p.zoomRange.length === 2 && typeof p.zoomRange[0] === 'number' && typeof p.zoomRange[1] === 'number'
     ? (p.zoomRange as [number, number])

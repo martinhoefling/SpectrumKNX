@@ -101,6 +101,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     setIsFilterOpen(false);
   };
 
+  // Time-Delta-Context window, edited from the telegram list's DELTA TIME
+  // quick-filter cell rather than the filter pane (#309, #371).
+  const handleDeltaContextChange = (deltaBeforeMs: number, deltaAfterMs: number) => {
+    onFiltersChange({ ...activeFilters, deltaBeforeMs, deltaAfterMs });
+  };
+
   const sortedTelegrams = useMemo(
     () => sortTelegrams(telegrams, sortConfig),
     [telegrams, sortConfig]
@@ -321,6 +327,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               activeFilters={activeFilters}
               onQuickFilter={handleQuickFilter}
               onQuickVisualize={handleQuickVisualize}
+              onDeltaContextChange={handleDeltaContextChange}
             />
           )}
         </div>

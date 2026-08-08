@@ -8,6 +8,8 @@ import { SendToGaPopover } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
+import { makeAddressPatternMatcher } from '../utils/addressPattern';
+import { makeValueMatcher } from '../utils/valuePattern';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -24,13 +26,16 @@ interface TelegramTableProps {
   /** Enables the per-row "Send to this GA" quick popover; true only when the bus is writable (#214). */
   canSend?: boolean;
 
-  // Lifted Quick-Filter state (#280, #341)
+  // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
   onQuickFilterOpenChange?: (open: boolean) => void;
   quickFilterEnabled?: boolean;
   onQuickFilterEnabledChange?: (enabled: boolean) => void;
-  quickPatterns?: Partial<Record<ColId, string>>;
-  onQuickPatternsChange?: (patterns: Partial<Record<ColId, string>>) => void;
+  quickPatterns?: Partial<Record<ColId, QuickCellValue>>;
+  onQuickPatternsChange?: (patterns: Partial<Record<ColId, QuickCellValue>>) => void;
+  /** Edits the Time-Delta-Context window (#309, #371) — moved here from the
+   * filter pane; current values come from `activeFilters.deltaBeforeMs/deltaAfterMs`. */
+  onDeltaContextChange?: (deltaBeforeMs: number, deltaAfterMs: number) => void;
 
   // Lifted Follow / Anchor state (#203, #341)
   listFollow?: boolean;
@@ -51,6 +56,16 @@ interface TelegramTableProps {
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
+
+// A quick-filter cell's two input rows (#309). Most columns use both (address/DPT
+// pattern + name regex on source/target/dpt; from/to on time/value); TYPE only
+// uses `top` (a comma-separated fixed-value list); `delta` isn't matched through
+// this pipeline at all — its two rows edit the Time-Delta-Context window instead.
+interface QuickCellValue {
+  top: string;
+  bottom: string;
+}
+const EMPTY_CELL: QuickCellValue = { top: '', bottom: '' };
 
 interface ColumnDef {
   id: ColId;
@@ -118,23 +133,15 @@ const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 const anchorKey = (t: Telegram) =>
   `${t.timestamp}-${t.source_address}-${t.target_address}-${t.raw_hex ?? ''}`;
 
-// ── Quick filter bar (#271) ──────────────────────────────────────────────────
-
-/** Per-column text the quick filter matches against (addresses and names alike). */
-const quickFilterHaystack = (id: ColId, t: Telegram): string => {
-  switch (id) {
-    case 'time': return format(new Date(t.timestamp), 'yyyy-MM-dd HH:mm:ss.SS');
-    case 'delta': return ''; // derived from visible row order — nothing to filter
-    case 'source': return `${t.source_address} ${t.source_name ?? ''}`;
-    case 'target': return `${t.target_address} ${t.target_name ?? ''}`;
-    case 'type': return `${t.simplified_type || t.telegram_type} ${t.direction ?? ''}`;
-    case 'dpt': return `${t.dpt_name ?? ''} ${t.dpt_main != null ? dptKey(t.dpt_main, t.dpt_sub) : ''}`;
-    case 'value': return `${t.value_formatted ?? t.value_numeric ?? ''} ${t.unit ?? ''} ${t.raw_hex ?? ''}`;
-  }
-};
+// ── Quick filter bar (#271, #309) ────────────────────────────────────────────
+// Two rows per applicable column: a top pattern row (address/DPT-key patterns
+// with wildcards and ranges, or a from/range bound) and a bottom text row
+// (regex/literal, or a to/range bound). TYPE only uses the top row (a
+// comma-separated fixed-value list); DELTA doesn't participate here at all —
+// it edits the Time-Delta-Context window instead (#371).
 
 /** Case-insensitive regex matcher; an invalid pattern degrades to a literal substring match. */
-const makeQuickMatcher = (pattern: string): ((s: string) => boolean) => {
+const makeTextMatcher = (pattern: string): ((s: string) => boolean) => {
   try {
     const re = new RegExp(pattern, 'i');
     return s => re.test(s);
@@ -144,9 +151,79 @@ const makeQuickMatcher = (pattern: string): ((s: string) => boolean) => {
   }
 };
 
+/** Builds one combined predicate from all active quick-filter cells, so
+ * patterns are compiled once per change rather than per telegram. */
+const compileQuickFilters = (patterns: Partial<Record<ColId, QuickCellValue>>): ((t: Telegram) => boolean) => {
+  const checks: ((t: Telegram) => boolean)[] = [];
+
+  const time = patterns.time;
+  if (time?.top || time?.bottom) {
+    const from = time.top ? new Date(time.top).getTime() : null;
+    const to = time.bottom ? new Date(time.bottom).getTime() : null;
+    checks.push(t => {
+      const ts = new Date(t.timestamp).getTime();
+      if (from != null && !Number.isNaN(from) && ts < from) return false;
+      if (to != null && !Number.isNaN(to) && ts > to) return false;
+      return true;
+    });
+  }
+
+  const source = patterns.source;
+  if (source?.top) {
+    const m = makeAddressPatternMatcher(source.top);
+    checks.push(t => m(t.source_address));
+  }
+  if (source?.bottom) {
+    const m = makeTextMatcher(source.bottom);
+    checks.push(t => m(t.source_name ?? ''));
+  }
+
+  const target = patterns.target;
+  if (target?.top) {
+    const m = makeAddressPatternMatcher(target.top);
+    checks.push(t => m(t.target_address));
+  }
+  if (target?.bottom) {
+    const m = makeTextMatcher(target.bottom);
+    checks.push(t => m(t.target_name ?? ''));
+  }
+
+  const type = patterns.type;
+  if (type?.top) {
+    const values = type.top.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (values.length > 0) {
+      checks.push(t => {
+        const typeVal = (t.simplified_type || t.telegram_type || '').toLowerCase();
+        const dirVal = (t.direction ?? '').toLowerCase();
+        return values.some(v => v === typeVal || v === dirVal);
+      });
+    }
+  }
+
+  const dpt = patterns.dpt;
+  if (dpt?.top) {
+    const m = makeAddressPatternMatcher(dpt.top);
+    checks.push(t => t.dpt_main != null && m(dptKey(t.dpt_main, t.dpt_sub)));
+  }
+  if (dpt?.bottom) {
+    const m = makeTextMatcher(dpt.bottom);
+    checks.push(t => m(t.dpt_name ?? ''));
+  }
+
+  const value = patterns.value;
+  if (value?.top || value?.bottom) {
+    const m = makeValueMatcher(value.top ?? '', value.bottom ?? '');
+    checks.push(m);
+  }
+
+  if (checks.length === 0) return () => true;
+  return t => checks.every(check => check(t));
+};
+
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
+  onDeltaContextChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
   markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange,
   infoBarOpen, onInfoBarOpenChange,
@@ -211,7 +288,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // in the bar switches it without losing the patterns.
   const [internalQuickOpen, setInternalQuickOpen] = useState(false);
   const [internalQuickEnabled, setInternalQuickEnabled] = useState(false);
-  const [internalQuickPatterns, setInternalQuickPatterns] = useState<Partial<Record<ColId, string>>>({});
+  const [internalQuickPatterns, setInternalQuickPatterns] = useState<Partial<Record<ColId, QuickCellValue>>>({});
 
   const quickOpen = quickFilterOpen ?? internalQuickOpen;
   const setQuickOpen = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
@@ -228,11 +305,16 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   }, [quickEnabled, onQuickFilterEnabledChange]);
 
   const currentPatterns = quickPatterns ?? internalQuickPatterns;
-  const setQuickPatterns = useCallback((val: Partial<Record<ColId, string>> | ((prev: Partial<Record<ColId, string>>) => Partial<Record<ColId, string>>)) => {
+  const setQuickPatterns = useCallback((val: Partial<Record<ColId, QuickCellValue>> | ((prev: Partial<Record<ColId, QuickCellValue>>) => Partial<Record<ColId, QuickCellValue>>)) => {
     const next = typeof val === 'function' ? val(currentPatterns) : val;
     setInternalQuickPatterns(next);
     onQuickPatternsChange?.(next);
   }, [currentPatterns, onQuickPatternsChange]);
+
+  /** Updates one row (top/bottom) of a quick-filter cell, preserving the other row. */
+  const setQuickCell = useCallback((id: ColId, row: 'top' | 'bottom', text: string) => {
+    setQuickPatterns(prev => ({ ...prev, [id]: { ...(prev[id] ?? EMPTY_CELL), [row]: text } }));
+  }, [setQuickPatterns]);
 
   const toggleQuickOpen = () => {
     const nextOpen = !quickOpen;
@@ -277,11 +359,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
   const quickFiltered = useMemo(() => {
     if (!quickOpen || !quickEnabled) return telegrams;
-    const matchers = Object.entries(currentPatterns)
-      .filter(([, p]) => p && p.trim() !== '')
-      .map(([id, p]) => [id, makeQuickMatcher(p!.trim())] as const);
-    if (matchers.length === 0) return telegrams;
-    return telegrams.filter(t => matchers.every(([id, m]) => m(quickFilterHaystack(id as ColId, t))));
+    const matches = compileQuickFilters(currentPatterns);
+    return telegrams.filter(matches);
   }, [telegrams, quickOpen, quickEnabled, currentPatterns]);
 
   // Time deltas between consecutive rows, by visual (sorted) order — always
@@ -1062,7 +1141,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         ))}
       </div>
 
-      {/* Quick filter bar (#271) — one regex/literal input per visible column */}
+      {/* Quick filter bar (#271, #309) — two rows per column: a pattern/from row
+          and a text/to row, except TYPE (one row) and DELTA (Time-Delta-Context
+          before/after, #371) which don't go through the pattern pipeline. */}
       {quickOpen && (
         <div
           style={{
@@ -1076,26 +1157,104 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           }}
         >
           {visibleCols.map(c => (
-            <div key={c.id} style={{ padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
+            <div key={c.id} style={{ padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'flex-start', gap: '0.35rem', minWidth: 0 }}>
               {c.id === 'time' && (
                 <button
                   className={`quick-filter-bar-toggle ${quickEnabled ? 'open' : ''}`}
                   onClick={() => setQuickEnabled(e => !e)}
                   title={quickEnabled ? 'Disable quick filter (keeps patterns)' : 'Enable quick filter'}
+                  style={{ marginTop: '0.2rem' }}
                 >
                   <Filter size={12} />
                 </button>
               )}
-              {c.id !== 'delta' && (
-                <input
-                  className="quick-filter-bar-input"
-                  type="text"
-                  value={currentPatterns[c.id] ?? ''}
-                  placeholder="regex…"
-                  aria-label={`Quick filter ${c.label}`}
-                  onChange={e => setQuickPatterns(prev => ({ ...prev, [c.id]: e.target.value }))}
-                />
-              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 0, flex: 1 }}>
+                {c.id === 'delta' ? (
+                  <>
+                    <input
+                      className="quick-filter-bar-input"
+                      type="number" min={0} step={10}
+                      value={activeFilters.deltaBeforeMs || ''}
+                      placeholder="before ms"
+                      aria-label="Time-Delta-Context before (ms)"
+                      onChange={e => onDeltaContextChange?.(Math.max(0, Number(e.target.value) || 0), activeFilters.deltaAfterMs)}
+                    />
+                    <input
+                      className="quick-filter-bar-input"
+                      type="number" min={0} step={10}
+                      value={activeFilters.deltaAfterMs || ''}
+                      placeholder="after ms"
+                      aria-label="Time-Delta-Context after (ms)"
+                      onChange={e => onDeltaContextChange?.(activeFilters.deltaBeforeMs, Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </>
+                ) : c.id === 'type' ? (
+                  <input
+                    className="quick-filter-bar-input"
+                    type="text"
+                    value={currentPatterns.type?.top ?? ''}
+                    placeholder="WRITE, RESPONSE, Incoming…"
+                    aria-label="Quick filter TYPE"
+                    onChange={e => setQuickCell('type', 'top', e.target.value)}
+                  />
+                ) : c.id === 'time' ? (
+                  <>
+                    <input
+                      className="quick-filter-bar-input"
+                      type="datetime-local" step="1"
+                      value={currentPatterns.time?.top ?? ''}
+                      aria-label="Quick filter TIME from"
+                      onChange={e => setQuickCell('time', 'top', e.target.value)}
+                    />
+                    <input
+                      className="quick-filter-bar-input"
+                      type="datetime-local" step="1"
+                      value={currentPatterns.time?.bottom ?? ''}
+                      aria-label="Quick filter TIME to"
+                      onChange={e => setQuickCell('time', 'bottom', e.target.value)}
+                    />
+                  </>
+                ) : c.id === 'value' ? (
+                  <>
+                    <input
+                      className="quick-filter-bar-input"
+                      type="text"
+                      value={currentPatterns.value?.top ?? ''}
+                      placeholder="from / 0x.. / 0b.. / &quot;regex&quot;"
+                      aria-label="Quick filter VALUE from"
+                      onChange={e => setQuickCell('value', 'top', e.target.value)}
+                    />
+                    <input
+                      className="quick-filter-bar-input"
+                      type="text"
+                      value={currentPatterns.value?.bottom ?? ''}
+                      placeholder="to / pattern…"
+                      aria-label="Quick filter VALUE to"
+                      onChange={e => setQuickCell('value', 'bottom', e.target.value)}
+                    />
+                  </>
+                ) : (
+                  // source / target / dpt: top = address/DPT-key pattern, bottom = name/description regex
+                  <>
+                    <input
+                      className="quick-filter-bar-input"
+                      type="text"
+                      value={currentPatterns[c.id]?.top ?? ''}
+                      placeholder={c.id === 'dpt' ? '1.008-1.011, 16.*' : c.id === 'source' ? '*.1.*, 1.2.12-1.2.91' : '1/5/*, 3/1/1-3/1/127'}
+                      aria-label={`Quick filter ${c.label} pattern`}
+                      onChange={e => setQuickCell(c.id, 'top', e.target.value)}
+                    />
+                    <input
+                      className="quick-filter-bar-input"
+                      type="text"
+                      value={currentPatterns[c.id]?.bottom ?? ''}
+                      placeholder={c.id === 'dpt' ? 'description regex…' : 'name regex…'}
+                      aria-label={`Quick filter ${c.label} name`}
+                      onChange={e => setQuickCell(c.id, 'bottom', e.target.value)}
+                    />
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>

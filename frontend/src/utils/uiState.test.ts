@@ -17,7 +17,7 @@ test('round-trip save/load works correctly', () => {
     quickFilter: {
       open: true,
       enabled: true,
-      patterns: { source_address: '1.1.1' },
+      patterns: { source: { top: '1.1.1', bottom: '' } },
     },
     listFollow: false,
     listAnchorKey: 'some-key',
@@ -83,4 +83,21 @@ test('sanitize drops invalid fields and fills defaults', () => {
     listFollow: true,
     zoomRange: null,
   });
+});
+
+test('drops pre-#309 single-string pattern cells instead of guessing top/bottom', () => {
+  localStorage.setItem(
+    UI_STORAGE_KEY,
+    JSON.stringify({
+      v: 1,
+      quickFilter: {
+        open: true,
+        enabled: true,
+        patterns: { source: '1.1.1', target: { top: '1/2/3', bottom: 'kitchen' } },
+      },
+    })
+  );
+
+  const loaded = loadUiState();
+  expect(loaded?.quickFilter.patterns).toEqual({ target: { top: '1/2/3', bottom: 'kitchen' } });
 });
