@@ -613,7 +613,7 @@ function App() {
   );
 
   // ── In-memory filtering (live view) ────────────────────────────────────────
-  const filteredLiveTelegrams = useMemo(() => {
+  const deltaExpandedLive = useMemo(() => {
     const f = activeFilters;
     // Master toggle off (#370): show everything, keep the filter set intact.
     const noFilter =
@@ -635,6 +635,9 @@ function App() {
 
     return expandWithDeltaContext(sortedLiveTelegrams, matches, anchorKey, flags, deltaBeforeMs, deltaAfterMs);
   }, [sortedLiveTelegrams, activeFilters, filtersEnabled, flaggedTelegramKeys]);
+  const filteredLiveTelegrams = deltaExpandedLive.items;
+  // Keys of rows shown only as unfiltered context around a match/flag (#343).
+  const contextTelegramKeys = deltaExpandedLive.contextKeys;
 
   // ── Count bubbles (live only) ───────────────────────────────────────────────
   const filterCounts = useMemo((): FilterCounts => {
@@ -1223,6 +1226,7 @@ function App() {
                     onLastMarkedKeyChange={setLastMarkedTelegramKey}
                     flaggedKeys={flaggedTelegramKeys}
                     onFlaggedKeysChange={setFlaggedTelegramKeys}
+                    contextKeys={contextTelegramKeys}
                     infoBarOpen={infoBarOpen}
                     onInfoBarOpenChange={setInfoBarOpen}
                   />

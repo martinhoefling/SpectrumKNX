@@ -61,6 +61,11 @@ interface TelegramTableProps {
   // individually flagged to always anchor a context window around themselves.
   flaggedKeys?: string[];
   onFlaggedKeysChange?: (keys: string[]) => void;
+
+  /** Keys (via the same anchor identity) of rows present only as unfiltered
+   * Time-Delta-Context around a match/flag, not because they matched the
+   * active filters themselves — marked with a distinct background (#343). */
+  contextKeys?: ReadonlySet<string>;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -230,6 +235,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange,
   infoBarOpen, onInfoBarOpenChange,
   flaggedKeys, onFlaggedKeysChange,
+  contextKeys,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -489,6 +495,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const targets = new Set<string>();
     const dpts = new Set<string>();
     const typeCounts = new Map<string, number>();
+    let contextCount = 0;
     telegramRows.forEach((t, i) => {
       if (new Date(t.timestamp) < new Date(telegramRows[oldestIdx].timestamp)) oldestIdx = i;
       if (new Date(t.timestamp) > new Date(telegramRows[newestIdx].timestamp)) newestIdx = i;
@@ -501,6 +508,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       dpts.add(t.dpt_name ?? (t.dpt_main != null ? `DPT ${t.dpt_main}` : 'unknown'));
       const type = t.simplified_type || t.telegram_type;
       typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+      if (contextKeys?.has(anchorKey(t))) contextCount++;
     });
     return {
       count: telegramRows.length,
@@ -510,8 +518,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       targetCount: targets.size,
       dptCount: dpts.size,
       typeCounts: [...typeCounts.entries()].sort((a, b) => b[1] - a[1]),
+      contextCount,
     };
-  }, [telegramRows]);
+  }, [telegramRows, contextKeys]);
 
   const virtualizer = useVirtualizer({
     count: telegramRows.length,
@@ -1124,6 +1133,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
             {infoMetrics.typeCounts.map(([type, n]) => (
               <span key={type} style={infoChipStyle}>{type}: {n}</span>
             ))}
+            {infoMetrics.contextCount > 0 && (
+              <span style={infoChipStyle} title="Rows shown only as unfiltered Time-Delta-Context, not real filter matches (#343)">
+                {infoMetrics.contextCount} context
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -1403,6 +1417,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               const marked = markedSet.has(key);
               // The most-recently-clicked row is the most prominent (#310).
               const latest = marked && key === lastMarked;
+              // Present only as unfiltered Time-Delta-Context, not a real filter
+              // match (#343) — a distinct wash, but marks still take priority.
+              const isContext = !marked && !!contextKeys?.has(key);
               return (
                 <div
                   key={virtualRow.key}
@@ -1422,17 +1439,22 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     fontSize: '0.8125rem',
                     // Marked rows get an accent wash that overrides the zebra
                     // stripe; the latest click is washed more strongly and gets
-                    // an accent bar. color-mix adapts to the theme's accent.
+                    // an accent bar. Context-only rows get a distinct (warning-
+                    // hued) wash instead, so they read apart from real matches.
+                    // color-mix adapts to the theme's accent/warning colors.
                     background: latest
                       ? 'color-mix(in srgb, var(--accent-primary) 34%, transparent)'
                       : marked
                         ? 'color-mix(in srgb, var(--accent-primary) 16%, transparent)'
-                        : (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
+                        : isContext
+                          ? 'color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent)'
+                          : (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
                     boxShadow: latest ? 'inset 3px 0 0 0 var(--accent-primary)' : undefined,
                     alignItems: 'start',
                     minHeight: '60px' // Ensure a minimum touch/visual target
                   }}
-                  className={`log-row${marked ? ' marked' : ''}${latest ? ' latest' : ''}`}
+                  title={isContext ? 'Unfiltered Time-Delta-Context — this telegram did not match the active filters' : undefined}
+                  className={`log-row${marked ? ' marked' : ''}${latest ? ' latest' : ''}${isContext ? ' context' : ''}`}
                 >
                   {visibleCols.map(c => (
                     <React.Fragment key={c.id}>{renderCell(c.id, t)}</React.Fragment>

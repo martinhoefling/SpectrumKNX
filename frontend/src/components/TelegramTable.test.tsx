@@ -4,6 +4,7 @@ import { TelegramTable, type SortConfig } from './TelegramTable';
 import { makeTelegram } from '../test/telegramFactory';
 import type { Telegram } from '../hooks/useWebSocket';
 import { DEFAULT_FILTERS } from '../types/filters';
+import { anchorKey } from '../utils/anchorKey';
 
 // jsdom has no layout: give the virtualizer a viewport and rows a rect so it
 // renders items and the anchor logic finds rows.
@@ -288,4 +289,54 @@ test('quick info bar (#311): toggled via the header button and summarizes the vi
   expect(screen.getByText(/4 telegrams/)).toBeInTheDocument();
   expect(screen.getByText(/Oldest:/)).toBeInTheDocument();
   expect(screen.getByText(/Newest:/)).toBeInTheDocument();
+});
+
+test('context rows (#343): marked with a distinct class/tooltip and counted in the info bar', () => {
+  const rows = makeList(3, 2);
+  const contextKeys = new Set([anchorKey(rows[1])]); // the middle row is context-only
+
+  const { container } = render(
+    <TelegramTable
+      telegrams={rows}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      contextKeys={contextKeys}
+    />,
+  );
+
+  const logRows = [...container.querySelectorAll('.log-row')];
+  expect(logRows.filter(r => r.classList.contains('context'))).toHaveLength(1);
+  expect(logRows.find(r => r.classList.contains('context'))).toHaveAttribute(
+    'title', 'Unfiltered Time-Delta-Context — this telegram did not match the active filters'
+  );
+
+  fireEvent.click(screen.getByTitle('Show info bar'));
+  expect(screen.getByText(/1 context/)).toBeInTheDocument();
+});
+
+test('context rows (#343): marking a context row hides the context styling in favor of the mark', () => {
+  const rows = makeList(3, 2);
+  const contextKeys = new Set([anchorKey(rows[1])]);
+
+  const { container } = render(
+    <TelegramTable
+      telegrams={rows}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      contextKeys={contextKeys}
+    />,
+  );
+
+  const logRows = [...container.querySelectorAll('.log-row')];
+  fireEvent.click(logRows[1]); // mark the context row
+  expect(logRows[1].classList.contains('marked')).toBe(true);
+  expect(logRows[1].classList.contains('context')).toBe(false);
 });

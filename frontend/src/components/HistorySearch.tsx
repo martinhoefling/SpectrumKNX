@@ -148,13 +148,16 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   // immediately applies to already-loaded data without a re-fetch. Also
   // applies the Time-Delta-Context window client-side (#309/#319), since
   // per-message flags are set after the historical load already happened.
-  const filteredSortedTelegrams = useMemo(() => {
+  const deltaExpandedHistory = useMemo(() => {
     const noFilter = !hasActiveFilters(activeFilters);
     const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, activeFilters));
     const { before, after } = effectiveDeltaContext(activeFilters);
     const flags = activeFilters.deltaContextEnabled ? new Set(flaggedKeys) : EMPTY_FLAG_SET;
     return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after);
   }, [sortedTelegrams, activeFilters, flaggedKeys]);
+  const filteredSortedTelegrams = deltaExpandedHistory.items;
+  // Keys of rows shown only as unfiltered context around a match/flag (#343).
+  const contextTelegramKeys = deltaExpandedHistory.contextKeys;
 
   // True when current filters are less restrictive than what was used to fetch,
   // meaning some telegrams may be missing from the loaded set.
@@ -349,6 +352,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
               flaggedKeys={flaggedKeys}
               onFlaggedKeysChange={setFlaggedKeys}
+              contextKeys={contextTelegramKeys}
             />
           )}
         </div>
