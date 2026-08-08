@@ -9,6 +9,7 @@ import { Download, Link2, Check, X } from 'lucide-react';
 import { getPref, setPref } from '../utils/prefs';
 import { clearSeriesHidden } from '../utils/legendVisibility';
 import { expandDegenerateRange } from '../utils/timeRange';
+import { splitLockedBuckets } from '../utils/chartLock';
 
 interface VisualizerProps {
   telegrams: Telegram[];
@@ -64,10 +65,32 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     return new Set([...rawArray].filter(a => !decoded.has(a)));
   }, [telegrams]);
 
-  const { buckets, minTime, maxTime } = useChartData(telegrams, selectedTargets, dptOverrides);
+  const { buckets, minTime, maxTime, addressToUnit } = useChartData(telegrams, selectedTargets, dptOverrides);
   const [stepped, setStepped] = useState(() => getPref('chartStepped') !== 'false');
   const [showDots, setShowDots] = useState(() => getPref('chartDots') !== 'false');
   const [linkCopied, setLinkCopied] = useState(false);
+
+  // Per-metric chart "lock" (#349): a locked chart stops taking further GAs of
+  // its unit — the next one selected spawns a new chart instead of crowding
+  // the existing one. Thresholds are "GAs assigned so far" counts (by
+  // selection order) at each lock action; see utils/chartLock.ts.
+  const [lockThresholds, setLockThresholds] = useState<Record<string, number[]>>({});
+  const displayBuckets = useMemo(
+    () => splitLockedBuckets(buckets, selectedTargets, addressToUnit, lockThresholds),
+    [buckets, selectedTargets, addressToUnit, lockThresholds]
+  );
+  // `openGroupSize` is the currently-open chart's own GA count (for that
+  // unit), read fresh from `displayBuckets` at the call site. If the most
+  // recent threshold exactly equals it, nothing has been added since that
+  // lock — toggling again undoes it; otherwise a new lock closes it off.
+  const toggleLock = (unit: string, openGroupSize: number) => {
+    setLockThresholds(prev => {
+      const existing = prev[unit] ?? [];
+      const alreadyLocked = existing.length > 0 && existing[existing.length - 1] === openGroupSize;
+      const next = alreadyLocked ? existing.slice(0, -1) : [...existing, openGroupSize];
+      return { ...prev, [unit]: next };
+    });
+  };
 
   const defaultRange = useMemo<[number, number]>(() => {
     // Pad a zero-width extent (a single telegram, or several at the same instant)
@@ -137,11 +160,18 @@ export const Visualizer: React.FC<VisualizerProps> = ({
 
   const charts = (
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
-      {buckets.map(b => (
-        b.isBinary ? (
-          <TimelineChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} />
+      {displayBuckets.map(g => (
+        g.bucket.isBinary ? (
+          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} />
         ) : (
-          <MixedChart key={b.unit} bucket={b} minTime={activeRange[0]} maxTime={activeRange[1]} stepped={stepped} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} />
+          <MixedChart
+            key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]}
+            stepped={stepped} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange}
+            groupLabel={g.groupCount > 1 ? `${g.groupIndex}/${g.groupCount}` : undefined}
+            // Only the unit's currently-open chart is lockable; earlier ones are permanently closed (#349).
+            locked={g.isLatest ? (lockThresholds[g.bucket.unit]?.at(-1) === g.bucket.series.length) : undefined}
+            onToggleLock={g.isLatest ? () => toggleLock(g.bucket.unit, g.bucket.series.length) : undefined}
+          />
         )
       ))}
 

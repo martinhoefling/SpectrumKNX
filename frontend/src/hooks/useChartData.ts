@@ -23,6 +23,9 @@ export interface ChartDataResult {
   buckets: ChartBucket[];
   minTime: number | null;
   maxTime: number | null;
+  /** Each plotted GA's metric/unit bucket key, so callers can group selection
+   * order by unit without redoing this classification (#349's chart lock). */
+  addressToUnit: Record<string, string>;
 }
 
 export function useChartData(
@@ -34,7 +37,7 @@ export function useChartData(
 ): ChartDataResult {
   return useMemo(() => {
     if (selectedTargets.length === 0 || telegrams.length === 0) {
-      return { buckets: [], minTime: null, maxTime: null };
+      return { buckets: [], minTime: null, maxTime: null, addressToUnit: {} };
     }
 
     // Decode an untyped GA's raw payload with its chosen datatype, if any.
@@ -72,7 +75,7 @@ export function useChartData(
       .sort((a, b) => a.ts - b.ts);
 
     if (relevant.length === 0) {
-      return { buckets: [], minTime: null, maxTime: null };
+      return { buckets: [], minTime: null, maxTime: null, addressToUnit: {} };
     }
 
     const minTime = relevant[0].ts;
@@ -81,6 +84,7 @@ export function useChartData(
     // 2. Group into physical units / buckets
     // We treat DPT1 (boolean/binary) as a special bucket called 'binary'
     const grouped = new Map<string, typeof relevant>();
+    const addressToUnit: Record<string, string> = {};
 
     for (const t of relevant) {
       const overrideKey = t.dpt_main == null ? dptOverrides[t.target_address] : undefined;
@@ -96,6 +100,7 @@ export function useChartData(
 
       if (!grouped.has(bucketKey)) grouped.set(bucketKey, []);
       grouped.get(bucketKey)!.push(t);
+      addressToUnit[t.target_address] = bucketKey;
     }
 
     // 3. For each bucket, build the aligned data matrix
@@ -164,6 +169,6 @@ export function useChartData(
     // a different metric the earliest one plotted (#312).
     buckets.sort((a, b) => a.unit.localeCompare(b.unit));
 
-    return { buckets, minTime, maxTime };
+    return { buckets, minTime, maxTime, addressToUnit };
   }, [telegrams, selectedTargets, dptOverrides]);
 }

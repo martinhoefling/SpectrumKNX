@@ -43,6 +43,25 @@ describe('useChartData — DPT backfill / duplicate graphs (#206)', () => {
   });
 });
 
+describe('useChartData — addressToUnit (#349 chart lock)', () => {
+  test('maps every plotted GA to its bucket unit', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', dpt_main: 9, dpt_sub: 1, unit: '°C', value_numeric: 20 }),
+      at(2, { target_address: '1/1/2', dpt_main: 9, dpt_sub: 1, unit: '°C', value_numeric: 21 }),
+      at(3, { target_address: '1/1/3', dpt_main: 1, value_json: true }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1', '1/1/2', '1/1/3']));
+    expect(result.current.addressToUnit).toEqual({
+      '1/1/1': '°C', '1/1/2': '°C', '1/1/3': 'binary',
+    });
+  });
+
+  test('is empty when nothing is selected', () => {
+    const { result } = renderHook(() => useChartData([], []));
+    expect(result.current.addressToUnit).toEqual({});
+  });
+});
+
 describe('useChartData — datatype override for untyped GAs (#315)', () => {
   test('untyped raw-byte telegrams do not plot without a chosen datatype', () => {
     const telegrams = [
