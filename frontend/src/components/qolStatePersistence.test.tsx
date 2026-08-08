@@ -81,7 +81,7 @@ test('TelegramTable quick-filter and follow/anchor survive unmount/remount', () 
           <TelegramTable
             telegrams={telegrams}
             visibleColumns={visibleColumns}
-            sortConfig={{ key: 'timestamp', direction: 'desc' }}
+            sortConfig={[{ key: 'timestamp', direction: 'desc' }]}
             onSort={vi.fn()}
             activeFilters={DEFAULT_FILTERS}
             onQuickFilter={vi.fn()}

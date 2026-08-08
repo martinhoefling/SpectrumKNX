@@ -21,6 +21,7 @@ test('round-trip save/load works correctly', () => {
     },
     listFollow: false,
     listAnchorKey: 'some-key',
+    infoBarOpen: true,
     zoomRange: [1000, 2000],
     statsSearch: 'stats',
     buildingSearch: 'building',

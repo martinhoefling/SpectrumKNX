@@ -2,24 +2,21 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
+import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
 
-export type SortKey = 'timestamp' | 'source_address' | 'target_address' | 'simplified_type' | 'dpt_name' | 'value_numeric';
-
-export interface SortConfig {
-  key: SortKey;
-  direction: 'asc' | 'desc';
-}
+export type { SortKey, SortLevel, SortConfig };
 
 interface TelegramTableProps {
   telegrams: Telegram[];
   visibleColumns: { [key: string]: boolean };
   sortConfig: SortConfig;
-  onSort: (key: SortKey) => void;
+  /** `additive` (ctrl/cmd-click) adds/toggles a sort level instead of replacing the whole config (#311). */
+  onSort: (key: SortKey, opts?: { additive?: boolean }) => void;
   activeFilters: ActiveFilters;
   onQuickFilter: (key: 'sources' | 'targets' | 'types' | 'dpts', value: string | number) => void;
   onQuickVisualize: (targetAddress: string) => void;
@@ -47,6 +44,10 @@ interface TelegramTableProps {
   onMarkedKeysChange?: (keys: string[]) => void;
   lastMarkedKey?: string | null;
   onLastMarkedKeyChange?: (key: string | null) => void;
+
+  // Lifted Quick Info Bar open state (#311, #341)
+  infoBarOpen?: boolean;
+  onInfoBarOpenChange?: (open: boolean) => void;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -98,7 +99,14 @@ const getDPTLabel = (dpt_main: number | null) => {
   return 'Unknown DPT';
 };
 
-type TelegramRow = Telegram & { deltaStr: string | null };
+type TelegramRow = Telegram & { deltaStr: string | null; deltaMs: number | null };
+
+const formatDeltaMs = (diffMs: number): string => {
+  const mm = String(Math.floor(diffMs / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((diffMs % 60000) / 1000)).padStart(2, '0');
+  const ms = String(diffMs % 1000).padStart(3, '0');
+  return `+ ${mm}:${ss}.${ms}`;
+};
 
 const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
@@ -140,7 +148,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
-  markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange
+  markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange,
+  infoBarOpen, onInfoBarOpenChange,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -231,6 +240,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     setQuickEnabled(nextOpen);
   };
 
+  // ── Quick info bar (#311): collapsible summary row above the header. ──────
+  const [internalInfoBarOpen, setInternalInfoBarOpen] = useState(false);
+  const infoOpen = infoBarOpen ?? internalInfoBarOpen;
+  const toggleInfoOpen = useCallback(() => {
+    const next = !infoOpen;
+    setInternalInfoBarOpen(next);
+    onInfoBarOpenChange?.(next);
+  }, [infoOpen, onInfoBarOpenChange]);
+
   // ── Row marks (#310) ─────────────────────────────────────────────────────
   // Controlled when App lifts them (so marks survive navigation), otherwise a
   // local fallback. `lastMarkedKey` may legitimately be null, so distinguish
@@ -266,22 +284,110 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     return telegrams.filter(t => matchers.every(([id, m]) => m(quickFilterHaystack(id as ColId, t))));
   }, [telegrams, quickOpen, quickEnabled, currentPatterns]);
 
-  // Compute time deltas between consecutive rows (by visual order)
-  const telegramRows = useMemo<TelegramRow[]>(() => {
+  // Time deltas between consecutive rows, by visual (sorted) order — always
+  // computed regardless of sort column, respecting whatever hierarchy is
+  // active (#311).
+  const naturalTelegramRows = useMemo<TelegramRow[]>(() => {
     return quickFiltered.map((t, idx) => {
       let deltaStr: string | null = null;
+      let deltaMs: number | null = null;
       if (idx > 0) {
         const curr = new Date(t.timestamp).getTime();
         const prev = new Date(quickFiltered[idx - 1].timestamp).getTime();
-        const diffMs = Math.abs(curr - prev);
-        const mm = String(Math.floor(diffMs / 60000)).padStart(2, '0');
-        const ss = String(Math.floor((diffMs % 60000) / 1000)).padStart(2, '0');
-        const ms = String(diffMs % 1000).padStart(3, '0');
-        deltaStr = `+ ${mm}:${ss}.${ms}`;
+        deltaMs = Math.abs(curr - prev);
+        deltaStr = formatDeltaMs(deltaMs);
       }
-      return { ...t, deltaStr };
+      return { ...t, deltaStr, deltaMs };
     });
   }, [quickFiltered]);
+
+  // ── Delta-sort exclusive mode (#311) ────────────────────────────────────────
+  // Sorting by the Δt column is a self-referential operation (deltas are
+  // derived from row order), so it freezes a snapshot instead of participating
+  // in the normal sortConfig: buffer/live-follow pause, deltas stop
+  // recalculating, and only the frozen set's order changes on repeat clicks.
+  // Any other column header exits the mode and restores the prior live state.
+  const [deltaSortActive, setDeltaSortActive] = useState(false);
+  const [deltaSortDirection, setDeltaSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [deltaFrozenRows, setDeltaFrozenRows] = useState<TelegramRow[] | null>(null);
+  const preDeltaSortFollowRef = useRef<boolean | null>(null);
+
+  const sortByDelta = useCallback((rows: TelegramRow[], direction: 'asc' | 'desc') =>
+    [...rows].sort((a, b) => {
+      if (a.deltaMs == null && b.deltaMs == null) return 0;
+      if (a.deltaMs == null) return 1;
+      if (b.deltaMs == null) return -1;
+      return direction === 'desc' ? b.deltaMs - a.deltaMs : a.deltaMs - b.deltaMs;
+    }), []);
+
+  const handleDeltaHeaderClick = useCallback(() => {
+    if (!deltaSortActive) {
+      setDeltaFrozenRows(sortByDelta(naturalTelegramRows, 'desc'));
+      setDeltaSortDirection('desc');
+      setDeltaSortActive(true);
+      if (onListFollowChange) {
+        preDeltaSortFollowRef.current = listFollow ?? true;
+        onListFollowChange(false);
+      }
+    } else {
+      const nextDir = deltaSortDirection === 'desc' ? 'asc' : 'desc';
+      setDeltaSortDirection(nextDir);
+      setDeltaFrozenRows(prev => (prev ? sortByDelta(prev, nextDir) : prev));
+    }
+  }, [deltaSortActive, deltaSortDirection, naturalTelegramRows, sortByDelta, listFollow, onListFollowChange]);
+
+  const exitDeltaSort = useCallback(() => {
+    if (!deltaSortActive) return;
+    setDeltaSortActive(false);
+    setDeltaFrozenRows(null);
+    if (onListFollowChange && preDeltaSortFollowRef.current !== null) {
+      onListFollowChange(preDeltaSortFollowRef.current);
+    }
+    preDeltaSortFollowRef.current = null;
+  }, [deltaSortActive, onListFollowChange]);
+
+  // A real column header click always exits delta-sort before applying its own sort.
+  const handleColumnSort = useCallback((key: SortKey, opts?: { additive?: boolean }) => {
+    exitDeltaSort();
+    onSort(key, opts);
+  }, [exitDeltaSort, onSort]);
+
+  const telegramRows = deltaSortActive && deltaFrozenRows ? deltaFrozenRows : naturalTelegramRows;
+
+  // ── Quick info bar metrics (#311) ───────────────────────────────────────────
+  // Summarizes the currently visible (sorted + filtered) rows; oldest/newest
+  // and min/max Δt jump to their row via gotoIndex regardless of sort order.
+  const infoMetrics = useMemo(() => {
+    if (telegramRows.length === 0) return null;
+    let oldestIdx = 0, newestIdx = 0;
+    let minDeltaIdx = -1, maxDeltaIdx = -1;
+    const sources = new Set<string>();
+    const targets = new Set<string>();
+    const dpts = new Set<string>();
+    const typeCounts = new Map<string, number>();
+    telegramRows.forEach((t, i) => {
+      if (new Date(t.timestamp) < new Date(telegramRows[oldestIdx].timestamp)) oldestIdx = i;
+      if (new Date(t.timestamp) > new Date(telegramRows[newestIdx].timestamp)) newestIdx = i;
+      if (t.deltaMs != null) {
+        if (minDeltaIdx === -1 || t.deltaMs < telegramRows[minDeltaIdx].deltaMs!) minDeltaIdx = i;
+        if (maxDeltaIdx === -1 || t.deltaMs > telegramRows[maxDeltaIdx].deltaMs!) maxDeltaIdx = i;
+      }
+      sources.add(t.source_address);
+      targets.add(t.target_address);
+      dpts.add(t.dpt_name ?? (t.dpt_main != null ? `DPT ${t.dpt_main}` : 'unknown'));
+      const type = t.simplified_type || t.telegram_type;
+      typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+    });
+    return {
+      count: telegramRows.length,
+      oldestIdx, newestIdx,
+      minDeltaIdx, maxDeltaIdx,
+      sourceCount: sources.size,
+      targetCount: targets.size,
+      dptCount: dpts.size,
+      typeCounts: [...typeCounts.entries()].sort((a, b) => b[1] - a[1]),
+    };
+  }, [telegramRows]);
 
   const virtualizer = useVirtualizer({
     count: telegramRows.length,
@@ -306,8 +412,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // concrete anchor row by key and, after each update, correct scrollTop by the
   // real pixel delta of that row's position — re-run on the next frame so the
   // async re-measure of prepended rows is absorbed too.
-  const isTimeSort = sortConfig.key === 'timestamp';
-  const liveEdge = sortConfig.direction === 'desc' ? 'top' : 'bottom';
+  // Only the *primary* level's key matters for the live edge — a secondary
+  // TIME tiebreaker doesn't make the list time-ordered top-to-bottom (#311).
+  const primarySort = sortConfig[0];
+  const isTimeSort = primarySort?.key === 'timestamp' && !deltaSortActive;
+  const liveEdge = primarySort?.direction === 'asc' ? 'bottom' : 'top';
   const atEdgeRef = useRef(listFollow ?? true);
   const [newSinceAnchor, setNewSinceAnchor] = useState(0);
   // The row pinned to the top of the viewport while anchored, and its offset
@@ -454,10 +563,28 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     scrollToEdge();
   };
 
-  // "Quick goto time" (#282): scroll to the telegram nearest a given time and
-  // stop live-following, so the viewed rows stay put while new ones accumulate.
-  // The jump-to-live pill is the way back. Only meaningful for the timestamp
-  // sort, where rows are ordered by time.
+  // Scrolls to a specific row by index and stops live-following, so the
+  // viewed rows stay put while new ones accumulate. Used by "quick goto time"
+  // and the quick info bar's click-to-jump metrics (#282, #311).
+  const gotoIndex = (idx: number) => {
+    if (idx < 0 || idx >= telegramRows.length) return;
+    atEdgeRef.current = false;
+    onListFollowChange?.(false);
+    setNewSinceAnchor(0);
+    markProgrammatic();
+    virtualizer.scrollToIndex(idx, { align: 'center' });
+    // Pin the row we land on once the virtualizer has settled the scroll (rows
+    // are dynamically measured, so give it two frames before capturing).
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      captureAnchor();
+      atEdgeRef.current = false;
+      onListFollowChange?.(false);
+    }));
+  };
+
+  // "Quick goto time" (#282): jump to the telegram nearest a given time. Only
+  // meaningful for the timestamp sort, where rows are ordered by time — the
+  // info bar's jumps use gotoIndex directly since they already know the index.
   const gotoTime = (targetMs: number) => {
     const rows = telegramRows;
     if (!isTimeSort || rows.length === 0) return;
@@ -467,18 +594,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       const diff = Math.abs(new Date(rows[i].timestamp).getTime() - targetMs);
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     }
-    atEdgeRef.current = false;
-    onListFollowChange?.(false);
-    setNewSinceAnchor(0);
-    markProgrammatic();
-    virtualizer.scrollToIndex(bestIdx, { align: 'center' });
-    // Pin the row we land on once the virtualizer has settled the scroll (rows
-    // are dynamically measured, so give it two frames before capturing).
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      captureAnchor();
-      atEdgeRef.current = false;
-      onListFollowChange?.(false);
-    }));
+    gotoIndex(bestIdx);
   };
 
   // Newest telegram time, used to seed the goto-time input.
@@ -601,13 +717,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   }, [totalSize]);
 
   // Visible columns in order, and the matching CSS grid template.
-  // The delta column is only meaningful when sorting by time, so hide it otherwise.
+  // The delta column is always shown when enabled, regardless of sort (#311) —
+  // it's computed from the visible row order under any sort hierarchy.
   const visibleCols = useMemo(
-    () => COLUMNS.filter(c => {
-      if (c.id === 'delta') return visibleColumns.delta && sortConfig.key === 'timestamp';
-      return !c.visibleKey || visibleColumns[c.visibleKey];
-    }),
-    [visibleColumns, sortConfig.key],
+    () => COLUMNS.filter(c => !c.visibleKey || visibleColumns[c.visibleKey]),
+    [visibleColumns],
   );
 
   const gridTemplate = useMemo(
@@ -621,8 +735,29 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     [visibleCols, widthFor],
   );
 
-  const renderSortArrow = (key: SortKey) =>
-    sortConfig.key === key && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />);
+  // Multi-level sort indicator (#311): the chevron shows this column's own
+  // direction; a small numbered badge additionally marks its position in the
+  // hierarchy once more than one level is active (ctrl/cmd-click adds levels).
+  const renderSortArrow = (key: SortKey) => {
+    const idx = sortConfig.findIndex(l => l.key === key);
+    if (idx === -1) return null;
+    const icon = sortConfig[idx].direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
+    if (sortConfig.length <= 1) return icon;
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.15rem' }}>
+        {icon}
+        <span
+          title={`Sort level ${idx + 1} of ${sortConfig.length}`}
+          style={{
+            fontSize: '0.6rem', fontWeight: 700, minWidth: '1rem', textAlign: 'center',
+            padding: '0 0.2rem', borderRadius: '3px', background: 'var(--bg-tag)', color: 'var(--text-dim)',
+          }}
+        >
+          {idx + 1}
+        </span>
+      </span>
+    );
+  };
 
   // ── Per-cell body content (keyed switch keeps body aligned with header order) ──
   const renderCell = (id: ColId, t: TelegramRow): React.ReactNode => {
@@ -792,8 +927,66 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
   };
 
+  const infoChipStyle: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+    background: 'var(--bg-tag)', border: '1px solid var(--border-subtle)', borderRadius: '4px',
+    padding: '0.15rem 0.45rem', fontSize: '0.68rem', color: 'var(--text-dim)',
+  };
+  const infoChipBtnStyle: React.CSSProperties = {
+    ...infoChipStyle, cursor: 'pointer', background: 'transparent',
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Quick info bar (#311): collapsible summary directly above the header. */}
+      {infoOpen && infoMetrics && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: '0.3rem',
+          padding: '0.4rem 0.75rem', borderBottom: '1px solid var(--border-color)',
+          background: 'var(--bg-subtle)', flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+            <button
+              style={infoChipBtnStyle} title="Jump to the oldest telegram in the current view"
+              onClick={() => gotoIndex(infoMetrics.oldestIdx)}
+            >
+              Oldest: {format(new Date(telegramRows[infoMetrics.oldestIdx].timestamp), 'yyyy-MM-dd HH:mm:ss.SS')}
+            </button>
+            <button
+              style={infoChipBtnStyle} title="Jump to the newest telegram in the current view"
+              onClick={() => gotoIndex(infoMetrics.newestIdx)}
+            >
+              Newest: {format(new Date(telegramRows[infoMetrics.newestIdx].timestamp), 'yyyy-MM-dd HH:mm:ss.SS')}
+            </button>
+            {infoMetrics.minDeltaIdx !== -1 && (
+              <button
+                style={infoChipBtnStyle} title="Jump to the smallest time gap in the current view"
+                onClick={() => gotoIndex(infoMetrics.minDeltaIdx)}
+              >
+                Min Δt: {telegramRows[infoMetrics.minDeltaIdx].deltaStr}
+              </button>
+            )}
+            {infoMetrics.maxDeltaIdx !== -1 && (
+              <button
+                style={infoChipBtnStyle} title="Jump to the largest time gap in the current view"
+                onClick={() => gotoIndex(infoMetrics.maxDeltaIdx)}
+              >
+                Max Δt: {telegramRows[infoMetrics.maxDeltaIdx].deltaStr}
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+            <span style={infoChipStyle}>{infoMetrics.count} telegram{infoMetrics.count !== 1 ? 's' : ''}</span>
+            <span style={infoChipStyle}>{infoMetrics.sourceCount} source{infoMetrics.sourceCount !== 1 ? 's' : ''}</span>
+            <span style={infoChipStyle}>{infoMetrics.targetCount} target{infoMetrics.targetCount !== 1 ? 's' : ''}</span>
+            <span style={infoChipStyle}>{infoMetrics.dptCount} DPT{infoMetrics.dptCount !== 1 ? 's' : ''}</span>
+            {infoMetrics.typeCounts.map(([type, n]) => (
+              <span key={type} style={infoChipStyle}>{type}: {n}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div
         style={{
@@ -824,11 +1017,34 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <ListFilter size={13} />
               </button>
             )}
+            {c.id === 'time' && (
+              <button
+                className={`quick-filter-bar-toggle ${infoOpen ? 'open' : ''}`}
+                onClick={toggleInfoOpen}
+                title={infoOpen ? 'Hide info bar' : 'Show info bar'}
+              >
+                <Info size={13} />
+              </button>
+            )}
             {c.id === 'time' && isTimeSort && (
               <GotoTimeControl seedMs={newestMs} onGoto={gotoTime} />
             )}
-            {c.sortKey ? (
-              <button className="sort-header" onClick={() => onSort(c.sortKey!)}>
+            {c.id === 'delta' ? (
+              <button
+                className="sort-header"
+                onClick={handleDeltaHeaderClick}
+                title={deltaSortActive
+                  ? 'Sorted by time delta — click to flip direction; click any other column to return to live order'
+                  : 'Sort by time delta (exclusive — pauses live scrolling and freezes the current order)'}
+              >
+                {c.label} {deltaSortActive && (deltaSortDirection === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+              </button>
+            ) : c.sortKey ? (
+              <button
+                className="sort-header"
+                onClick={(e) => handleColumnSort(c.sortKey!, { additive: e.ctrlKey || e.metaKey })}
+                title="Click to sort · ctrl/cmd-click to add as a further sort level (TIME is always the deepest tiebreaker)"
+              >
                 {c.label} {renderSortArrow(c.sortKey)}
               </button>
             ) : (

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
-import { readSortConfigPref, writeSortConfigPref } from '../utils/sortConfig';
+import { readSortConfigPref, writeSortConfigPref, toggleSortLevel, sortTelegrams } from '../utils/sortConfig';
 import type { Telegram } from '../hooks/useWebSocket';
 import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
 import { HistoryLoader } from './HistoryLoader';
@@ -75,12 +75,9 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       .catch(err => console.error('Failed to load shared view:', err));
   }, [initialView, loadLimit]);
 
-  const handleSort = (key: SortKey) => {
+  const handleSort = (key: SortKey, opts?: { additive?: boolean }) => {
     setSortConfig(prev => {
-      const next: SortConfig = {
-        key,
-        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
-      };
+      const next = toggleSortLevel(prev, key, !!opts?.additive);
       writeSortConfigPref(next);
       return next;
     });
@@ -104,31 +101,10 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     setIsFilterOpen(false);
   };
 
-  const sortedTelegrams = useMemo(() => {
-    const items = [...telegrams];
-    items.sort((a, b) => {
-      const aVal = a[sortConfig.key];
-      const bVal = b[sortConfig.key];
-      if (aVal === bVal) return 0;
-      if (aVal == null) return 1;
-      if (bVal == null) return -1;
-      if (sortConfig.key === 'timestamp') {
-        const timeA = new Date(aVal as string).getTime();
-        const timeB = new Date(bVal as string).getTime();
-        return sortConfig.direction === 'asc'
-          ? timeA - timeB
-          : timeB - timeA;
-      }
-
-      const valA = (aVal as string | number);
-      const valB = (bVal as string | number);
-
-      return sortConfig.direction === 'asc'
-        ? valA < valB ? -1 : 1
-        : valA < valB ? 1 : -1;
-    });
-    return items;
-  }, [telegrams, sortConfig]);
+  const sortedTelegrams = useMemo(
+    () => sortTelegrams(telegrams, sortConfig),
+    [telegrams, sortConfig]
+  );
 
   const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }, range?: LoadedRange) => {
     setTelegrams(prev => {

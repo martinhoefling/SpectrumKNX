@@ -6,6 +6,8 @@ export interface UiSessionState {
   };
   listFollow: boolean;
   listAnchorKey: string | null;
+  /** Quick info bar open/closed state above the telegram list header (#311). */
+  infoBarOpen: boolean;
   zoomRange: [number, number] | null;
   statsSearch: string;
   buildingSearch: string;
@@ -24,6 +26,7 @@ export const DEFAULT_UI_STATE: UiSessionState = {
   },
   listFollow: true,
   listAnchorKey: null,
+  infoBarOpen: false,
   zoomRange: null,
   statsSearch: '',
   buildingSearch: '',
@@ -82,6 +85,7 @@ function sanitize(p: Partial<StoredUiState>): UiSessionState {
     },
     listFollow: typeof p.listFollow === 'boolean' ? p.listFollow : true,
     listAnchorKey: typeof p.listAnchorKey === 'string' ? p.listAnchorKey : null,
+    infoBarOpen: typeof p.infoBarOpen === 'boolean' ? p.infoBarOpen : false,
     zoomRange: zoom,
     statsSearch: typeof p.statsSearch === 'string' ? p.statsSearch : '',
     buildingSearch: typeof p.buildingSearch === 'string' ? p.buildingSearch : '',

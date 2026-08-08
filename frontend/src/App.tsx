@@ -17,7 +17,7 @@ import {
 } from './utils/uiState';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
-import { readSortConfigPref, writeSortConfigPref } from './utils/sortConfig';
+import { readSortConfigPref, writeSortConfigPref, toggleSortLevel, sortTelegrams } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock, List } from 'lucide-react';
 import { getPref, setPref } from './utils/prefs';
 import { getLabel, getFileName } from './utils/labels';
@@ -211,6 +211,7 @@ function App() {
   const [quickPatterns, setQuickPatterns] = useState(initialUiState.quickFilter.patterns);
   const [listFollow, setListFollow] = useState(initialUiState.listFollow);
   const [listAnchorKey, setListAnchorKey] = useState<string | null>(initialUiState.listAnchorKey);
+  const [infoBarOpen, setInfoBarOpen] = useState(initialUiState.infoBarOpen);
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(initialUiState.zoomRange);
   const [statsSearch, setStatsSearch] = useState(initialUiState.statsSearch);
   const [buildingSearch, setBuildingSearch] = useState(initialUiState.buildingSearch);
@@ -472,6 +473,7 @@ function App() {
         },
         listFollow,
         listAnchorKey,
+        infoBarOpen,
         zoomRange,
         statsSearch,
         buildingSearch,
@@ -488,6 +490,7 @@ function App() {
     quickPatterns,
     listFollow,
     listAnchorKey,
+    infoBarOpen,
     zoomRange,
     statsSearch,
     buildingSearch,
@@ -528,14 +531,11 @@ function App() {
   const [markedTelegramKeys, setMarkedTelegramKeys] = useState<string[]>([]);
   const [lastMarkedTelegramKey, setLastMarkedTelegramKey] = useState<string | null>(null);
 
-  // ── Sorting ─────────────────────────────────────────────────────────────────
+  // ── Sorting (#311: multi-level, ctrl/cmd-click adds a level) ─────────────────
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
-  const handleSort = (key: SortKey) => {
+  const handleSort = (key: SortKey, opts?: { additive?: boolean }) => {
     setSortConfig(prev => {
-      const next: SortConfig = {
-        key,
-        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
-      };
+      const next = toggleSortLevel(prev, key, !!opts?.additive);
       writeSortConfigPref(next);
       return next;
     });
@@ -585,25 +585,10 @@ function App() {
     setIsFilterOpen(true);
   }, [handleFiltersChange]);
 
-  const sortedLiveTelegrams = useMemo(() => {
-    const items = [...liveTelegrams];
-    items.sort((a, b) => {
-      const aVal = a[sortConfig.key];
-      const bVal = b[sortConfig.key];
-      if (aVal === bVal) return 0;
-      if (aVal == null) return 1;
-      if (bVal == null) return -1;
-      if (sortConfig.key === 'timestamp') {
-        return sortConfig.direction === 'asc'
-          ? new Date(aVal as string).getTime() - new Date(bVal as string).getTime()
-          : new Date(bVal as string).getTime() - new Date(aVal as string).getTime();
-      }
-      return sortConfig.direction === 'asc'
-        ? aVal < bVal ? -1 : 1
-        : aVal < bVal ? 1 : -1;
-    });
-    return items;
-  }, [liveTelegrams, sortConfig]);
+  const sortedLiveTelegrams = useMemo(
+    () => sortTelegrams(liveTelegrams, sortConfig),
+    [liveTelegrams, sortConfig]
+  );
 
   // ── In-memory filtering (live view) ────────────────────────────────────────
   const filteredLiveTelegrams = useMemo(() => {
@@ -1227,6 +1212,8 @@ function App() {
                     onMarkedKeysChange={setMarkedTelegramKeys}
                     lastMarkedKey={lastMarkedTelegramKey}
                     onLastMarkedKeyChange={setLastMarkedTelegramKey}
+                    infoBarOpen={infoBarOpen}
+                    onInfoBarOpenChange={setInfoBarOpen}
                   />
                   </>
                 )}

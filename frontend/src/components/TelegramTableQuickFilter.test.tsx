@@ -31,7 +31,7 @@ const visibleColumns = {
   target: true, targetName: true, type: true, dpt: true, data: true, value: true,
 };
 
-const sortConfig: SortConfig = { key: 'timestamp', direction: 'desc' };
+const sortConfig: SortConfig = [{ key: 'timestamp', direction: 'desc' }];
 
 const TELEGRAMS: Telegram[] = [
   makeTelegram({ timestamp: '2024-01-01T10:00:03.000Z', target_address: '1/2/3', target_name: 'Licht Küche', raw_hex: '0x03' }),

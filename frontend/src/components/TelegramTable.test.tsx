@@ -32,7 +32,7 @@ const visibleColumns = {
   target: true, targetName: true, type: true, dpt: true, data: true, value: true,
 };
 
-const sortConfig: SortConfig = { key: 'timestamp', direction: 'desc' };
+const sortConfig: SortConfig = [{ key: 'timestamp', direction: 'desc' }];
 
 /** `count` telegrams sorted newest-first, 1 s apart, ending at `newestOffsetS`. */
 const makeList = (count: number, newestOffsetS: number): Telegram[] => {
@@ -115,7 +115,7 @@ test('clicking a row pauses live-following (#266)', () => {
 });
 
 test('newest-on-bottom: clicking a row stays anchored while the full buffer evicts (#297)', () => {
-  const asc: SortConfig = { key: 'timestamp', direction: 'asc' };
+  const asc: SortConfig = [{ key: 'timestamp', direction: 'asc' }];
   // In asc view the parent hands rows oldest-first, newest at the bottom edge.
   const oldestFirst = (count: number, newestOffsetS: number) => makeList(count, newestOffsetS).slice().reverse();
   const renderAsc = (telegrams: Telegram[]) =>
@@ -166,4 +166,126 @@ test('without a click the table keeps following the live edge', () => {
     />,
   );
   expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
+});
+
+test('multi-level sort (#311): plain click replaces, ctrl-click adds a level', () => {
+  const onSort = vi.fn();
+  render(
+    <TelegramTable
+      telegrams={makeList(3, 2)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={onSort}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+
+  const sourceHeader = screen.getByText('SOURCE').closest('button')!;
+  fireEvent.click(sourceHeader);
+  expect(onSort).toHaveBeenLastCalledWith('source_address', { additive: false });
+
+  fireEvent.click(sourceHeader, { ctrlKey: true });
+  expect(onSort).toHaveBeenLastCalledWith('source_address', { additive: true });
+
+  fireEvent.click(sourceHeader, { metaKey: true });
+  expect(onSort).toHaveBeenLastCalledWith('source_address', { additive: true });
+});
+
+test('multi-level sort (#311): a numbered badge marks each explicit level beyond the first', () => {
+  const multiSort: SortConfig = [{ key: 'source_address', direction: 'asc' }, { key: 'target_address', direction: 'desc' }];
+  render(
+    <TelegramTable
+      telegrams={makeList(3, 2)}
+      visibleColumns={visibleColumns}
+      sortConfig={multiSort}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+
+  const sourceHeader = screen.getByText('SOURCE').closest('button')!;
+  const targetHeader = screen.getByText('TARGET').closest('button')!;
+  expect(sourceHeader).toHaveTextContent('1');
+  expect(targetHeader).toHaveTextContent('2');
+});
+
+test('delta column (#311): stays visible when sorted by a non-time column', () => {
+  const bySource: SortConfig = [{ key: 'source_address', direction: 'asc' }];
+  render(
+    <TelegramTable
+      telegrams={makeList(3, 2)}
+      visibleColumns={visibleColumns}
+      sortConfig={bySource}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('Δt')).toBeInTheDocument();
+});
+
+test('delta-sort exclusive mode (#311): activates on click, pauses live-follow, and exits on another header click', () => {
+  const onListFollowChange = vi.fn();
+  const { rerender } = render(
+    <TelegramTable
+      telegrams={makeList(6, 5)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      listFollow={true}
+      onListFollowChange={onListFollowChange}
+    />,
+  );
+
+  fireEvent.click(screen.getByText('Δt').closest('button')!);
+  expect(onListFollowChange).toHaveBeenCalledWith(false);
+
+  // New telegrams while delta-sort is active don't reach the frozen view.
+  onListFollowChange.mockClear();
+  rerender(
+    <TelegramTable
+      telegrams={makeList(7, 6)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      listFollow={false}
+      onListFollowChange={onListFollowChange}
+    />,
+  );
+  expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
+
+  // Clicking a real column header exits delta-sort and restores live-follow.
+  fireEvent.click(screen.getByText('SOURCE').closest('button')!);
+  expect(onListFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test('quick info bar (#311): toggled via the header button and summarizes the visible rows', () => {
+  render(
+    <TelegramTable
+      telegrams={makeList(4, 3)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+
+  expect(screen.queryByText(/4 telegrams/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTitle('Show info bar'));
+  expect(screen.getByText(/4 telegrams/)).toBeInTheDocument();
+  expect(screen.getByText(/Oldest:/)).toBeInTheDocument();
+  expect(screen.getByText(/Newest:/)).toBeInTheDocument();
 });

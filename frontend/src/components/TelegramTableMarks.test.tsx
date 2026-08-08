@@ -31,7 +31,7 @@ const visibleColumns = {
   target: true, targetName: true, type: true, dpt: true, data: true, value: true,
 };
 
-const sortConfig: SortConfig = { key: 'timestamp', direction: 'desc' };
+const sortConfig: SortConfig = [{ key: 'timestamp', direction: 'desc' }];
 
 // Five rows so range + additive semantics are unambiguous. Desc timestamp → the
 // DOM row order matches this array order (newest first).
