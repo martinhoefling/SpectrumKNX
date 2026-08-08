@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
@@ -36,6 +36,8 @@ interface TelegramTableProps {
   /** Edits the Time-Delta-Context window (#309, #371) — moved here from the
    * filter pane; current values come from `activeFilters.deltaBeforeMs/deltaAfterMs`. */
   onDeltaContextChange?: (deltaBeforeMs: number, deltaAfterMs: number) => void;
+  /** Toggles the window on/off without losing the entered values (#318). */
+  onDeltaContextEnabledChange?: (enabled: boolean) => void;
 
   // Lifted Follow / Anchor state (#203, #341)
   listFollow?: boolean;
@@ -223,7 +225,7 @@ const compileQuickFilters = (patterns: Partial<Record<ColId, QuickCellValue>>): 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
-  onDeltaContextChange,
+  onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
   markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange,
   infoBarOpen, onInfoBarOpenChange,
@@ -1168,6 +1170,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   <Filter size={12} />
                 </button>
               )}
+              {c.id === 'delta' && (
+                <button
+                  className={`quick-filter-bar-toggle ${activeFilters.deltaContextEnabled ? 'open' : ''}`}
+                  onClick={() => onDeltaContextEnabledChange?.(!activeFilters.deltaContextEnabled)}
+                  title={activeFilters.deltaContextEnabled
+                    ? 'Disable Time-Delta-Context (keeps the entered before/after values)'
+                    : 'Enable Time-Delta-Context with the previously entered values'}
+                  style={{ marginTop: '0.2rem' }}
+                >
+                  <Power size={12} />
+                </button>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 0, flex: 1 }}>
                 {c.id === 'delta' ? (
                   <>
@@ -1177,6 +1191,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                       value={activeFilters.deltaBeforeMs || ''}
                       placeholder="before ms"
                       aria-label="Time-Delta-Context before (ms)"
+                      style={{ opacity: activeFilters.deltaContextEnabled ? 1 : 0.5 }}
                       onChange={e => onDeltaContextChange?.(Math.max(0, Number(e.target.value) || 0), activeFilters.deltaAfterMs)}
                     />
                     <input
@@ -1185,6 +1200,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                       value={activeFilters.deltaAfterMs || ''}
                       placeholder="after ms"
                       aria-label="Time-Delta-Context after (ms)"
+                      style={{ opacity: activeFilters.deltaContextEnabled ? 1 : 0.5 }}
                       onChange={e => onDeltaContextChange?.(activeFilters.deltaBeforeMs, Math.max(0, Number(e.target.value) || 0))}
                     />
                   </>

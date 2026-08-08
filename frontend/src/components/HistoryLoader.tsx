@@ -149,10 +149,10 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
             {filters.dpts.map(d => (
               <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>
             ))}
-            {filters.deltaBeforeMs > 0 && (
+            {filters.deltaContextEnabled && filters.deltaBeforeMs > 0 && (
               <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>−{filters.deltaBeforeMs}ms before</span>
             )}
-            {filters.deltaAfterMs > 0 && (
+            {filters.deltaContextEnabled && filters.deltaAfterMs > 0 && (
               <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>+{filters.deltaAfterMs}ms after</span>
             )}
           </div>

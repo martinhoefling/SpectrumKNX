@@ -1,5 +1,5 @@
 import type { Telegram } from '../hooks/useWebSocket';
-import type { ActiveFilters } from '../types/filters';
+import { effectiveDeltaContext, type ActiveFilters } from '../types/filters';
 import { apiUrl } from './basePath';
 
 export interface HistoryMetadata {
@@ -20,8 +20,9 @@ export function applyFilterParams(url: string, filters?: ActiveFilters): string 
   if (filters.targets.length > 0) params.push(`target_address=${encodeURIComponent(filters.targets.join(','))}`);
   if (filters.types.length > 0) params.push(`telegram_type=${encodeURIComponent(filters.types.join(','))}`);
   if (filters.dpts.length > 0) params.push(`dpt_main=${encodeURIComponent(filters.dpts.join(','))}`);
-  if (filters.deltaBeforeMs > 0) params.push(`delta_before_ms=${filters.deltaBeforeMs}`);
-  if (filters.deltaAfterMs > 0) params.push(`delta_after_ms=${filters.deltaAfterMs}`);
+  const { before, after } = effectiveDeltaContext(filters);
+  if (before > 0) params.push(`delta_before_ms=${before}`);
+  if (after > 0) params.push(`delta_after_ms=${after}`);
   if (params.length === 0) return url;
   return url + (url.includes('?') ? '&' : '?') + params.join('&');
 }

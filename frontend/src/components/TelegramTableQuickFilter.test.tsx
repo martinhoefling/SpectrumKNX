@@ -163,3 +163,33 @@ test('the TIME row restricts to a from/to range', () => {
   fireEvent.change(screen.getByLabelText('Quick filter TIME to'), { target: { value: boundary } });
   expect(rowCount(container)).toBe(1);
 });
+
+test('the DELTA TIME toggle disables/enables the context window without losing the entered values (#318)', () => {
+  const onDeltaContextChange = vi.fn();
+  const onDeltaContextEnabledChange = vi.fn();
+  render(
+    <TelegramTable
+      telegrams={TELEGRAMS}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={{ ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaAfterMs: 250, deltaContextEnabled: true }}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      onDeltaContextChange={onDeltaContextChange}
+      onDeltaContextEnabledChange={onDeltaContextEnabledChange}
+    />,
+  );
+  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+
+  // Values are shown regardless of enabled state.
+  expect(screen.getByLabelText('Time-Delta-Context before (ms)')).toHaveValue(500);
+  expect(screen.getByLabelText('Time-Delta-Context after (ms)')).toHaveValue(250);
+
+  fireEvent.click(screen.getByTitle('Disable Time-Delta-Context (keeps the entered before/after values)'));
+  expect(onDeltaContextEnabledChange).toHaveBeenCalledWith(false);
+
+  // Editing a value while enabled still goes through onDeltaContextChange, preserving the other field.
+  fireEvent.change(screen.getByLabelText('Time-Delta-Context before (ms)'), { target: { value: '750' } });
+  expect(onDeltaContextChange).toHaveBeenCalledWith(750, 250);
+});

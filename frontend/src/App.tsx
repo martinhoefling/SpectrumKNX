@@ -42,6 +42,7 @@ import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
   DEFAULT_FILTERS,
   dptKey,
+  effectiveDeltaContext,
   hasActiveFilters,
   matchesTelegram,
   type ActiveFilters,
@@ -591,6 +592,11 @@ function App() {
     handleFiltersChange(prev => ({ ...prev, deltaBeforeMs, deltaAfterMs }));
   }, [handleFiltersChange]);
 
+  // Toggles the window on/off without losing the entered values (#318).
+  const handleDeltaContextEnabledChange = useCallback((deltaContextEnabled: boolean) => {
+    handleFiltersChange(prev => ({ ...prev, deltaContextEnabled }));
+  }, [handleFiltersChange]);
+
   const sortedLiveTelegrams = useMemo(
     () => sortTelegrams(liveTelegrams, sortConfig),
     [liveTelegrams, sortConfig]
@@ -613,7 +619,8 @@ function App() {
       noFilter ? true : matchesTelegram(t, f)
     );
 
-    const hasDelta = f.deltaBeforeMs > 0 || f.deltaAfterMs > 0;
+    const { before: deltaBeforeMs, after: deltaAfterMs } = effectiveDeltaContext(f);
+    const hasDelta = deltaBeforeMs > 0 || deltaAfterMs > 0;
 
     if (!hasDelta) {
       return sortedLiveTelegrams.filter((_, idx) => matches[idx]);
@@ -630,7 +637,7 @@ function App() {
       if (matches[idx]) return true;
       const ts = new Date(t.timestamp).getTime();
       return matchingTimestamps.some(mts =>
-        (ts >= mts - f.deltaBeforeMs) && (ts <= mts + f.deltaAfterMs)
+        (ts >= mts - deltaBeforeMs) && (ts <= mts + deltaAfterMs)
       );
     });
   }, [sortedLiveTelegrams, activeFilters, filtersEnabled]);
@@ -1211,6 +1218,7 @@ function App() {
                     quickPatterns={quickPatterns}
                     onQuickPatternsChange={setQuickPatterns}
                     onDeltaContextChange={handleDeltaContextChange}
+                    onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
                     listFollow={listFollow}
                     onListFollowChange={setListFollow}
                     listAnchorKey={listAnchorKey}

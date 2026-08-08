@@ -64,6 +64,7 @@ export function parseViewUrl(search: string): VizViewState | null {
     dpts: list(p.get('dpt')).filter(d => /^\d+(\.\d+)?$/.test(d)),
     deltaBeforeMs: Math.max(0, Number(p.get('before')) || 0),
     deltaAfterMs: Math.max(0, Number(p.get('after')) || 0),
+    deltaContextEnabled: p.get('delta_off') !== '1',
     sourceTargetRelation: p.get('rel_st') === 'OR' ? 'OR' : 'AND',
   };
 
@@ -101,6 +102,7 @@ export function buildViewUrl(state: {
   if (f.dpts.length > 0) p.set('dpt', f.dpts.join(','));
   if (f.deltaBeforeMs > 0) p.set('before', String(f.deltaBeforeMs));
   if (f.deltaAfterMs > 0) p.set('after', String(f.deltaAfterMs));
+  if (!f.deltaContextEnabled) p.set('delta_off', '1');
   // `rel_st` is no longer written — all filters combine with AND (#275). Old links
   // carrying rel_st=OR are still parsed above and load (harmlessly) as AND.
   if (state.range.kind === 'relative') {

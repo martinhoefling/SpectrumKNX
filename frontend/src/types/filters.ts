@@ -32,6 +32,13 @@ export interface ActiveFilters {
   /** ms after a matching telegram to also include (0 = disabled) */
   deltaAfterMs: number;
   /**
+   * Toggles the Time-Delta-Context window on/off without losing the entered
+   * before/after values, so re-enabling doesn't require retyping them (#318).
+   * Defaults to true: existing links/workspaces with a non-zero before/after
+   * and no stored flag keep behaving as "on", matching pre-#318 behavior.
+   */
+  deltaContextEnabled: boolean;
+  /**
    * @deprecated All active filters combine with AND (#275); this no longer affects
    * matching. Retained only so old shared links / workspaces carrying `rel_st=OR`
    * still parse without error — they load and apply as AND. Cross-category OR returns
@@ -51,8 +58,16 @@ export const DEFAULT_FILTERS: ActiveFilters = {
   dpts: [],
   deltaBeforeMs: 0,
   deltaAfterMs: 0,
+  deltaContextEnabled: true,
   sourceTargetRelation: 'AND',
 };
+
+/** The before/after window actually in effect — zeroed while the toggle is off,
+ * even though the stored values are kept so re-enabling restores them (#318). */
+export function effectiveDeltaContext(f: ActiveFilters): { before: number; after: number } {
+  if (!f.deltaContextEnabled) return { before: 0, after: 0 };
+  return { before: f.deltaBeforeMs, after: f.deltaAfterMs };
+}
 
 /** Minimal telegram shape needed for in-memory filtering. */
 export interface FilterableTelegram {

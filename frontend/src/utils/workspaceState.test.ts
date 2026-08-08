@@ -113,6 +113,18 @@ describe('monitor URL encoding', () => {
       filters: { ...DEFAULT_FILTERS, dpts: ['1.001'] },
     });
   });
+
+  it('round-trips a disabled Time-Delta-Context, keeping the stored values (#318)', () => {
+    const ws: WorkspaceState = {
+      ...DEFAULT_WORKSPACE,
+      filters: { ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaContextEnabled: false },
+    };
+    const search = buildMonitorSearch(ws);
+    expect(search).toContain('delta_off=1');
+    const parsed = parseMonitorSearch('?' + search);
+    expect(parsed!.filters.deltaContextEnabled).toBe(false);
+    expect(parsed!.filters.deltaBeforeMs).toBe(500);
+  });
 });
 
 describe('applyWorkspaceUrl', () => {

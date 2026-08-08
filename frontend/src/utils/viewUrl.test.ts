@@ -42,6 +42,13 @@ describe('parseViewUrl', () => {
     const v = parseViewUrl('?view=viz&rel=1h&src=1.1.5&tgt=1/2/3&rel_st=OR');
     expect(v!.filters.sourceTargetRelation).toBe('OR');
   });
+
+  test('deltaContextEnabled defaults true and honors delta_off=1 (#318)', () => {
+    expect(parseViewUrl('?view=viz&rel=1h&before=500')!.filters.deltaContextEnabled).toBe(true);
+    const disabled = parseViewUrl('?view=viz&rel=1h&before=500&delta_off=1');
+    expect(disabled!.filters.deltaContextEnabled).toBe(false);
+    expect(disabled!.filters.deltaBeforeMs).toBe(500); // stored value survives being disabled
+  });
 });
 
 describe('buildViewUrl', () => {
@@ -86,6 +93,17 @@ describe('buildViewUrl', () => {
     expect(url).not.toContain('before=');
     expect(url).not.toContain('limit=');
     expect(url).not.toContain('rel_st=');
+    expect(url).not.toContain('delta_off='); // enabled is the default (#318)
+  });
+
+  test('writes delta_off=1 only when the context is disabled', () => {
+    const url = buildViewUrl({
+      plot: [],
+      filters: { ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaContextEnabled: false },
+      range: { kind: 'relative', seconds: 3600 },
+    });
+    expect(url).toContain('delta_off=1');
+    expect(parseViewUrl(url.slice(url.indexOf('?')))!.filters.deltaContextEnabled).toBe(false);
   });
 
   test('absolute ranges keep datetime-local strings', () => {

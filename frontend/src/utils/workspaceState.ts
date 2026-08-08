@@ -105,6 +105,7 @@ function sanitize(p: Partial<WorkspaceState>): WorkspaceState {
       dpts: strings(f.dpts).filter(d => /^\d+(\.\d+)?$/.test(d)),
       deltaBeforeMs: Math.max(0, Number(f.deltaBeforeMs) || 0),
       deltaAfterMs: Math.max(0, Number(f.deltaAfterMs) || 0),
+      deltaContextEnabled: typeof f.deltaContextEnabled === 'boolean' ? f.deltaContextEnabled : true,
       sourceTargetRelation: f.sourceTargetRelation === 'OR' ? 'OR' : 'AND',
     },
     plot: strings(p.plot),
@@ -131,6 +132,7 @@ export function buildMonitorSearch(state: WorkspaceState): string {
   if (f.dpts.length > 0) p.set('dpt', f.dpts.join(','));
   if (f.deltaBeforeMs > 0) p.set('before', String(f.deltaBeforeMs));
   if (f.deltaAfterMs > 0) p.set('after', String(f.deltaAfterMs));
+  if (!f.deltaContextEnabled) p.set('delta_off', '1');
   // `rel_st` is no longer written — all filters combine with AND (#275). Old links
   // carrying rel_st=OR are still parsed above and load (harmlessly) as AND.
   if (state.plot.length > 0) p.set('plot', state.plot.join(','));
@@ -160,6 +162,7 @@ export function parseMonitorSearch(search: string): WorkspaceState | null {
       dpts: list(p.get('dpt')),
       deltaBeforeMs: Number(p.get('before')) || 0,
       deltaAfterMs: Number(p.get('after')) || 0,
+      deltaContextEnabled: p.get('delta_off') !== '1',
       sourceTargetRelation: p.get('rel_st') === 'OR' ? 'OR' : 'AND',
     },
     plot: list(p.get('plot')),

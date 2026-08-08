@@ -107,6 +107,11 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     onFiltersChange({ ...activeFilters, deltaBeforeMs, deltaAfterMs });
   };
 
+  // Toggles the window on/off without losing the entered values (#318).
+  const handleDeltaContextEnabledChange = (deltaContextEnabled: boolean) => {
+    onFiltersChange({ ...activeFilters, deltaContextEnabled });
+  };
+
   const sortedTelegrams = useMemo(
     () => sortTelegrams(telegrams, sortConfig),
     [telegrams, sortConfig]
@@ -328,6 +333,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               onQuickFilter={handleQuickFilter}
               onQuickVisualize={handleQuickVisualize}
               onDeltaContextChange={handleDeltaContextChange}
+              onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
             />
           )}
         </div>

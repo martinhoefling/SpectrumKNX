@@ -1,5 +1,20 @@
 import { expect, test } from 'vitest';
-import { buildHistoryUrl, rangeToMs } from './historyLoad';
+import { applyFilterParams, buildHistoryUrl, rangeToMs } from './historyLoad';
+import { DEFAULT_FILTERS } from '../types/filters';
+
+test('applyFilterParams sends the Time-Delta-Context window when enabled', () => {
+  const url = applyFilterParams('/api/telegrams', { ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaAfterMs: 250 });
+  expect(url).toContain('delta_before_ms=500');
+  expect(url).toContain('delta_after_ms=250');
+});
+
+test('applyFilterParams omits the window while disabled, even with stored values (#318)', () => {
+  const url = applyFilterParams('/api/telegrams', {
+    ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaAfterMs: 250, deltaContextEnabled: false,
+  });
+  expect(url).not.toContain('delta_before_ms');
+  expect(url).not.toContain('delta_after_ms');
+});
 
 test('buildHistoryUrl handles relative ranges correctly', () => {
   const url = buildHistoryUrl({ kind: 'relative', seconds: 3600 }, 100);

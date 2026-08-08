@@ -1,5 +1,19 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_FILTERS, dptKey, matchesDpt, matchesTelegram } from './filters';
+import { DEFAULT_FILTERS, dptKey, effectiveDeltaContext, matchesDpt, matchesTelegram } from './filters';
+
+describe('effectiveDeltaContext', () => {
+  test('returns the stored before/after values when enabled', () => {
+    const f = { ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaAfterMs: 250, deltaContextEnabled: true };
+    expect(effectiveDeltaContext(f)).toEqual({ before: 500, after: 250 });
+  });
+
+  test('zeroes the effective window when disabled, without touching the stored values (#318)', () => {
+    const f = { ...DEFAULT_FILTERS, deltaBeforeMs: 500, deltaAfterMs: 250, deltaContextEnabled: false };
+    expect(effectiveDeltaContext(f)).toEqual({ before: 0, after: 0 });
+    expect(f.deltaBeforeMs).toBe(500); // re-enabling would restore these, not lose them
+    expect(f.deltaAfterMs).toBe(250);
+  });
+});
 
 describe('dptKey', () => {
   test('pads the sub to three digits', () => {
