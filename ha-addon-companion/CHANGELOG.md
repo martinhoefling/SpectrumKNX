@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0-beta.6
+
+### Added
+
+- **Building Structure readability**: shared group-address table with row-hover highlighting, project-wide name-column alignment, and blank Time/Value cells for GAs never seen on the bus; function-type names, DPT-mismatch detection between linked group addresses, a comm-object summary row, and visualize icons throughout (#306, #307).
+- **Telegram List overhaul**: multi-level sorting, an always-on delta-time column, and a quick info bar (oldest/newest, min/max delta, jump-to-row); redesigned quick filter with per-column pattern matching and a DELTA TIME quick-filter cell (#311, #309).
+- **Time-Delta-Context**: switchable on/off without losing the entered before/after values, per-message flagging so a specific telegram always anchors its own context window, and clear visual marking of filtered vs. unfiltered context rows in the list (#318, #319, #343).
+- **Visualization improvements**: crowded charts get hover highlighting, a collapsible fixed legend, and a per-metric "lock" that spawns a new chart instead of piling more lines onto one; the pan & zoom timeline now sits above the charts and pins to the live edge as the buffer grows; clicking a point on a chart's timeline jumps back to the telegram list centered on that time; group addresses with unchartable values (e.g. text/DPT16) now render as discrete, labeled event dots instead of a blank chart (#349, #308, #341).
+- **Cross-navigation icons**: write-to-GA, add-to-filter, visualize, and last-seen-values icons throughout the Visualization Targets sidebar and the Last Seen Values pane, including on the "other kind" address (device or GA) shown in each telegram's row (#341).
+
+### Fixed
+
+- **Write to bus**: sending an empty value to a DPT 16/28 (string) group address was blocked by the Write button, even though an empty string is a valid payload for clearing a text display (#410).
+
 ## 2.0.0-beta.5
 
 ### Added
