@@ -240,7 +240,11 @@ export const DatabaseOverlay: React.FC<DatabaseOverlayProps> = ({ onClose }) => 
                     <button
                       className="glass-button"
                       disabled={busy || !cutoffDate}
-                      onClick={() => requestPreview(new Date(cutoffDate).toISOString())}
+                      // A date-only string ("2026-08-05") parses as UTC midnight per the
+                      // JS spec, not local midnight — appending a bare time makes it parse
+                      // as local time instead, so the cutoff matches the date the user
+                      // actually picked in their own timezone (#416).
+                      onClick={() => requestPreview(new Date(`${cutoffDate}T00:00:00`).toISOString())}
                       style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-tag)', color: 'var(--text-main)', cursor: busy || !cutoffDate ? 'not-allowed' : 'pointer' }}
                     >
                       Preview
