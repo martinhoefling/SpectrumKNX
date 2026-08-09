@@ -170,7 +170,12 @@ export function WriteControls({ dptMain, dptKey, address, value, onValueChange, 
     );
   }
 
-  const writeDisabled = disabled || value.trim() === '';
+  // DPT 16 (14-byte string) and 28 (UTF-8 string) treat an empty string as a
+  // valid payload (e.g. clearing a text display) — only block the send for
+  // DPTs where an empty value isn't meaningful, e.g. because it can't be
+  // coerced to a number (#410).
+  const isTextDpt = dptMain === 16 || dptMain === 28;
+  const writeDisabled = disabled || (!isTextDpt && value.trim() === '');
   return (
     <div style={{ position: 'relative', display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
       <div style={{ position: 'relative' }}>

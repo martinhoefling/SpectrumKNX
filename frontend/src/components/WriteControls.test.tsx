@@ -34,6 +34,16 @@ test('Write is disabled while the value is empty', () => {
   expect(screen.getByRole('button', { name: /Write/ })).toBeDisabled();
 });
 
+test('DPT 16/28 (string) allow sending an empty value (#410)', () => {
+  const onWrite = vi.fn();
+  render(<WriteControls dptMain={16} value="" onValueChange={() => {}} onWrite={onWrite} />);
+
+  const writeBtn = screen.getByRole('button', { name: /Write/ });
+  expect(writeBtn).not.toBeDisabled();
+  fireEvent.click(writeBtn);
+  expect(onWrite).toHaveBeenCalledWith('');
+});
+
 test('DPT 10 renders a time input field and handles write', () => {
   const onWrite = vi.fn();
   const onValueChange = vi.fn();
