@@ -32,3 +32,11 @@ export function secondaryBtn(disabled: boolean): React.CSSProperties {
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
   };
 }
+
+/** Small inline per-row action icon (filter/last-seen/visualize/write), as used
+ * on GA/device rows throughout the app (#214, #306, #341). */
+export const rowIconBtnStyle: React.CSSProperties = {
+  background: 'transparent', border: 'none', cursor: 'pointer',
+  color: 'var(--text-dim)', padding: '0.15rem', borderRadius: '3px',
+  display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle',
+};

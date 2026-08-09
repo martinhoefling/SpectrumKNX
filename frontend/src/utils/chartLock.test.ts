@@ -5,7 +5,7 @@ import type { ChartBucket, ChartSeries } from '../hooks/useChartData';
 const series = (address: string): ChartSeries => ({ address, name: address, data: [1], real: [true] });
 
 const bucket = (unit: string, addresses: string[]): ChartBucket => ({
-  unit, isBinary: false, timestamps: [1000], series: addresses.map(series),
+  unit, isBinary: false, isEvents: false, timestamps: [1000], series: addresses.map(series),
 });
 
 describe('splitLockedBuckets', () => {

@@ -1130,6 +1130,9 @@ function App() {
                     zoomRange={zoomRange}
                     onZoomRangeChange={setZoomRange}
                     onTimeClick={handleChartTimeClick}
+                    writeEnabled={serverConfig?.status?.write_enabled}
+                    onFilterGAs={handleFilterGAs}
+                    onLastSeen={handleQuickLastSeen}
                   />
                 ) : isLastSeenOpen ? (
                   <LastSeenOverlay
@@ -1149,6 +1152,9 @@ function App() {
                       setLastSeenMode(mode);
                       setLastSeenAddresses(addresses);
                     }}
+                    onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
+                    onFilterGAs={handleFilterGAs}
+                    onVisualizeGAs={handleVisualizeGAs}
                   />
                 ) : isStatisticsOpen ? (
                   <StatisticsOverlay

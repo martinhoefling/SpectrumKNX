@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Clock, RefreshCw, Search, ToggleLeft, ToggleRight, Radio, Send } from 'lucide-react';
+import { X, Clock, RefreshCw, Search, ToggleLeft, ToggleRight, Radio, Send, Filter, LineChart } from 'lucide-react';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { FilterOptions } from '../types/filters';
@@ -8,7 +8,7 @@ import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
-import { secondaryBtn } from '../utils/buttonStyles';
+import { secondaryBtn, rowIconBtnStyle } from '../utils/buttonStyles';
 
 const LIMITS = [10, 20, 50, 100] as const;
 
@@ -29,6 +29,11 @@ interface LastSeenOverlayProps {
   search?: string;
   onSearchChange?: (search: string) => void;
   onSelectionChange?: (mode: 'ga' | 'pa', addresses: string[]) => void;
+  /** Cross-navigation icons on GA/device rows and the SOURCE/TARGET columns
+   * (#341): add-to-filter for both kinds, plus visualize for GAs. */
+  onFilterDevice?: (pa: string) => void;
+  onFilterGAs?: (addresses: string[]) => void;
+  onVisualizeGAs?: (addresses: string[]) => void;
 }
 
 const getTypeColor = (type?: string | null) => {
@@ -70,6 +75,9 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   search: searchProp,
   onSearchChange,
   onSelectionChange,
+  onFilterDevice,
+  onFilterGAs,
+  onVisualizeGAs,
 }) => {
   const [mode, setMode] = useState<'ga' | 'pa'>(initialMode);
   const [selectedAddresses, setSelectedAddresses] = useState<string[]>(initialAddresses);
@@ -220,6 +228,15 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     setSearch('');
   };
 
+  // Cross-navigation from a SOURCE/TARGET table cell of the "other" kind
+  // (e.g. a device shown as a GA telegram's source): switch mode and select
+  // it, entirely within this pane's own state (#341).
+  const gotoAddress = (address: string, kind: 'ga' | 'pa') => {
+    setMode(kind);
+    setSelectedAddresses([address]);
+    setSearch('');
+  };
+
   const filteredAddresses = addressList
     .filter(a => {
       const q = search.toLowerCase();
@@ -336,15 +353,51 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                     </div>
                   )}
                 </button>
-                {writeEnabled && mode === 'ga' && addr.address && (
-                  <div style={{ paddingRight: '0.5rem', flexShrink: 0 }}>
-                    <SendToGaPopover
-                      address={addr.address}
-                      name={addr.name}
-                      dptMain={addr.main}
-                      dptSub={addr.sub}
-                      buttonClassName="quick-send-btn"
-                    />
+                {addr.address && (
+                  <div style={{ paddingRight: '0.5rem', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                    {writeEnabled && mode === 'ga' && (
+                      <SendToGaPopover
+                        address={addr.address}
+                        name={addr.name}
+                        dptMain={addr.main}
+                        dptSub={addr.sub}
+                        buttonClassName="quick-send-btn"
+                        buttonStyle={rowIconBtnStyle}
+                      />
+                    )}
+                    {mode === 'ga' && onVisualizeGAs && (
+                      <button
+                        style={rowIconBtnStyle}
+                        title="Visualize this group address"
+                        onClick={() => onVisualizeGAs([addr.address!])}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                      >
+                        <LineChart size={11} />
+                      </button>
+                    )}
+                    {mode === 'ga' && onFilterGAs && (
+                      <button
+                        style={rowIconBtnStyle}
+                        title="Filter by this group address"
+                        onClick={() => onFilterGAs([addr.address!])}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                      >
+                        <Filter size={11} />
+                      </button>
+                    )}
+                    {mode === 'pa' && onFilterDevice && (
+                      <button
+                        style={rowIconBtnStyle}
+                        title="Filter by this device"
+                        onClick={() => onFilterDevice(addr.address!)}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                      >
+                        <Filter size={11} />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -533,8 +586,80 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                       </td>
                     )}
                     <td style={tdStyle}>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                        {mode === 'ga' ? t.source_address : t.target_address}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                          {mode === 'ga' ? t.source_address : t.target_address}
+                        </span>
+                        {/* Cross-navigation icons on the "other kind" address of
+                            this telegram (#341): a device shown while viewing a
+                            GA's history, or a GA shown while viewing a device's. */}
+                        {mode === 'ga' ? (
+                          <>
+                            {onFilterDevice && (
+                              <button
+                                style={rowIconBtnStyle}
+                                title="Filter by this device"
+                                onClick={() => onFilterDevice(t.source_address)}
+                                onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                              >
+                                <Filter size={11} />
+                              </button>
+                            )}
+                            <button
+                              style={rowIconBtnStyle}
+                              title="Show last seen values for this device"
+                              onClick={() => gotoAddress(t.source_address, 'pa')}
+                              onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                            >
+                              <Clock size={11} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {writeEnabled && (
+                              <SendToGaPopover
+                                address={t.target_address}
+                                name={t.target_name}
+                                dptMain={t.dpt_main}
+                                dptSub={t.dpt_sub}
+                                buttonStyle={rowIconBtnStyle}
+                              />
+                            )}
+                            {onVisualizeGAs && (
+                              <button
+                                style={rowIconBtnStyle}
+                                title="Visualize this group address"
+                                onClick={() => onVisualizeGAs([t.target_address])}
+                                onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                              >
+                                <LineChart size={11} />
+                              </button>
+                            )}
+                            {onFilterGAs && (
+                              <button
+                                style={rowIconBtnStyle}
+                                title="Filter by this group address"
+                                onClick={() => onFilterGAs([t.target_address])}
+                                onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                              >
+                                <Filter size={11} />
+                              </button>
+                            )}
+                            <button
+                              style={rowIconBtnStyle}
+                              title="Show last seen values for this group address"
+                              onClick={() => gotoAddress(t.target_address, 'ga')}
+                              onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                            >
+                              <Clock size={11} />
+                            </button>
+                          </>
+                        )}
                       </span>
                     </td>
                     <td style={{ ...tdStyle, color: 'var(--text-dim)', fontSize: '0.78rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

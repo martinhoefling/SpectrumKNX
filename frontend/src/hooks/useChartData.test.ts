@@ -63,15 +63,19 @@ describe('useChartData — addressToUnit (#349 chart lock)', () => {
 });
 
 describe('useChartData — datatype override for untyped GAs (#315)', () => {
-  test('untyped raw-byte telegrams do not plot without a chosen datatype', () => {
+  test('untyped raw-byte telegrams with no chosen datatype land in the events bucket (#341)', () => {
     const telegrams = [
       at(1, { target_address: '1/1/1', value_json: [0x0c, 0x1a] as unknown as Record<string, unknown> }),
       at(2, { target_address: '1/1/1', value_json: [0x0c, 0x1b] as unknown as Record<string, unknown> }),
     ];
     const { result } = renderHook(() => useChartData(telegrams, ['1/1/1']));
-    // A bucket exists but the raw byte arrays decode to nothing plottable.
+    // Unplottable as a numeric line, but not silently dropped either — shown
+    // as discrete event dots instead (#341).
+    expect(result.current.buckets).toHaveLength(1);
+    expect(result.current.buckets[0].unit).toBe('events');
+    expect(result.current.buckets[0].isEvents).toBe(true);
     const series = result.current.buckets[0]?.series[0];
-    expect(series?.data.every(v => v === null)).toBe(true);
+    expect(series?.real).toEqual([true, true]);
   });
 
   test('a chosen datatype decodes raw payloads and groups by its unit', () => {
@@ -95,6 +99,50 @@ describe('useChartData — datatype override for untyped GAs (#315)', () => {
     const { result } = renderHook(() => useChartData(telegrams, ['1/1/1'], { '1/1/1': '5.001' }));
     expect(result.current.buckets[0].unit).toBe('%');
     expect(result.current.buckets[0].series[0].data[0]).toBeCloseTo(100, 6);
+  });
+});
+
+describe('useChartData — events bucket for unchartable DPTs (#341)', () => {
+  test('text (DPT16) telegrams land in a shared events bucket with formatted labels', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', dpt_main: 16, dpt_sub: 1, value_json: 'Hello', value_formatted: 'Hello' }),
+      at(2, { target_address: '1/1/1', dpt_main: 16, dpt_sub: 1, value_json: 'World', value_formatted: 'World' }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1']));
+    expect(result.current.buckets).toHaveLength(1);
+    expect(result.current.buckets[0].unit).toBe('events');
+    expect(result.current.addressToUnit['1/1/1']).toBe('events');
+    const series = result.current.buckets[0].series[0];
+    expect(series.labels).toEqual(['Hello', 'World']);
+  });
+
+  test('binary and numeric GAs are not swept into the events bucket', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', dpt_main: 1, value_json: true }),
+      at(2, { target_address: '1/1/2', dpt_main: 9, dpt_sub: 1, unit: '°C', value_numeric: 20 }),
+      at(3, { target_address: '1/1/3', dpt_main: 16, dpt_sub: 1, value_json: 'Alarm', value_formatted: 'Alarm' }),
+    ];
+    const { result } = renderHook(() => useChartData(telegrams, ['1/1/1', '1/1/2', '1/1/3']));
+    expect(result.current.addressToUnit).toEqual({
+      '1/1/1': 'binary', '1/1/2': '°C', '1/1/3': 'events',
+    });
+    const eventsBucket = result.current.buckets.find(b => b.unit === 'events')!;
+    expect(eventsBucket.series.map(s => s.address)).toEqual(['1/1/3']);
+  });
+
+  test('an events-bucket series does not forward-fill between occurrences', () => {
+    const telegrams = [
+      at(1, { target_address: '1/1/1', dpt_main: 16, dpt_sub: 1, value_json: 'A', value_formatted: 'A' }),
+    ];
+    // A second, unrelated GA extends maxTime — the lone event should not
+    // "hold" a value across that appended column.
+    const telegramsWithLaterOther = [
+      ...telegrams,
+      at(5, { target_address: '1/1/2', dpt_main: 1, value_json: true }),
+    ];
+    const { result } = renderHook(() => useChartData(telegramsWithLaterOther, ['1/1/1', '1/1/2']));
+    const eventsSeries = result.current.buckets.find(b => b.unit === 'events')!.series[0];
+    expect(eventsSeries.data).toEqual([1, null]);
   });
 });
 

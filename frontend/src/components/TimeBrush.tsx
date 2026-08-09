@@ -8,6 +8,10 @@ interface TimeBrushProps {
   value: [number, number];
   onChange: (value: [number, number]) => void;
   telegrams: Telegram[];
+  /** Whether each handle is currently pinned to its domain edge, tracking it
+   * as the buffer grows/purges instead of staying at a frozen time (#341). */
+  leftPinned?: boolean;
+  rightPinned?: boolean;
 }
 
 export const TimeBrush: React.FC<TimeBrushProps> = ({
@@ -16,6 +20,8 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
   value,
   onChange,
   telegrams,
+  leftPinned = false,
+  rightPinned = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<'left' | 'right' | 'middle' | null>(null);
@@ -192,7 +198,9 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
             e.stopPropagation();
             onChange([minTime, value[1]]);
           }}
-          title="Drag to adjust · double-click to extend to the oldest data"
+          title={leftPinned
+            ? 'Pinned to the oldest data — follows as the buffer purges. Drag to unpin.'
+            : 'Drag to adjust · double-click to pin to the oldest data'}
           style={{
             position: 'absolute',
             left: `calc(${leftPct}% - 5px)`,
@@ -210,7 +218,7 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
               width: 4,
               height: 14,
               borderRadius: 2,
-              background: dragMode === 'left' ? 'var(--accent-primary)' : 'var(--text-dim)',
+              background: dragMode === 'left' || leftPinned ? 'var(--accent-primary)' : 'var(--text-dim)',
               border: '1px solid var(--border-color)',
             }}
           />
@@ -228,7 +236,9 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
             e.stopPropagation();
             onChange([value[0], maxTime]);
           }}
-          title="Drag to adjust · double-click to extend to the newest data"
+          title={rightPinned
+            ? 'Pinned to the live edge — follows as new telegrams arrive. Drag to unpin.'
+            : 'Drag to adjust · double-click to pin to the live edge'}
           style={{
             position: 'absolute',
             left: `calc(${rightPct}% - 5px)`,
@@ -246,7 +256,7 @@ export const TimeBrush: React.FC<TimeBrushProps> = ({
               width: 4,
               height: 14,
               borderRadius: 2,
-              background: dragMode === 'right' ? 'var(--accent-primary)' : 'var(--text-dim)',
+              background: dragMode === 'right' || rightPinned ? 'var(--accent-primary)' : 'var(--text-dim)',
               border: '1px solid var(--border-color)',
             }}
           />

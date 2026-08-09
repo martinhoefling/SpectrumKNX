@@ -4,6 +4,7 @@ import { VisualizerSidebar } from './VisualizerSidebar';
 import { useChartData } from '../hooks/useChartData';
 import { MixedChart } from './MixedChart';
 import { TimelineChart } from './TimelineChart';
+import { EventDotsChart } from './EventDotsChart';
 import { TimeBrush } from './TimeBrush';
 import { Download, Link2, Check, X } from 'lucide-react';
 import { getPref, setPref } from '../utils/prefs';
@@ -25,11 +26,15 @@ interface VisualizerProps {
   /** Click on a chart's time ruler or a telegram dot: navigate to the telegram
    * list around that timestamp (#308). */
   onTimeClick?: (ms: number) => void;
+  /** Per-target row actions in the sidebar (#341): write/filter/last-seen. */
+  writeEnabled?: boolean;
+  onFilterGAs?: (addresses: string[]) => void;
+  onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
 }
 
 export const Visualizer: React.FC<VisualizerProps> = ({
   telegrams, selectedTargets, onTargetsChange, onClose, getShareLink, embed = false,
-  zoomRange, onZoomRangeChange, onTimeClick,
+  zoomRange, onZoomRangeChange, onTimeClick, writeEnabled, onFilterGAs, onLastSeen,
 }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
@@ -103,18 +108,32 @@ export const Visualizer: React.FC<VisualizerProps> = ({
 
   const [internalZoomRange, setInternalZoomRange] = useState<[number, number] | null>(null);
   const currentZoomRange = zoomRange !== undefined ? zoomRange : internalZoomRange;
+
+  // Edge pin (#341, #340 follow-up): a handle left at (or dragged/double-clicked
+  // to) the domain edge keeps tracking that edge as minTime/maxTime move — the
+  // timeline analogue of the telegram list's live-edge follow (#203). Ephemeral,
+  // like the list's follow state: not part of the shareable-link zoomRange
+  // contract, so it resets on reload rather than being encoded in a URL.
+  const [edgePinned, setEdgePinned] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+
   const setZoomRange = (val: [number, number] | null | ((prev: [number, number] | null) => [number, number] | null)) => {
     const next = typeof val === 'function' ? val(currentZoomRange) : val;
     setInternalZoomRange(next);
     onZoomRangeChange?.(next);
+    if (next && minTime !== null && maxTime !== null) {
+      const eps = Math.max(1000, (maxTime - minTime) * 0.005);
+      setEdgePinned({ left: next[0] <= minTime + eps, right: next[1] >= maxTime - eps });
+    } else {
+      setEdgePinned({ left: false, right: false });
+    }
   };
 
   const activeRange = useMemo<[number, number]>(() => {
     if (!currentZoomRange || minTime === null || maxTime === null) return defaultRange;
-    const left = Math.max(minTime, Math.min(maxTime, currentZoomRange[0]));
-    const right = Math.max(left, Math.min(maxTime, currentZoomRange[1]));
+    const left = edgePinned.left ? minTime : Math.max(minTime, Math.min(maxTime, currentZoomRange[0]));
+    const right = edgePinned.right ? maxTime : Math.max(left, Math.min(maxTime, currentZoomRange[1]));
     return [left, right];
-  }, [currentZoomRange, minTime, maxTime, defaultRange]);
+  }, [currentZoomRange, minTime, maxTime, defaultRange, edgePinned]);
 
   // Deselecting a target clears any legend-hide on it, so reselecting the same
   // target shows its series again instead of staying invisible (#205).
@@ -166,6 +185,8 @@ export const Visualizer: React.FC<VisualizerProps> = ({
       {displayBuckets.map(g => (
         g.bucket.isBinary ? (
           <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} />
+        ) : g.bucket.isEvents ? (
+          <EventDotsChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} />
         ) : (
           <MixedChart
             key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]}
@@ -198,6 +219,8 @@ export const Visualizer: React.FC<VisualizerProps> = ({
             value={activeRange}
             onChange={setZoomRange}
             telegrams={telegrams}
+            leftPinned={edgePinned.left}
+            rightPinned={edgePinned.right}
           />
         )}
         {charts}
@@ -216,6 +239,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           untypedTargets={untypedTargets}
           dptOverrides={dptOverrides}
           onDptOverrideChange={setDptOverride}
+          writeEnabled={writeEnabled}
+          onFilterGAs={onFilterGAs}
+          onLastSeen={onLastSeen}
         />
 
         {/* Chart Area */}
@@ -303,6 +329,8 @@ export const Visualizer: React.FC<VisualizerProps> = ({
               value={activeRange}
               onChange={setZoomRange}
               telegrams={telegrams}
+              leftPinned={edgePinned.left}
+              rightPinned={edgePinned.right}
             />
           )}
           {charts}

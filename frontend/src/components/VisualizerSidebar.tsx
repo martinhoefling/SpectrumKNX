@@ -1,14 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { LineChart, X, Search } from 'lucide-react';
+import { LineChart, X, Search, Filter, Clock } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { OptionRow } from './FilterPanel';
+import { SendToGaPopover } from './SendToGaPopover';
 import { RAW_DPT_OPTIONS } from '../utils/rawDpt';
 import { getPref, setPref } from '../utils/prefs';
+import { rowIconBtnStyle } from '../utils/buttonStyles';
 
 interface TargetCount {
   address: string;
   name: string;
   count: number;
+  dptMain: number | null;
+  dptSub: number | null;
 }
 
 interface VisualizerSidebarProps {
@@ -21,11 +25,16 @@ interface VisualizerSidebarProps {
   dptOverrides?: Record<string, string>;
   /** Assign (or clear, with '') the datatype for a GA. */
   onDptOverrideChange?: (address: string, key: string) => void;
+  /** Per-target row actions (#341): write/filter/last-seen. */
+  writeEnabled?: boolean;
+  onFilterGAs?: (addresses: string[]) => void;
+  onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
 }
 
 export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
   telegrams, selectedTargets, onTargetsChange,
   untypedTargets, dptOverrides = {}, onDptOverrideChange,
+  writeEnabled, onFilterGAs, onLastSeen,
 }) => {
   // Persisted so the Targets filter survives closing/reopening the panel and
   // reloads, like the other visualization prefs (#361).
@@ -44,7 +53,9 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
         map.set(t.target_address, {
           address: t.target_address,
           name: t.target_name || 'Unknown Target',
-          count: 0
+          count: 0,
+          dptMain: t.dpt_main,
+          dptSub: t.dpt_sub,
         });
       }
       map.get(t.target_address)!.count++;
@@ -125,6 +136,41 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
                 checked={selected}
                 count={t.count}
                 onToggle={() => toggle(t.address)}
+                actions={(writeEnabled || onFilterGAs || onLastSeen) && (
+                  <>
+                    {writeEnabled && (
+                      <SendToGaPopover
+                        address={t.address}
+                        name={t.name}
+                        dptMain={t.dptMain}
+                        dptSub={t.dptSub}
+                        buttonStyle={rowIconBtnStyle}
+                      />
+                    )}
+                    {onFilterGAs && (
+                      <button
+                        style={rowIconBtnStyle}
+                        title="Filter by this group address"
+                        onClick={() => onFilterGAs([t.address])}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                      >
+                        <Filter size={11} />
+                      </button>
+                    )}
+                    {onLastSeen && (
+                      <button
+                        style={rowIconBtnStyle}
+                        title="Show last seen values"
+                        onClick={() => onLastSeen([t.address], 'ga')}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
+                      >
+                        <Clock size={11} />
+                      </button>
+                    )}
+                  </>
+                )}
               />
               {needsDpt && (
                 <div style={{ padding: '0 0.25rem 0.5rem 1.75rem', marginTop: '-0.25rem' }}>

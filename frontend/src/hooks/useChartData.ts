@@ -10,11 +10,19 @@ export interface ChartSeries {
    * forward-filled hold). Drives the telegram dots (#195), so cyclic repeats of
    * the same value are visible instead of hidden inside a flat segment. */
   real: boolean[];
+  /** Formatted value text per column, only for an "events" bucket (#341) —
+   * unchartable telegrams (e.g. DPT16 text) have no numeric `data` to plot,
+   * just a discrete occurrence with a label shown in the dot's tooltip/legend. */
+  labels?: (string | null)[];
 }
 
 export interface ChartBucket {
   unit: string;
   isBinary: boolean;
+  /** GAs that never resolve to a number or boolean (e.g. text/complex DPTs)
+   * are grouped here as discrete, unfilled event dots instead of a numeric
+   * line or an always-empty series (#341). Mutually exclusive with isBinary. */
+  isEvents: boolean;
   timestamps: number[]; // shared x-values (unix ms)
   series: ChartSeries[];
 }
@@ -81,12 +89,38 @@ export function useChartData(
     const minTime = relevant[0].ts;
     const maxTime = relevant[relevant.length - 1].ts;
 
+    // A GA whose telegrams never resolve to a number or boolean (e.g. DPT16
+    // text, or a complex/unknown DPT with no chosen override) can't be
+    // plotted as a line — it used to land in the 'unknown' bucket as an
+    // always-empty series. Route those GAs into a dedicated "events" bucket
+    // of discrete dots instead (#341).
+    const binaryAddrs = new Set<string>();
+    const decodableAddrs = new Set<string>();
+    for (const t of relevant) {
+      if (t.dpt_main === 1 || typeof t.value_json === 'boolean') {
+        binaryAddrs.add(t.target_address);
+        continue;
+      }
+      const overrideKey = t.dpt_main == null ? dptOverrides[t.target_address] : undefined;
+      let val = t.value_numeric;
+      if (val === null && typeof t.value_json === 'number') val = t.value_json;
+      else if (val === null && overrideKey) val = overrideValue(t);
+      if (val !== null) decodableAddrs.add(t.target_address);
+    }
+    const eventAddrs = new Set(
+      relevant
+        .map(t => t.target_address)
+        .filter((a, i, arr) => arr.indexOf(a) === i && !binaryAddrs.has(a) && !decodableAddrs.has(a))
+    );
+
     // 2. Group into physical units / buckets
     // We treat DPT1 (boolean/binary) as a special bucket called 'binary'
     const grouped = new Map<string, typeof relevant>();
     const addressToUnit: Record<string, string> = {};
 
     for (const t of relevant) {
+      if (eventAddrs.has(t.target_address)) continue; // built as the shared 'events' bucket below
+
       const overrideKey = t.dpt_main == null ? dptOverrides[t.target_address] : undefined;
       let bucketKey = t.unit || 'unknown';
       if (overrideKey) {
@@ -158,9 +192,39 @@ export function useChartData(
       buckets.push({
         unit,
         isBinary,
+        isEvents: false,
         timestamps,
         series
       });
+    }
+
+    // 3b. Events bucket (#341): one shared lane group for every unchartable
+    // GA, dots only — no forward-fill, since each is a discrete occurrence
+    // rather than a held state.
+    if (eventAddrs.size > 0) {
+      const eventRows = relevant.filter(t => eventAddrs.has(t.target_address));
+      const tsSet = new Set<number>();
+      eventRows.forEach(r => tsSet.add(r.ts));
+      tsSet.add(maxTime);
+      const timestamps = Array.from(tsSet).sort((a, b) => a - b);
+
+      const series: ChartSeries[] = Array.from(eventAddrs).map(addr => {
+        const rows = eventRows.filter(r => r.target_address === addr);
+        const name = rows[0]?.target_name || addr;
+        const real: boolean[] = [];
+        const data: (number | null)[] = [];
+        const labels: (string | null)[] = [];
+        for (const ts of timestamps) {
+          const match = rows.find(r => r.ts === ts);
+          real.push(!!match);
+          data.push(match ? 1 : null);
+          labels.push(match ? (match.value_formatted ?? (match.value_json != null ? String(match.value_json) : null)) : null);
+        }
+        return { address: addr, name, data, real, labels };
+      });
+
+      buckets.push({ unit: 'events', isBinary: false, isEvents: true, timestamps, series });
+      eventAddrs.forEach(a => { addressToUnit[a] = 'events'; });
     }
 
     // Order buckets by metric (unit), not by which telegram arrived first. The
