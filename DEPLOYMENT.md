@@ -460,3 +460,56 @@ configured each returns `{"status": "no_project_loaded"}`.
 |---|---|
 | `analyze_bus_traffic(hours)` | Steer a read-only analysis of recent traffic (volume, busy addresses, anomalies). |
 | `find_group_addresses_without_dpts` | Audit the project for group addresses missing a DPT. |
+
+---
+
+## 8. Health Monitoring & Kubernetes Probes
+
+Spectrum KNX includes a health check endpoint for monitoring systems, load balancers, and Kubernetes probes:
+
+- **Endpoints:**
+  - `/health` or `/api/health`: Full health check endpoint. Returns HTTP `200 OK` when healthy, or HTTP `503 Service Unavailable` when degraded or unhealthy.
+  - `/health/liveness` or `/api/health/liveness`: Liveness probe. Checks core process and database reachability.
+  - `/health/readiness` or `/api/health/readiness`: Readiness probe. Checks database reachability and active KNX bus connection status.
+
+- **Response Payload:**
+  ```json
+  {
+    "status": "ok",
+    "timestamp": "2026-08-14T22:18:00.123456+00:00",
+    "version": "1.0.0",
+    "store_mode": "standalone",
+    "checks": {
+      "database": {
+        "status": "ok",
+        "error": null
+      },
+      "knx_connection": {
+        "status": "ok",
+        "connected": true
+      },
+      "telegrams": {
+        "status": "ok",
+        "last_received_at": "2026-08-14T22:15:00+00:00",
+        "seconds_since_last_telegram": 180.0
+      }
+    }
+  }
+  ```
+
+- **Kubernetes Probes Example:**
+  ```yaml
+  livenessProbe:
+    httpGet:
+      path: /health/liveness
+      port: 8765
+    initialDelaySeconds: 15
+    periodSeconds: 10
+  readinessProbe:
+    httpGet:
+      path: /health/readiness
+      port: 8765
+    initialDelaySeconds: 10
+    periodSeconds: 5
+  ```
+

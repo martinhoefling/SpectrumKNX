@@ -6,7 +6,18 @@ import tempfile
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from knx_telegram_store import TelegramQuery
 from knx_telegram_store.formats import COMMUNICATION_LOG_FOOTER, COMMUNICATION_LOG_HEADER, format_telegram_element
@@ -16,7 +27,9 @@ from xknx.exceptions import ConversionError, CouldNotParseAddress
 from xknx.telegram.address import GroupAddress, IndividualAddress
 
 import cyclic_send
+import ha_live_bridge
 import knx_daemon  # import global config
+import pg_listen_bridge
 import telegram_export
 import telegram_import
 import update_check
@@ -51,6 +64,111 @@ def get_backend_version() -> str:
 async def get_version():
     """Returns the backend version from ENV or git"""
     return {"version": get_backend_version()}
+
+
+@router.get("/health")
+@router.get("/api/health")
+@router.get("/health/liveness")
+@router.get("/api/health/liveness")
+@router.get("/health/readiness")
+@router.get("/api/health/readiness")
+async def get_health(request: Request, response: Response, probe_type: str | None = None):
+    """Health check endpoint for monitoring systems and Kubernetes probes.
+
+    Checks:
+    - database: reachability and store query execution.
+    - knx_connection: active bus connection in standalone/postgres-readonly modes,
+      or live feed status in external-readonly mode.
+    - telegrams: timestamp of the last telegram processed and time elapsed.
+    """
+    path = request.url.path
+    if path.endswith("/liveness") or probe_type == "liveness":
+        check_type = "liveness"
+    elif path.endswith("/readiness") or probe_type == "readiness":
+        check_type = "readiness"
+    else:
+        check_type = "full"
+
+    # 1. Database Check & Latest DB Telegram
+    db_status = "ok"
+    db_error = None
+    latest_db_telegram_ts = None
+
+    try:
+        res = await store.query(TelegramQuery(limit=1, order_descending=True))
+        if res.telegrams:
+            t_ts = res.telegrams[0].timestamp
+            if t_ts.tzinfo is None:
+                t_ts = t_ts.replace(tzinfo=UTC)
+            latest_db_telegram_ts = t_ts
+    except Exception as e:
+        db_status = "error"
+        db_error = str(e)
+
+    # 2. KNX Connection Check
+    knx_status = "n/a"
+    knx_connected = None
+
+    if STORE_MODE in ("standalone", "postgres-readonly"):
+        knx_connected = knx_daemon.is_connected()
+        knx_status = "ok" if knx_connected else "disconnected"
+    elif STORE_MODE == "external-readonly":
+        feed_stat = ha_live_bridge.live_feed_status()
+        knx_connected = feed_stat.get("connected", False)
+        knx_status = "ok" if knx_connected else "disconnected"
+
+    # 3. Telegram Activity Tracking
+    in_mem_ts = None
+    if STORE_MODE in ("standalone", "postgres-readonly"):
+        in_mem_ts = knx_daemon.get_last_telegram_timestamp()
+    elif STORE_MODE == "external-readonly":
+        in_mem_ts = ha_live_bridge.get_last_telegram_timestamp()
+
+    if STORE_MODE == "postgres-readonly" and in_mem_ts is None:
+        in_mem_ts = pg_listen_bridge.get_last_telegram_timestamp()
+
+    last_received_at = None
+    if in_mem_ts and latest_db_telegram_ts:
+        last_received_at = max(in_mem_ts, latest_db_telegram_ts)
+    else:
+        last_received_at = in_mem_ts or latest_db_telegram_ts
+
+    now = datetime.now(UTC)
+    seconds_since_last = None
+    if last_received_at:
+        if last_received_at.tzinfo is None:
+            last_received_at = last_received_at.replace(tzinfo=UTC)
+        seconds_since_last = round((now - last_received_at).total_seconds(), 2)
+
+    is_live = db_status == "ok"
+    is_ready = is_live and (knx_status in ("ok", "n/a"))
+
+    overall_ok = is_live if check_type == "liveness" else is_ready
+
+    if not overall_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return {
+        "status": "ok" if overall_ok else "unhealthy",
+        "timestamp": now.isoformat(),
+        "version": get_backend_version(),
+        "store_mode": STORE_MODE,
+        "checks": {
+            "database": {
+                "status": db_status,
+                "error": db_error,
+            },
+            "knx_connection": {
+                "status": knx_status,
+                "connected": knx_connected,
+            },
+            "telegrams": {
+                "status": "ok" if last_received_at is not None else "no_telegrams",
+                "last_received_at": last_received_at.isoformat() if last_received_at else None,
+                "seconds_since_last_telegram": seconds_since_last,
+            },
+        },
+    }
 
 
 @router.get("/api/update")

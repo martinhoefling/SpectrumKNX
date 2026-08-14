@@ -33,6 +33,7 @@ global_knx_project: Any | None = None
 project_name_map: dict[str, dict[str, str | None]] = {"ga": {}, "ia": {}}
 _connect_task: asyncio.Task | None = None
 _watch_task: asyncio.Task | None = None
+_last_telegram_timestamp: datetime | None = None
 
 
 async def _load_project_data() -> bool:
@@ -225,6 +226,7 @@ async def _watch_files():
 
 
 async def process_telegram_async(telegram: XknxTelegram):
+    global _last_telegram_timestamp
     if STORE_MODE == "postgres-readonly":
         # The daemon is connected only to enable outbound bus writes here; the
         # telegram store is a shared, read-only view of what the writer (e.g.
@@ -234,6 +236,7 @@ async def process_telegram_async(telegram: XknxTelegram):
         return
     try:
         ts = datetime.now(UTC)
+        _last_telegram_timestamp = ts
 
         source_addr = str(telegram.source_address)
         target_addr = str(telegram.destination_address) if telegram.destination_address else "0/0/0"
@@ -415,6 +418,11 @@ def is_connected() -> bool:
         return xknx_instance.connection_manager.connected.is_set()
     except Exception:
         return False
+
+
+def get_last_telegram_timestamp() -> datetime | None:
+    """Returns the timestamp of the last telegram processed by the daemon."""
+    return _last_telegram_timestamp
 
 
 def write_enabled() -> bool:

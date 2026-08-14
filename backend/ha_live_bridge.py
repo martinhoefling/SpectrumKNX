@@ -18,9 +18,9 @@ import os
 from datetime import UTC, datetime
 
 import websockets
+from knx_telegram_store import TelegramQuery
 
 from database import store
-from knx_telegram_store import TelegramQuery
 from parsers import format_dpt_name, format_value_nicely, get_simplified_type
 from ws_manager import manager
 
@@ -39,6 +39,11 @@ _connected: bool = False
 def live_feed_status() -> dict:
     """Current live-feed state for the status API (companion mode, #184)."""
     return {"source": _active_source, "connected": _connected}
+
+
+def get_last_telegram_timestamp() -> datetime | None:
+    """Returns the timestamp of the last telegram seen by the HA bridge."""
+    return _last_seen
 
 
 def _ha_token() -> str:

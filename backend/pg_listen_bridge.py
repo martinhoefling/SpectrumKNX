@@ -32,6 +32,11 @@ def live_feed_status() -> dict:
     return {"connected": _connected}
 
 
+def get_last_telegram_timestamp() -> datetime | None:
+    """Returns the timestamp of the last telegram seen by the Postgres listen bridge."""
+    return _last_seen
+
+
 def _as_utc(dt: datetime) -> datetime:
     """The store round-trips naive timestamps as UTC by convention."""
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)

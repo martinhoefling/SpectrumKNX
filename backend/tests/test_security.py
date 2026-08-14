@@ -28,8 +28,9 @@ class TestSecurity(unittest.TestCase):
         self.assertFalse(is_safe_path(self.static_dir, "index.html\0.php"))
 
     def test_default_cors_origins(self):
-        from main import app
         from fastapi.testclient import TestClient
+
+        from main import app
 
         client = TestClient(app)
         response = client.options(

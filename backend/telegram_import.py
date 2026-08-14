@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import IO, Any
 
+from knx_telegram_store import StoredTelegram, TelegramQuery
 from knx_telegram_store.formats import RawTelegramRecord, iter_communication_log
 from xknx.cemi import CEMIFrame
 from xknx.exceptions import XKNXException
@@ -28,7 +29,6 @@ from xknx.telegram import Telegram as XknxTelegram
 from xknx.telegram.apci import GroupValueRead, GroupValueResponse, GroupValueWrite
 
 import knx_daemon
-from knx_telegram_store import StoredTelegram, TelegramQuery
 from parsers import parse_telegram_payload
 
 logger = logging.getLogger("uvicorn.error")

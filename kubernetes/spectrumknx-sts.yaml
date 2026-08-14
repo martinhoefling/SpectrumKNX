@@ -41,6 +41,19 @@ spec:
           ports:
             - containerPort: 8765
               name: http
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: 8765
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 8765
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
           volumeMounts:
             - name: knxproj
               mountPath: "/knxproj"

@@ -42,3 +42,10 @@ This directory contains templates for deploying Spectrum KNX on Kubernetes.
    ```bash
    kubectl apply -f spectrumknx-ingress.yaml
    ```
+
+## Health Probes & Monitoring
+
+`spectrumknx-sts.yaml` comes configured with `livenessProbe` (`/health/liveness`) and `readinessProbe` (`/health/readiness`):
+- **Liveness** (`/health/liveness`): verifies process health and database reachability.
+- **Readiness** (`/health/readiness`): verifies database reachability and active KNX bus connection status before routing traffic to the pod.
+
