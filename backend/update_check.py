@@ -28,27 +28,75 @@ _ERROR_TTL = 15 * 60  # back off for 15 minutes after a failed check
 _MAX_RELEASES = 10  # cap the notes we return if the install is far behind
 _REQUEST_TIMEOUT = 10.0
 
-_VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+# x.y.z plus an optional semver pre-release suffix ("-beta.6", "-rc1"). The
+# suffix decides the release *channel*, so it must be captured, not ignored.
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?")
+# A git-describe suffix ("-3-gabc123") is not a pre-release marker.
+_GIT_DESCRIBE_RE = re.compile(r"^\d+-g[0-9a-f]+$")
+
+
+def _is_ha_addon() -> bool:
+    """Whether we are running as a Home Assistant add-on.
+
+    Supervisor injects SUPERVISOR_TOKEN into the add-on container (the same
+    signal ha_live_bridge uses). There the update path is the add-on store, not
+    a Docker image tag.
+    """
+    return bool(os.getenv("SUPERVISOR_TOKEN"))
+
 
 _cache: dict | None = None
 _cache_expiry: float = 0.0
 _lock = asyncio.Lock()
 
 
-def _parse_version(value: str | None) -> tuple[int, int, int] | None:
-    """Extract a (major, minor, patch) tuple from a version/tag string.
+def _prerelease_identifiers(value: str | None) -> tuple | None:
+    """The semver pre-release suffix of a version string, or None if stable.
+
+    "v2.0.0-beta.6" → the beta identifiers; "v1.16.2" → None. A git-describe
+    suffix ("v1.10.0-3-gabc123") means "a few commits past a stable tag", not a
+    pre-release, so it is deliberately not treated as one.
+    """
+    if not value:
+        return None
+    match = _VERSION_RE.search(value)
+    if not match or not match.group(4):
+        return None
+    suffix = match.group(4)
+    if _GIT_DESCRIBE_RE.match(suffix):
+        return None
+    # Numeric identifiers rank below alphanumeric ones and compare numerically
+    # (semver §11). The leading flag keeps int/str comparisons apart.
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in suffix.split("."))
+
+
+def is_prerelease(value: str | None) -> bool:
+    """Whether a version/tag string names a pre-release (beta, rc, …)."""
+    return _prerelease_identifiers(value) is not None
+
+
+def _parse_version(value: str | None) -> tuple | None:
+    """Extract a comparable sort key from a version/tag string.
 
     Handles the various shapes the running version can take — "1.10.0",
-    "v1.10.0", or a git-describe like "v1.10.0-3-gabc123" — by matching the
-    first x.y.z it finds. Returns None when there's nothing to compare (e.g.
-    a plain "dev" build), which callers treat as "can't tell → no update".
+    "v1.10.0", "v2.0.0-beta.6", or a git-describe like "v1.10.0-3-gabc123" — by
+    matching the first x.y.z it finds. Returns None when there's nothing to
+    compare (e.g. a plain "dev" build), which callers treat as "can't tell → no
+    update".
+
+    Pre-releases sort *below* the matching stable release (semver: 2.0.0-beta.6
+    < 2.0.0), so a beta is never mistaken for a newer stable version.
     """
     if not value:
         return None
     match = _VERSION_RE.search(value)
     if not match:
         return None
-    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+    major, minor, patch = (int(part) for part in match.groups()[:3])
+    identifiers = _prerelease_identifiers(value)
+    if identifiers is None:
+        return (major, minor, patch, 1, ())
+    return (major, minor, patch, 0, identifiers)
 
 
 def _is_newer(candidate: str | None, current: str | None) -> bool:
@@ -76,11 +124,20 @@ async def _fetch_releases() -> list[dict]:
 
 def _build_info(current: str, releases: list[dict]) -> dict:
     """Assemble the update payload from the raw GitHub release list."""
+    # The channel the running install is on. A user on a stable release is never
+    # offered a pre-release; a user already on a beta keeps getting betas (#427).
+    # This does not rely on GitHub's own "prerelease" flag being set correctly —
+    # every 2.0.0 beta was published with prerelease=false, which is what made
+    # the flag-only filter a no-op and pushed betas at stable users.
+    on_prerelease = is_prerelease(current)
+
     # GitHub returns releases newest-first. Keep only real, versioned releases.
     published = [
         r
         for r in releases
-        if not r.get("draft") and not r.get("prerelease") and _parse_version(r.get("tag_name") or r.get("name"))
+        if not r.get("draft")
+        and _parse_version(r.get("tag_name") or r.get("name"))
+        and (on_prerelease or not (r.get("prerelease") or is_prerelease(r.get("tag_name") or r.get("name"))))
     ]
 
     latest = published[0] if published else None
@@ -89,6 +146,10 @@ def _build_info(current: str, releases: list[dict]) -> dict:
     return {
         "enabled": True,
         "current": current,
+        "channel": "beta" if on_prerelease else "stable",
+        # How this install is updated. Add-on users update from the Home
+        # Assistant add-on store — telling them to pull an image tag is wrong.
+        "managed_by": "home-assistant-addon" if _is_ha_addon() else None,
         "latest": latest.get("tag_name") if latest else None,
         "update_available": bool(newer),
         "html_url": latest.get("html_url") if latest else None,

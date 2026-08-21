@@ -14,9 +14,11 @@ const formatDate = (iso?: string | null): string | null => {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString();
 };
 
-// Under Home Assistant Ingress the app is served at /api/hassio_ingress/<token>/,
-// so the user updates via the add-on page rather than any in-app action.
-const isHomeAssistant = (): boolean => getBasePath().includes('hassio_ingress');
+// The backend reports the add-on case authoritatively via SUPERVISOR_TOKEN
+// (#427); the ingress base path is a fallback for older backends. An add-on
+// user reached over the direct port is still an add-on user.
+const isHomeAssistant = (info: UpdateInfo): boolean =>
+  info.managed_by === 'home-assistant-addon' || getBasePath().includes('hassio_ingress');
 
 export function UpdateNotification({ info, onClose }: UpdateNotificationProps) {
   const releases = info.releases ?? [];
@@ -57,6 +59,18 @@ export function UpdateNotification({ info, onClose }: UpdateNotificationProps) {
             <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
               {info.current} → <strong style={{ color: 'var(--accent-primary)' }}>{info.latest}</strong>
               {formatDate(info.published_at) && <span> · {formatDate(info.published_at)}</span>}
+              {info.channel === 'beta' && (
+                <span
+                  title="You are on the beta channel — pre-release builds only."
+                  style={{
+                    marginLeft: '0.5rem', padding: '0.05rem 0.4rem', borderRadius: '4px',
+                    fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.03em',
+                    border: '1px solid var(--warning, #f59e0b)', color: 'var(--warning, #f59e0b)',
+                  }}
+                >
+                  BETA
+                </span>
+              )}
             </div>
           </div>
           <button
@@ -108,7 +122,7 @@ export function UpdateNotification({ info, onClose }: UpdateNotificationProps) {
           padding: '1rem 1.5rem', borderTop: '1px solid var(--border-color)',
         }}>
           <div style={{ flex: 1, fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-            {isHomeAssistant()
+            {isHomeAssistant(info)
               ? 'Update from the Spectrum KNX add-on page in Home Assistant.'
               : 'Pull the latest image / installer to update.'}
           </div>

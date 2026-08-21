@@ -14,6 +14,10 @@ export interface UpdateInfo {
   current?: string;
   latest?: string | null;
   update_available: boolean;
+  /** Release channel the running install is on — betas only see betas (#427). */
+  channel?: 'stable' | 'beta';
+  /** Set when the install is updated by something other than pulling an image. */
+  managed_by?: 'home-assistant-addon' | null;
   html_url?: string | null;
   published_at?: string | null;
   releases?: UpdateRelease[];

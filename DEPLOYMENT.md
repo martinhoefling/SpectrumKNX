@@ -36,6 +36,10 @@ Spectrum KNX can be installed as a native **Home Assistant Add-on**. This is the
 6. The **Spectrum KNX** Add-on should now appear in the store. Click on it.
 7. Click **Install** and wait for the image to download (this may take a few minutes on first install).
 
+The store lists four add-ons from this repository — a stable and a beta variant of both
+the standalone and the companion add-on. Install **Spectrum KNX** unless you deliberately
+want pre-release builds; see [Release channels](#9-release-channels-stable-vs-beta).
+
 ### 2.2 Configuration
 
 After installation, go to the **Configuration** tab of the Add-on. The following options are available:
@@ -262,7 +266,7 @@ KNX_KNXKEYS_PASSWORD=my_secure_password
 | Variable | Description | Default |
 |---|---|---|
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, etc.) | `INFO` |
-| `APP_IMAGE` | Docker image to pull (Prod Stack only) | `ghcr.io/martinhoefling/spectrumknx:latest` |
+| `APP_IMAGE` | Docker image to pull (Prod Stack only). See [Release channels](#9-release-channels-stable-vs-beta). | `ghcr.io/martinhoefling/spectrumknx:latest` |
 | `MCP_MODE` | MCP server for AI agents at `/mcp`: `off`, `read-only`, or `read-write`. See [MCP Server](#7-mcp-server-ai-agents). | `read-only` |
 
 ---
@@ -342,8 +346,14 @@ The server is controlled by the `MCP_MODE` environment variable:
 MCP_MODE=read-only
 ```
 
-When enabled, the endpoint is served at `http://<host>:<BIND_PORT>/mcp` (default port
-`8765`).
+When enabled, the endpoint is served at `http://<host>:<BIND_PORT>/mcp/` (default port
+`8765`). Both `/mcp` and `/mcp/` work — the bare form redirects (307) to the trailing-slash
+form, so a client that follows redirects can use either.
+
+**Home Assistant add-on:** use the direct port, `http://<ha-host>:8765/mcp/`. Ingress
+(the "Open Web UI" link) serves the user interface only — it sits behind Home Assistant
+authentication under `/api/hassio_ingress/<token>/`, so an MCP client cannot connect
+through it.
 
 > ⚠️ **Enabled by default and unauthenticated.** With `MCP_MODE` unset the server runs
 > in `read-only` mode, so `/mcp` is exposed out of the box, and the endpoint has **no
@@ -412,7 +422,7 @@ a Cursor / generic `mcp.json`:
 {
   "mcpServers": {
     "spectrum-knx": {
-      "url": "http://<host>:8765/mcp"
+      "url": "http://<host>:8765/mcp/"
     }
   }
 }
@@ -426,7 +436,7 @@ For clients that only speak stdio (for example Claude Desktop), bridge with
   "mcpServers": {
     "spectrum-knx": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://<host>:8765/mcp"]
+      "args": ["-y", "mcp-remote", "http://<host>:8765/mcp/"]
     }
   }
 }
@@ -513,3 +523,70 @@ Spectrum KNX includes a health check endpoint for monitoring systems, load balan
     periodSeconds: 5
   ```
 
+
+## 9. Release Channels (Stable vs Beta)
+
+Spectrum KNX publishes two channels. **Stable** is the default everywhere; **beta**
+(pre-release) builds are opt-in and are never offered to a stable install.
+
+Pre-release versions carry a semver suffix — `2.0.0-beta.7` — and are marked as
+pre-releases on the [GitHub releases page](https://github.com/martinhoefling/SpectrumKNX/releases).
+
+### 9.1 Docker
+
+The `:latest` tag always points at the newest **stable** release. It never moves to a
+beta. To run a pre-release, pin the version explicitly:
+
+```bash
+# .env — stable (default)
+APP_IMAGE=ghcr.io/martinhoefling/spectrumknx:latest
+
+# .env — opt in to a specific pre-release
+APP_IMAGE=ghcr.io/martinhoefling/spectrumknx:2.0.0-beta.7
+```
+
+Then recreate the container:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+> The shipped `docker-compose.yml` sets `pull_policy: always` on the app service, so
+> `docker compose up -d` re-pulls a moved tag instead of silently reusing the cached
+> local image. If you maintain your own compose file and an update appears to do
+> nothing, this is usually why.
+
+To go back to stable, set `APP_IMAGE` back to `:latest` (or a specific stable version)
+and recreate the container. Note that a beta may have migrated the database to a newer
+schema; downgrading is not supported without restoring a backup.
+
+### 9.2 Home Assistant add-on
+
+The add-on repository provides both channels as **separate add-ons**. Install the one
+matching the channel you want — not both:
+
+| Add-on | Channel |
+| --- | --- |
+| **Spectrum KNX** | stable |
+| **Spectrum KNX (Beta)** | pre-release |
+| **Spectrum KNX (HA Companion)** | stable |
+| **Spectrum KNX (HA Companion, Beta)** | pre-release |
+
+There is no image tag to change — Home Assistant updates each add-on to the version its
+channel points at, and the usual add-on **Update** button does the right thing for the
+channel you installed.
+
+To switch channels, uninstall the current add-on and install the other one. Take a
+backup first: the two are separate add-ons with separate data.
+
+### 9.3 The in-app update notification
+
+The update check only offers releases from the channel you are already on: a stable
+install is never told to move to a beta, and a beta install is offered newer betas (and
+the final stable release once it ships). Running a pre-release is labelled **BETA** in
+the update dialog.
+
+Inside the Home Assistant add-on the notification points at the add-on page, since
+updates are applied from the add-on store rather than by pulling an image.
+
+Set `UPDATE_CHECK=false` to disable the check entirely (no outbound request is made).

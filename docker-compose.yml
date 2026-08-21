@@ -14,6 +14,9 @@ services:
 
   backend:
     image: ${APP_IMAGE:-ghcr.io/martinhoefling/spectrumknx:latest}
+    # Re-pull on every "up" so a moved tag (":latest") actually updates the
+    # container instead of silently reusing the cached local image (#427).
+    pull_policy: always
     container_name: knx_backend
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-knxuser}

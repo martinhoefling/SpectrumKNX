@@ -72,7 +72,12 @@ for searching and inspecting details:
 - `list_locations`, `list_functions`, and `get_topology` for building structure & functions.
 - `list_dpts` and `describe_dpt` for DPT definitions.
 - `query_telegrams`, `get_store_stats`, `get_last_values` for stored bus telegrams.
-Bus write tools exist only when the server is configured in read-write mode."""
+Bus write tools exist only when the server is configured in read-write mode.
+
+When analysing a period, bound `query_telegrams` with `start_time`/`end_time` rather than \
+raising `limit`, and check `limit_reached` in the result — it means you received only part \
+of the range and must page with `next_offset` or narrow the range before concluding \
+anything. Use `get_store_stats` to see the time range the store actually covers."""
 
 
 def _project_overview() -> str:
@@ -224,11 +229,27 @@ def _build_server() -> FastMCP:
         offset: int = 0,
         order_descending: bool = True,
     ) -> dict[str, Any]:
-        """Search stored KNX telegrams. Times are ISO-8601; address/type/direction
-        filters are lists (OR within a filter, AND across filters). `telegram_types`
-        accepts "Write"/"Read"/"Response" or the full GroupValue* names. `dpts` are
-        "main" or "main.sub" strings (e.g. "9.001"). `delta_before_ms`/`delta_after_ms`
-        add a context window of telegrams around each match."""
+        """Search stored KNX telegrams over a time range.
+
+        To analyse a period, bound it with `start_time`/`end_time` (ISO-8601) —
+        that is the correct way to ask for "everything between X and Y", not a
+        larger `limit`.
+
+        IMPORTANT — the result may be partial. `limit` (default 100) is applied
+        *within* the requested range, and results are ordered newest-first by
+        default (`order_descending`), so a plain time-range query returns the
+        *newest* `limit` telegrams in that range, not the whole range. On a busy
+        bus 100 telegrams can be a couple of minutes. Always check
+        `limit_reached` in the result: when it is true you are looking at a
+        subset and must either page with `next_offset` (pass it as `offset`) or
+        narrow the range before drawing conclusions. `total_count` reports how
+        many telegrams match the filters overall.
+
+        Address/type/direction filters are lists (OR within a filter, AND across
+        filters). `telegram_types` accepts "Write"/"Read"/"Response" or the full
+        GroupValue* names. `dpts` are "main" or "main.sub" strings (e.g.
+        "9.001"). `delta_before_ms`/`delta_after_ms` add a context window of
+        telegrams around each match."""
         result = await lib_query_telegrams(
             store,
             QueryTelegramsInput(
