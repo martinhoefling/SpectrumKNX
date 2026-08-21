@@ -264,7 +264,7 @@ def test_endpoint_serves_at_mount_root_not_doubled():
     assert "/mcp" not in paths
 
 
-def test_bare_mcp_path_redirects_instead_of_hitting_spa(monkeypatch):
+def test_bare_mcp_path_redirects_instead_of_hitting_spa():
     """The bare "/mcp" must not fall through to the SPA catch-all (#426).
 
     Without the redirect an MCP client POSTing to "/mcp" gets 405 (the
@@ -275,16 +275,19 @@ def test_bare_mcp_path_redirects_instead_of_hitting_spa(monkeypatch):
 
     import main
 
-    with TestClient(main.app) as client:
-        for method in ("get", "post", "delete"):
-            response = getattr(client, method)("/mcp", follow_redirects=False)
-            assert response.status_code == 307, f"{method} /mcp -> {response.status_code}"
-            # 307 keeps the method and body, so the initialize POST survives.
-            assert response.headers["location"] == "/mcp/"
+    # Not used as a context manager on purpose: that would run the app lifespan
+    # (KNX daemon, store startup), which routing does not need.
+    client = TestClient(main.app)
 
-        # Query strings must survive the redirect.
-        response = client.get("/mcp?session_id=abc", follow_redirects=False)
-        assert response.headers["location"] == "/mcp/?session_id=abc"
+    for method in ("get", "post", "delete"):
+        response = getattr(client, method)("/mcp", follow_redirects=False)
+        assert response.status_code == 307, f"{method} /mcp -> {response.status_code}"
+        # 307 keeps the method and body, so the initialize POST survives.
+        assert response.headers["location"] == "/mcp/"
+
+    # Query strings must survive the redirect.
+    response = client.get("/mcp?session_id=abc", follow_redirects=False)
+    assert response.headers["location"] == "/mcp/?session_id=abc"
 
 
 @pytest.mark.asyncio
