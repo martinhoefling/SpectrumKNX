@@ -31,26 +31,34 @@ chmod 700 "$DATADIR"
 # Clear any marker from a previous boot before re-checking.
 rm -f "$INCOMPATIBLE_MARKER"
 
-# ── Major-version guard ───────────────────────────────────────────────────────
+# ── Major-version migration ───────────────────────────────────────────────────
 # A PostgreSQL data directory can only be opened by the major version that wrote
-# it. Without this check a version bump would skip initdb (the directory is not
-# empty) and the new binary would reject the directory, so the add-on would fail
-# to boot with an obscure error — or, worse, look like the history was lost.
-# Refuse loudly instead and leave the data untouched. Automatic migration to a
-# newer major is tracked in #432.
+# it, so bumping the bundled major needs the data migrated first (#432). This
+# runs automatically on the first start after such an upgrade.
+#
+# The migration copies rather than moves: the original cluster is untouched
+# until the new one is in place, and is then kept as <datadir>.old-<major> for
+# the user to delete. Any failure leaves the installation exactly as it was.
 if [ -s "$DATADIR/PG_VERSION" ]; then
     EXISTING_MAJOR="$(cat "$DATADIR/PG_VERSION")"
     if [ "$EXISTING_MAJOR" != "$PG_MAJOR" ]; then
-        echo "$EXISTING_MAJOR" > "$INCOMPATIBLE_MARKER"
-        bashio::log.fatal "Database version mismatch — refusing to start."
-        bashio::log.fatal "  ${DATADIR} was created by PostgreSQL ${EXISTING_MAJOR}"
-        bashio::log.fatal "  this add-on bundles PostgreSQL ${PG_MAJOR}"
-        bashio::log.fatal "Your telegram history has NOT been touched or deleted."
-        bashio::log.fatal "A major-version change needs a data migration; automatic migration is tracked in issue #432."
-        bashio::log.fatal "For now: go back to the add-on version bundling PostgreSQL ${EXISTING_MAJOR}, or restore a Home Assistant backup."
-        # Hold instead of exiting: a crash loop would scroll this message out of
-        # the add-on log, which is the only place the user can read it.
-        exec sleep infinity
+        bashio::log.warning "Database was created by PostgreSQL ${EXISTING_MAJOR}; this add-on runs PostgreSQL ${PG_MAJOR}."
+        bashio::log.warning "Migrating automatically. On a large store this can take several minutes."
+        bashio::log.warning "Do NOT stop the add-on while it runs. Your existing data is copied, not moved."
+
+        if DATADIR="$DATADIR" TARGET_MAJOR="$PG_MAJOR" PG_USER=postgres /usr/local/bin/pg-migrate; then
+            bashio::log.info "Database migrated to PostgreSQL ${PG_MAJOR}."
+        else
+            echo "$EXISTING_MAJOR" > "$INCOMPATIBLE_MARKER"
+            bashio::log.fatal "Database migration failed — refusing to start."
+            bashio::log.fatal "  ${DATADIR} was created by PostgreSQL ${EXISTING_MAJOR}"
+            bashio::log.fatal "  this add-on runs PostgreSQL ${PG_MAJOR}"
+            bashio::log.fatal "Your telegram history has NOT been touched or deleted — see the migration output above."
+            bashio::log.fatal "Go back to the previous add-on version, or restore a Home Assistant backup, and report this on issue #432."
+            # Hold instead of exiting: a crash loop would scroll this message out
+            # of the add-on log, which is the only place the user can read it.
+            exec sleep infinity
+        fi
     fi
 fi
 

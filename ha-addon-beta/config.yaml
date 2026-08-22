@@ -3,7 +3,7 @@
 # running both against the same bus is not supported.
 name: "Spectrum KNX (Beta)"
 description: "BETA — A professional KNX bus monitor and analyzer"
-version: "2.0.0-beta.7"
+version: "2.0.0-beta.8"
 slug: "spectrum_knx_beta"
 image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"
 host_network: true

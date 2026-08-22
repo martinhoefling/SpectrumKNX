@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.0.0-beta.8
+
+### Added
+
+- **Automatic PostgreSQL 18 migration.** The add-on now runs PostgreSQL 18 and migrates an existing
+  PostgreSQL 15 database automatically on first start. The migration copies rather than moves: the
+  original cluster is untouched until the new one is in place, and is then kept as
+  `/data/postgres.old-15` for you to delete once satisfied — it is never removed automatically. If
+  there is not enough free space for a second copy, or anything else goes wrong, the add-on changes
+  nothing and refuses to start with an explanation rather than coming up with an empty database
+  (#432).
+- **Migration tooling for Docker Compose**: a one-shot `docker-compose.migrate.yml` service and a
+  standalone image, plus a documented logical dump/restore route for Alpine-based PostgreSQL images
+  (#432).
+
+### Changed
+
+- **TimescaleDB 2.29.2** on PostgreSQL 18, up from 2.28.x on PostgreSQL 15.
+- **The add-on image is noticeably larger in this release**, because it carries both PostgreSQL
+  majors so it can migrate. PostgreSQL 15 will be dropped again once the transition is done.
+
+### Notes
+
+> **Take a Home Assistant backup before updating.** The migration is built to fail safe and is
+> tested against compressed hypertables, but a backup is the only real protection.
+
+- On a large telegram store the migration takes several minutes. The add-on log shows progress —
+  **do not stop the add-on while it runs**.
+- After it completes, `/data/postgres.old-15` still holds the old copy. Delete it to reclaim the
+  space once you are happy everything works.
+- Docker Compose users are **not** migrated automatically: the `db` container is yours. See
+  "PostgreSQL Major Versions & Upgrades" in `DEPLOYMENT.md` before changing the image tag.
+- Kubernetes remains a manual exercise; no tooling is provided.
+
 ## 2.0.0-beta.7
 
 ### Added

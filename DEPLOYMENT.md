@@ -602,35 +602,61 @@ to start. Moving between major versions always requires an explicit data migrati
 
 Current versions:
 
-| Deployment | PostgreSQL |
-| --- | --- |
-| Home Assistant add-on | 15 (bundled in the image) |
-| Docker Compose (`docker-compose.yml`) | 15 (`timescale/timescaledb:latest-pg15`) |
-| Kubernetes (`kubernetes/timescaledb-sts.yaml`) | 16 (`timescale/timescaledb:latest-pg16`) |
+| Deployment | PostgreSQL | Migration |
+| --- | --- | --- |
+| Home Assistant add-on | 18 | automatic, on first start |
+| Docker Compose (`docker-compose.yml`) | 15 | tooling provided, run manually |
+| Kubernetes (`kubernetes/timescaledb-sts.yaml`) | 16 | by hand, not covered |
 
-### 10.1 Home Assistant add-on
+### 10.1 Home Assistant add-on — automatic
 
-The add-on **detects a version mismatch and refuses to start**, leaving the existing data
-directory untouched, rather than failing obscurely or coming up with an empty database. The
-add-on log states which version wrote the data and which version the add-on bundles.
+The add-on carries both the new and the previous PostgreSQL major. On the first start after an
+upgrade that changes the major, it **migrates the database automatically** and then starts
+normally. On a large store this takes several minutes; the add-on log shows the progress.
 
-If you hit this, go back to the add-on version bundling the PostgreSQL major that wrote your data,
-or restore a Home Assistant backup.
+> **Take a Home Assistant backup before updating.** The migration is designed to fail safe, but
+> a backup is the only thing that protects against the unexpected.
 
-Automatic migration to PostgreSQL 18 on first start is planned — see
-[#432](https://github.com/martinhoefling/SpectrumKNX/issues/432). **Take a Home Assistant backup
-before installing the release that introduces it.**
+How it protects your data:
 
-### 10.2 Docker Compose
+- The migration **copies**; your original cluster is not modified.
+- Nothing is swapped in until the new cluster is fully built.
+- Any failure leaves the installation exactly as it was, and the add-on refuses to start with an
+  explanation rather than coming up with an empty database.
+- After a successful migration the previous cluster is **kept** as `/data/postgres.old-<major>`.
+  It is never deleted automatically — remove it yourself once you are satisfied, to reclaim the
+  space.
 
-You own the database container. Changing the `db` image to a different PostgreSQL major while the
-`knx_db_data` volume still holds data from the old major will leave the container failing to start
-with an "incompatible data directory" error in its log. Nothing is lost — revert the tag and it
-comes back.
+The migration needs room for a second copy of the database. If there is not enough free space it
+refuses up front and changes nothing — free some space and restart the add-on.
 
-Migration tooling for Compose is planned alongside the add-on migration (#432). Until it ships,
-either stay on the current major or migrate by hand with `pg_dump`/`pg_restore` between an old and
-a new container.
+Do not stop the add-on while a migration is running.
+
+### 10.2 Docker Compose — one command
+
+You own the database container, so the migration is a step you run. Before changing the `db`
+image tag:
+
+```bash
+docker compose down
+docker compose -f docker-compose.yml -f docker-compose.migrate.yml run --rm pg-migrate
+```
+
+Then update the `db` image tag in `docker-compose.yml` and bring the stack back up:
+
+```bash
+docker compose up -d
+```
+
+The same guarantees apply — copy mode, original kept as `<volume>/data.old-<major>`, refuses
+rather than risking a half-finished upgrade.
+
+> **Check which image you run first.** This path is for Debian-based PostgreSQL images. The stock
+> `timescale/timescaledb` images are Alpine/musl and their clusters must not be opened with
+> Debian/glibc binaries — text collation differs, which corrupts index ordering silently. For
+> those, use the logical dump/restore documented in
+> [`packaging/pg-migrate/README.md`](../packaging/pg-migrate/README.md), which rebuilds indexes
+> and is safe across any image or version.
 
 ### 10.3 Kubernetes
 

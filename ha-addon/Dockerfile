@@ -34,12 +34,29 @@ RUN curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
     && echo "deb [signed-by=/usr/share/keyrings/timescaledb-archive-keyring.asc] https://packagecloud.io/timescale/timescaledb/debian/ bookworm main" \
       > /etc/apt/sources.list.d/timescaledb.list
 
-# Install PostgreSQL 15 and TimescaleDB
+# PostgreSQL: the runtime major, plus the previous one so an existing data
+# directory can be migrated in place on first start (#432).
+#
+# The pinned TimescaleDB versions are deliberate. pg_upgrade carries the
+# pg_extension catalog across, so the new major must be able to load the
+# extension at the version the old cluster recorded. 2.28.3 is the newest that
+# still supports PG15, and the PG18 package bundles every historical versioned
+# .so (2.23.0-2.29.2) — that overlap is what makes the upgrade possible.
+ARG PG_MAJOR=18
+ARG PG_MIGRATE_FROM_MAJOR=15
+ARG TS_VERSION_NEW="2.29.2~debian12-1804"
+ARG TS_VERSION_OLD="2.28.3~debian12-1518"
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-15 \
-    timescaledb-2-postgresql-15 \
-    postgresql-client-15 \
+    postgresql-${PG_MAJOR} \
+    postgresql-client-${PG_MAJOR} \
+    timescaledb-2-postgresql-${PG_MAJOR}=${TS_VERSION_NEW} \
+    postgresql-${PG_MIGRATE_FROM_MAJOR} \
+    timescaledb-2-postgresql-${PG_MIGRATE_FROM_MAJOR}=${TS_VERSION_OLD} \
     && rm -rf /var/lib/apt/lists/*
+
+# In-place major-version migration, shared with the standalone image.
+COPY packaging/pg-migrate/migrate.sh /usr/local/bin/pg-migrate
+RUN chmod +x /usr/local/bin/pg-migrate
 
 # Configure PostgreSQL for TimescaleDB
 RUN timescaledb-tune --quiet --yes || true
