@@ -175,9 +175,13 @@ async def server(monkeypatch):
 
 
 async def _structured(server, name, args=None):
-    """The structured (dict/list) result of a tool call."""
-    _, structured = await server.call_tool(name, args or {})
-    return structured
+    """The structured (dict/list) result of a tool call.
+
+    mcp 2.0 returns a CallToolResult object; 1.x returned a
+    (content, structured) tuple.
+    """
+    result = await server.call_tool(name, args or {})
+    return result.structured_content
 
 
 @pytest.mark.asyncio
@@ -257,7 +261,7 @@ async def test_canned_prompts_include_knx_context(server):
 
 
 def test_endpoint_serves_at_mount_root_not_doubled():
-    # FastMCP must serve at "/" internally so mounting the app at "/mcp" yields
+    # The MCP server must serve at "/" internally so mounting the app at "/mcp" yields
     # "/mcp" and not the doubled-up "/mcp/mcp" (#332).
     paths = [getattr(r, "path", None) for r in mcp_server.get_asgi_app().routes]
     assert "/" in paths

@@ -40,7 +40,7 @@ from knx_telegram_store.mcp import (
 from knx_telegram_store.mcp import (
     query_telegrams as lib_query_telegrams,
 )
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 from xknx import mcp as xknx_mcp
@@ -136,7 +136,7 @@ def _describe(*input_types: type, **overrides: str) -> Callable[[Callable], Call
     """Attach parameter descriptions to a tool from library dataclass metadata.
 
     The shared ``*.mcp`` input dataclasses carry each field's description as
-    ``dataclasses.field`` metadata. FastMCP only surfaces per-parameter
+    ``dataclasses.field`` metadata. MCPServer only surfaces per-parameter
     descriptions from ``Annotated[..., pydantic.Field(description=...)]`` in the
     signature, so this decorator rewrites the wrapper's annotations in place —
     matching parameter names to fields — instead of duplicating the text here.
@@ -162,18 +162,10 @@ def _describe(*input_types: type, **overrides: str) -> Callable[[Callable], Call
     return decorator
 
 
-def _build_server() -> FastMCP:
-    # stateless_http keeps each request self-contained — no server-side session
-    # state to manage, which is all these read tools need and simplifies mounting.
-    # streamable_http_path="/" so that mounting the app at "/mcp" serves the
-    # endpoint at "/mcp" rather than the doubled-up "/mcp/mcp".
-    # enable_dns_rebinding_protection=False allows remote network clients / custom Host headers.
-    mcp = FastMCP(
-        "spectrum-knx",
-        stateless_http=True,
-        streamable_http_path="/",
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
-    )
+def _build_server() -> MCPServer:
+    # Transport options are not constructor arguments — they are passed to
+    # streamable_http_app() in get_asgi_app() below (mcp 2.0 moved them).
+    mcp = MCPServer("spectrum-knx")
 
     # ── Project resource ────────────────────────────────────────────────────────
     # A lightweight index overview of the loaded ETS project. Degrades to a stable
@@ -443,7 +435,7 @@ def _build_server() -> FastMCP:
     return mcp
 
 
-def _register_bus_tools(mcp: FastMCP) -> None:
+def _register_bus_tools(mcp: MCPServer) -> None:
     """Register the bus tools that transmit on the KNX bus.
 
     Only mounted in ``read-write`` mode: these send telegrams (a live read
@@ -488,16 +480,28 @@ def _register_bus_tools(mcp: FastMCP) -> None:
         return asdict(result)
 
 
-_fastmcp: FastMCP | None = None
+_fastmcp: MCPServer | None = None
 _asgi_app: Any = None
 
 
 def get_asgi_app() -> Any:
-    """The Streamable HTTP ASGI app to mount, built once on first use."""
+    """The Streamable HTTP ASGI app to mount, built once on first use.
+
+    ``streamable_http_path="/"`` so that mounting this app at "/mcp" serves the
+    endpoint at "/mcp" rather than the doubled-up "/mcp/mcp" — the default is
+    "/mcp", which would double it (#332). ``stateless_http`` keeps each request
+    self-contained: no server-side session state to manage, which is all these
+    read tools need and simplifies mounting. Disabling DNS-rebinding protection
+    allows remote network clients and custom Host headers.
+    """
     global _fastmcp, _asgi_app
     if _asgi_app is None:
         _fastmcp = _build_server()
-        _asgi_app = _fastmcp.streamable_http_app()
+        _asgi_app = _fastmcp.streamable_http_app(
+            streamable_http_path="/",
+            stateless_http=True,
+            transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        )
     return _asgi_app
 
 
