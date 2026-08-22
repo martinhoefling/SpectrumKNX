@@ -44,12 +44,36 @@ jobs:
           OWNER="${{ github.repository_owner }}"
           echo "base=${REGISTRY}/${OWNER,,}/spectrum-knx-addon" >> "$GITHUB_OUTPUT"
 
-      - name: Read Add-on version from config.yaml
+      - name: Determine the Add-on version to build
         id: addon_version
+        # Every add-on slug (stable and beta) pulls the same image and pins it by
+        # version, so the image tag to build is simply the version being released.
+        # On a tag push that is the tag; on main it is the beta channel's version,
+        # which is the one that moves ahead (#427). Older versions referenced by
+        # the stable slugs were built when they were current.
         run: |
-          VERSION=$(grep '^version:' ha-addon/config.yaml | sed 's/version: *"\(.*\)"/\1/')
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION=$(grep '^version:' ha-addon-beta/config.yaml | sed 's/version: *"\(.*\)"/\1/')
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Add-on version: $VERSION"
+
+      - name: Compute image tags
+        id: tags
+        # Never move ":latest" onto a pre-release build (#427) — a semver
+        # pre-release version carries a hyphen ("2.0.0-beta.7"). Supervisor pulls
+        # the pinned version tag, so ":latest" is only a convenience.
+        run: |
+          BASE="${{ steps.image.outputs.base }}-${{ matrix.ha_arch }}"
+          VERSION="${{ steps.addon_version.outputs.version }}"
+          {
+            echo "tags<<TAGS_EOF"
+            echo "$BASE:$VERSION"
+            if [[ "$VERSION" != *-* ]]; then echo "$BASE:latest"; fi
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         if: matrix.arch == 'aarch64'
@@ -87,6 +111,4 @@ jobs:
           build-args: |
             BUILD_FROM=${{ matrix.base_image }}
           push: true
-          tags: |
-            ${{ steps.image.outputs.base }}-${{ matrix.ha_arch }}:${{ steps.addon_version.outputs.version }}
-            ${{ steps.image.outputs.base }}-${{ matrix.ha_arch }}:latest
+          tags: ${{ steps.tags.outputs.tags }}

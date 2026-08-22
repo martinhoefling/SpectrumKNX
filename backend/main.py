@@ -7,9 +7,9 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if it exists
 load_dotenv()
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.responses import FileResponse, RedirectResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 import cyclic_send  # noqa: E402
@@ -81,6 +81,24 @@ app.include_router(api_router)
 # Mount the MCP Streamable HTTP endpoint before the SPA catch-all so /mcp is not
 # swallowed by static routing (#332). Disabled when MCP_MODE=off.
 if mcp_server.mcp_enabled():
+
+    @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"], include_in_schema=False)
+    async def mcp_root_redirect(request: Request):
+        """Redirect the bare /mcp to /mcp/ (#426).
+
+        Starlette compiles a Mount path into ``^/mcp(?P<path>/.*)$``, so the
+        mount below never matches the bare "/mcp" — without this the request
+        falls through to the SPA catch-all and an MCP client's POST gets a
+        confusing 405 (the catch-all is GET-only) while a browser gets
+        index.html. Router-level redirect_slashes can't help because the
+        catch-all always matches. 307 preserves the method and body, so the
+        client's initialize POST survives the redirect.
+        """
+        target = request.url.path + "/"
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(target, status_code=307)
+
     app.mount("/mcp", mcp_server.get_asgi_app())
     logger.info(f"MCP endpoint mounted at /mcp (mode: {mcp_server.MCP_MODE})")
 

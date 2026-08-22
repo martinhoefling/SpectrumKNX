@@ -1,6 +1,12 @@
 services:
   db:
-    image: timescale/timescaledb:latest-pg15
+    # Changing the PostgreSQL major under an existing knx_db_data volume will stop
+    # the container from starting — the data directory belongs to the old major.
+    # Migrate first: see DEPLOYMENT.md "PostgreSQL Major Versions & Upgrades" and
+    # docker-compose.migrate.yml (#432). New installs can set DB_IMAGE to a newer
+    # major straight away; the default stays on pg15 so existing volumes keep
+    # working when this file is updated.
+    image: ${DB_IMAGE:-timescale/timescaledb:latest-pg15}
     container_name: knx_timescale
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-knxuser}
@@ -14,6 +20,9 @@ services:
 
   backend:
     image: ${APP_IMAGE:-ghcr.io/martinhoefling/spectrumknx:latest}
+    # Re-pull on every "up" so a moved tag (":latest") actually updates the
+    # container instead of silently reusing the cached local image (#427).
+    pull_policy: always
     container_name: knx_backend
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-knxuser}

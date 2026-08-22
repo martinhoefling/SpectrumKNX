@@ -264,6 +264,43 @@ def test_endpoint_serves_at_mount_root_not_doubled():
     assert "/mcp" not in paths
 
 
+def test_bare_mcp_path_redirects_instead_of_hitting_spa():
+    """The bare "/mcp" must not fall through to the SPA catch-all (#426).
+
+    Without the redirect an MCP client POSTing to "/mcp" gets 405 (the
+    catch-all is GET-only) and a browser gets index.html, which is what made
+    the trailing slash mandatory.
+    """
+    from fastapi.testclient import TestClient
+
+    import main
+
+    # Not used as a context manager on purpose: that would run the app lifespan
+    # (KNX daemon, store startup), which routing does not need.
+    client = TestClient(main.app)
+
+    for method in ("get", "post", "delete"):
+        response = getattr(client, method)("/mcp", follow_redirects=False)
+        assert response.status_code == 307, f"{method} /mcp -> {response.status_code}"
+        # 307 keeps the method and body, so the initialize POST survives.
+        assert response.headers["location"] == "/mcp/"
+
+    # Query strings must survive the redirect.
+    response = client.get("/mcp?session_id=abc", follow_redirects=False)
+    assert response.headers["location"] == "/mcp/?session_id=abc"
+
+
+@pytest.mark.asyncio
+async def test_query_telegrams_description_documents_time_range_and_truncation(server):
+    """The tool description is the only place an agent learns that a time-range
+    query can come back silently truncated (#428)."""
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    description = tools["query_telegrams"].description
+    assert "start_time" in description and "end_time" in description
+    assert "limit_reached" in description
+    assert "next_offset" in description
+
+
 @pytest.mark.asyncio
 async def test_query_telegrams(server):
     result = await _structured(server, "query_telegrams", {"destinations": ["1/1/1"]})

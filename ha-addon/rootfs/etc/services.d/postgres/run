@@ -8,18 +8,63 @@ if [ "$DB_BACKEND" = "SQLITE" ] || [ "$COMPANION_MODE" = "true" ]; then
     exec sleep infinity
 fi
 
+# ── Bundled PostgreSQL version ────────────────────────────────────────────────
+# Derived from the image rather than hardcoded, so moving to a new major only
+# means changing the Dockerfile (#432).
+PG_MAJOR="$(ls -1 /usr/lib/postgresql 2>/dev/null | sort -V | tail -n 1)"
+if [ -z "$PG_MAJOR" ]; then
+    bashio::log.fatal "No PostgreSQL installation found under /usr/lib/postgresql — this is a broken image."
+    exec sleep infinity
+fi
+PG_BIN="/usr/lib/postgresql/${PG_MAJOR}/bin"
+
 # ── Persistent data directory ─────────────────────────────────────────────────
 # Home Assistant persists /data across container restarts and updates.
 # We store PostgreSQL data there. The KNX project directory (/project) is set up
 # by the spectrum_knx service so it also exists in SQLite/companion modes.
 DATADIR="/data/postgres"
+INCOMPATIBLE_MARKER="/data/postgres.incompatible"
 mkdir -p "$DATADIR"
 chown -R postgres:postgres "$DATADIR"
 chmod 700 "$DATADIR"
 
+# Clear any marker from a previous boot before re-checking.
+rm -f "$INCOMPATIBLE_MARKER"
+
+# ── Major-version migration ───────────────────────────────────────────────────
+# A PostgreSQL data directory can only be opened by the major version that wrote
+# it, so bumping the bundled major needs the data migrated first (#432). This
+# runs automatically on the first start after such an upgrade.
+#
+# The migration copies rather than moves: the original cluster is untouched
+# until the new one is in place, and is then kept as <datadir>.old-<major> for
+# the user to delete. Any failure leaves the installation exactly as it was.
+if [ -s "$DATADIR/PG_VERSION" ]; then
+    EXISTING_MAJOR="$(cat "$DATADIR/PG_VERSION")"
+    if [ "$EXISTING_MAJOR" != "$PG_MAJOR" ]; then
+        bashio::log.warning "Database was created by PostgreSQL ${EXISTING_MAJOR}; this add-on runs PostgreSQL ${PG_MAJOR}."
+        bashio::log.warning "Migrating automatically. On a large store this can take several minutes."
+        bashio::log.warning "Do NOT stop the add-on while it runs. Your existing data is copied, not moved."
+
+        if DATADIR="$DATADIR" TARGET_MAJOR="$PG_MAJOR" PG_USER=postgres /usr/local/bin/pg-migrate; then
+            bashio::log.info "Database migrated to PostgreSQL ${PG_MAJOR}."
+        else
+            echo "$EXISTING_MAJOR" > "$INCOMPATIBLE_MARKER"
+            bashio::log.fatal "Database migration failed — refusing to start."
+            bashio::log.fatal "  ${DATADIR} was created by PostgreSQL ${EXISTING_MAJOR}"
+            bashio::log.fatal "  this add-on runs PostgreSQL ${PG_MAJOR}"
+            bashio::log.fatal "Your telegram history has NOT been touched or deleted — see the migration output above."
+            bashio::log.fatal "Go back to the previous add-on version, or restore a Home Assistant backup, and report this on issue #432."
+            # Hold instead of exiting: a crash loop would scroll this message out
+            # of the add-on log, which is the only place the user can read it.
+            exec sleep infinity
+        fi
+    fi
+fi
+
 if [ ! -s "$DATADIR/PG_VERSION" ]; then
-    bashio::log.info "Initializing database..."
-    s6-setuidgid postgres /usr/lib/postgresql/15/bin/initdb -D "$DATADIR"
+    bashio::log.info "Initializing database (PostgreSQL ${PG_MAJOR})..."
+    s6-setuidgid postgres "$PG_BIN"/initdb -D "$DATADIR"
 
     # Add timescaledb to preload libraries
     echo "shared_preload_libraries = 'timescaledb'" >> "$DATADIR/postgresql.conf"
@@ -30,12 +75,12 @@ if [ ! -s "$DATADIR/PG_VERSION" ]; then
 
     # Start temporarily to create the database
     bashio::log.info "Creating database and extensions..."
-    s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -w start
+    s6-setuidgid postgres "$PG_BIN"/pg_ctl -D "$DATADIR" -w start
     s6-setuidgid postgres psql -c "CREATE DATABASE spectrum_knx;" || true
     s6-setuidgid postgres psql -d spectrum_knx -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" || true
 
-    s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_ctl -D "$DATADIR" -m fast -w stop
+    s6-setuidgid postgres "$PG_BIN"/pg_ctl -D "$DATADIR" -m fast -w stop
 fi
 
 bashio::log.info "Starting PostgreSQL..."
-exec s6-setuidgid postgres /usr/lib/postgresql/15/bin/postgres -D "$DATADIR" -c listen_addresses='127.0.0.1'
+exec s6-setuidgid postgres "$PG_BIN"/postgres -D "$DATADIR" -c listen_addresses='127.0.0.1'

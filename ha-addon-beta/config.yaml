@@ -1,0 +1,59 @@
+# Beta channel (#427). Same image as the stable add-on, pinned to a
+# pre-release version. Install this one *instead of* the stable add-on —
+# running both against the same bus is not supported.
+name: "Spectrum KNX (Beta)"
+description: "BETA — A professional KNX bus monitor and analyzer"
+version: "2.0.0-beta.8"
+slug: "spectrum_knx_beta"
+image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"
+host_network: true
+init: false
+arch:
+  - aarch64
+  - amd64
+ingress: true
+ingress_port: 8765
+ingress_stream: true
+panel_icon: mdi:chart-timeline-variant
+panel_title: "Spectrum KNX Beta"
+panel_admin: true
+options:
+  KNX_GATEWAY_IP: "AUTO"
+  KNX_GATEWAY_PORT: 3671
+  KNX_CONNECTION_TYPE: "AUTOMATIC"
+  KNX_LOCAL_IP: ""
+  KNX_INDIVIDUAL_ADDRESS: ""
+  KNX_ROUTE_BACK: false
+  KNX_MULTICAST_GROUP: "224.0.23.12"
+  KNX_MULTICAST_PORT: 3671
+  KNX_KNXKEYS_FILE: ""
+  KNX_KNXKEYS_PASSWORD: ""
+  KNX_SECURE_USER_ID: 0
+  KNX_SECURE_USER_PASSWORD: ""
+  KNX_SECURE_DEVICE_PASSWORD: ""
+  KNX_SECURE_BACKBONE_KEY: ""
+  KNX_SECURE_LATENCY_MS: 0
+  LOG_LEVEL: "INFO"
+  DB_BACKEND: "POSTGRES"
+  UPDATE_CHECK: true
+schema:
+  KNX_GATEWAY_IP: "str"
+  KNX_GATEWAY_PORT: "port"
+  KNX_CONNECTION_TYPE: "list(AUTOMATIC|TUNNELING|TUNNELING_TCP|TUNNELING_TCP_SECURE|ROUTING|ROUTING_SECURE)"
+  KNX_LOCAL_IP: "str?"
+  KNX_INDIVIDUAL_ADDRESS: "str?"
+  KNX_ROUTE_BACK: "bool"
+  KNX_MULTICAST_GROUP: "str?"
+  KNX_MULTICAST_PORT: "port?"
+  KNX_KNXKEYS_FILE: "str?"
+  KNX_KNXKEYS_PASSWORD: "password?"
+  KNX_SECURE_USER_ID: "int?"
+  KNX_SECURE_USER_PASSWORD: "password?"
+  KNX_SECURE_DEVICE_PASSWORD: "password?"
+  KNX_SECURE_BACKBONE_KEY: "str?"
+  KNX_SECURE_LATENCY_MS: "int?"
+  LOG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR|CRITICAL)"
+  DB_BACKEND: "list(POSTGRES|SQLITE)"
+  UPDATE_CHECK: "bool"
+ports_description:
+  "5432/tcp": "PostgreSQL TimescaleDB (Internal Only, unused when DB_BACKEND=SQLITE)"

@@ -31,9 +31,21 @@ elif [ "$DB_BACKEND" = "SQLITE" ]; then
     bashio::log.info "SQLite backend selected — skipping PostgreSQL wait."
     export DATABASE_URL="sqlite+aiosqlite:////data/spectrum_knx.db"
 else
+    # Bundled major, derived from the image (see the postgres service) so this
+    # does not need touching when the Dockerfile moves to a new major (#432).
+    PG_MAJOR="$(ls -1 /usr/lib/postgresql 2>/dev/null | sort -V | tail -n 1)"
+
     # Wait for Postgres to be ready
     bashio::log.info "Waiting for PostgreSQL to start..."
-    until s6-setuidgid postgres /usr/lib/postgresql/15/bin/pg_isready -h 127.0.0.1 -p 5432; do
+    until s6-setuidgid postgres "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_isready" -h 127.0.0.1 -p 5432; do
+        # The postgres service refuses to start on a data directory written by a
+        # different major version. Without this check we would wait here forever
+        # with nothing but "Waiting for PostgreSQL to start..." in the log.
+        if [ -f /data/postgres.incompatible ]; then
+            bashio::log.fatal "PostgreSQL will not start: the database was created by PostgreSQL $(cat /data/postgres.incompatible), but this add-on bundles ${PG_MAJOR}."
+            bashio::log.fatal "See the PostgreSQL log above. Your telegram history has NOT been touched."
+            exec sleep infinity
+        fi
         sleep 1
     done
     bashio::log.info "PostgreSQL is ready!"
