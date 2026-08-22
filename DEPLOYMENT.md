@@ -590,3 +590,57 @@ Inside the Home Assistant add-on the notification points at the add-on page, sin
 updates are applied from the add-on store rather than by pulling an image.
 
 Set `UPDATE_CHECK=false` to disable the check entirely (no outbound request is made).
+
+## 10. PostgreSQL Major Versions & Upgrades
+
+> Applies only to `DB_BACKEND=POSTGRES`. SQLite installs and the HA Companion add-on
+> (which reads Home Assistant's own database) are unaffected.
+
+A PostgreSQL **data directory can only be opened by the major version that created it**.
+Pointing a newer PostgreSQL at an existing directory does not upgrade it — the server refuses
+to start. Moving between major versions always requires an explicit data migration.
+
+Current versions:
+
+| Deployment | PostgreSQL |
+| --- | --- |
+| Home Assistant add-on | 15 (bundled in the image) |
+| Docker Compose (`docker-compose.yml`) | 15 (`timescale/timescaledb:latest-pg15`) |
+| Kubernetes (`kubernetes/timescaledb-sts.yaml`) | 16 (`timescale/timescaledb:latest-pg16`) |
+
+### 10.1 Home Assistant add-on
+
+The add-on **detects a version mismatch and refuses to start**, leaving the existing data
+directory untouched, rather than failing obscurely or coming up with an empty database. The
+add-on log states which version wrote the data and which version the add-on bundles.
+
+If you hit this, go back to the add-on version bundling the PostgreSQL major that wrote your data,
+or restore a Home Assistant backup.
+
+Automatic migration to PostgreSQL 18 on first start is planned — see
+[#432](https://github.com/martinhoefling/SpectrumKNX/issues/432). **Take a Home Assistant backup
+before installing the release that introduces it.**
+
+### 10.2 Docker Compose
+
+You own the database container. Changing the `db` image to a different PostgreSQL major while the
+`knx_db_data` volume still holds data from the old major will leave the container failing to start
+with an "incompatible data directory" error in its log. Nothing is lost — revert the tag and it
+comes back.
+
+Migration tooling for Compose is planned alongside the add-on migration (#432). Until it ships,
+either stay on the current major or migrate by hand with `pg_dump`/`pg_restore` between an old and
+a new container.
+
+### 10.3 Kubernetes
+
+**Manual.** No migration tooling is provided for Kubernetes deployments — a major upgrade of the
+TimescaleDB StatefulSet is yours to plan and execute against the PVC, using the standard
+PostgreSQL approaches (`pg_upgrade`, or `pg_dump`/`pg_restore` into a new StatefulSet).
+
+One thing worth knowing if you do it by hand: Spectrum KNX **rebuilds its own TimescaleDB state on
+startup**. `telegrams` is converted to a hypertable (`migrate_data => TRUE`) and the compression
+policy is re-applied every time the application initialises. So a plain logical dump/restore of the
+four tables (`telegrams`, `last_ga_telegrams`, `string_lookup`, `store_metadata`) into a fresh
+cluster is sufficient — you do not need to preserve TimescaleDB's own catalog, and the extension
+version does not have to match.

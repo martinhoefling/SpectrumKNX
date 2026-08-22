@@ -1,5 +1,8 @@
 services:
   db:
+    # Changing this major version under an existing knx_db_data volume will stop
+    # the container from starting — the data directory belongs to the old major.
+    # See DEPLOYMENT.md "PostgreSQL Major Versions & Upgrades" (#432).
     image: timescale/timescaledb:latest-pg15
     container_name: knx_timescale
     environment:
