@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import logging
 import os
 from datetime import UTC, datetime
@@ -521,6 +522,54 @@ async def read_group_value(address: str) -> None:
     await xknx_instance.telegrams.put(telegram)
 
 
+def _project_file_info(ets_project_file: str | None) -> dict:
+    """Project file details for the settings screen (#425).
+
+    Uploads all land on the same fixed path, so the name the user chose is kept
+    in a sidecar written at upload time; without one (a file supplied via
+    KNX_PROJECT_PATH) the path's own basename is already the real name. The
+    import time falls back to the file's mtime, which is when we wrote it.
+
+    Also surfaces what ETS recorded inside the project — its name and last
+    modification — which is not the same thing as when it was imported here.
+    """
+    info: dict = {
+        "project_file": ets_project_file,
+        "project_loaded": global_knx_project is not None,
+        "project_display_name": None,
+        "project_imported_at": None,
+        "project_ets_name": None,
+        "project_ets_last_modified": None,
+        "project_created_by": None,
+    }
+
+    if ets_project_file:
+        info["project_display_name"] = os.path.basename(ets_project_file)
+        meta_file = os.path.splitext(ets_project_file)[0] + "_meta.json"
+        try:
+            with open(meta_file, encoding="utf-8") as f:
+                meta = json.load(f)
+            info["project_display_name"] = meta.get("original_filename") or info["project_display_name"]
+            info["project_imported_at"] = meta.get("imported_at")
+        except (OSError, ValueError):
+            # No sidecar (or an unreadable one) is normal — fall back to mtime.
+            pass
+        if not info["project_imported_at"]:
+            try:
+                mtime = os.path.getmtime(ets_project_file)
+                info["project_imported_at"] = datetime.fromtimestamp(mtime, UTC).isoformat()
+            except OSError:
+                pass
+
+    if global_knx_project:
+        ets_info = global_knx_project.get("info") or {}
+        info["project_ets_name"] = ets_info.get("name")
+        info["project_ets_last_modified"] = ets_info.get("last_modified")
+        info["project_created_by"] = ets_info.get("created_by")
+
+    return info
+
+
 def get_server_config() -> dict:
     """Return the effective server configuration for the status API, with passwords masked."""
 
@@ -552,10 +601,7 @@ def get_server_config() -> dict:
                 "live_source": feed["source"],
             },
             "security": {},
-            "files": {
-                "project_file": ets_project_file,
-                "project_loaded": global_knx_project is not None,
-            },
+            "files": _project_file_info(ets_project_file),
             "status": {
                 "connected": feed["connected"],
                 "write_enabled": False,
@@ -584,8 +630,7 @@ def get_server_config() -> dict:
             "latency_ms": os.getenv("KNX_SECURE_LATENCY_MS"),
         },
         "files": {
-            "project_file": ets_project_file,
-            "project_loaded": global_knx_project is not None,
+            **_project_file_info(ets_project_file),
             "knxkeys_file": knxkeys_file,
             "knxkeys_found": knxkeys_file is not None and os.path.exists(knxkeys_file),
         },

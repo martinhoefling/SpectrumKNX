@@ -201,6 +201,17 @@ const PanelSwitch = ({ active, onChange }: { active: MainPanel; onChange: (p: Ma
 // Stable identity so passing "no flags" doesn't churn memo deps (#319).
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
 
+/**
+ * Settings-screen timestamp: locale date + time. ETS records its own
+ * last-modified string, which is not always parseable — show it verbatim
+ * rather than "Invalid Date" (#425).
+ */
+const formatSettingsDate = (value?: string | null): string | null => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+};
+
 function App() {
   const [theme, setTheme] = useTheme();
   // A view shared via URL (#150) starts on the History tab with its filters applied.
@@ -990,7 +1001,8 @@ function App() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           {serverConfig.files?.project_file && (
                             <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
-                              {getFileName(serverConfig.files.project_file)}
+                              {/* The name the user uploaded, not the fixed path we store it under (#425). */}
+                              {serverConfig.files.project_display_name || getFileName(serverConfig.files.project_file)}
                             </span>
                           )}
                           <span style={{ color: serverConfig.files?.project_loaded ? 'var(--success)' : 'var(--text-dim)', fontSize: '0.75rem' }}>
@@ -998,6 +1010,20 @@ function App() {
                           </span>
                         </div>
                       </div>
+                      {/* Import time and what ETS recorded inside the project (#425). */}
+                      {[
+                        ['Imported:', formatSettingsDate(serverConfig.files?.project_imported_at)],
+                        ['ETS project:', serverConfig.files?.project_ets_name],
+                        ['ETS modified:', formatSettingsDate(serverConfig.files?.project_ets_last_modified)],
+                        ['Created by:', serverConfig.files?.project_created_by],
+                      ].map(([label, value]) => value ? (
+                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                          <span style={{ color: 'var(--text-dim)' }}>{label}</span>
+                          <span style={{ fontFamily: '"JetBrains Mono", monospace', color: 'var(--text-main)', background: 'var(--bg-tag)', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.75rem' }}>
+                            {value}
+                          </span>
+                        </div>
+                      ) : null)}
                       {serverConfig.files?.knxkeys_found !== undefined && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
                           <span style={{ color: 'var(--text-dim)' }}>KNX keys file:</span>

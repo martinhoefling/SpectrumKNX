@@ -396,6 +396,79 @@ def test_get_server_config_standalone_reports_mode():
     assert "telegram_store" not in config["status"]
 
 
+def test_project_file_info_prefers_the_uploaded_filename(tmp_path):
+    """Uploads all land on one fixed path, so the sidecar carries the name the
+    user actually chose — which is what they use for versioning (#425)."""
+    import json as _json
+
+    import knx_daemon
+
+    proj = tmp_path / "knx_project.knxproj"
+    proj.write_bytes(b"x")
+    (tmp_path / "knx_project_meta.json").write_text(
+        _json.dumps({"original_filename": "Home-v42.knxproj", "imported_at": "2026-08-20T10:00:00+00:00"})
+    )
+
+    info = knx_daemon._project_file_info(str(proj))
+
+    assert info["project_display_name"] == "Home-v42.knxproj"
+    assert info["project_imported_at"] == "2026-08-20T10:00:00+00:00"
+
+
+def test_project_file_info_falls_back_to_basename_and_mtime(tmp_path):
+    """A project supplied via KNX_PROJECT_PATH has no sidecar, but its own
+    basename is already the real name and its mtime is when it arrived."""
+    import knx_daemon
+
+    proj = tmp_path / "MyHouse.knxproj"
+    proj.write_bytes(b"x")
+
+    info = knx_daemon._project_file_info(str(proj))
+
+    assert info["project_display_name"] == "MyHouse.knxproj"
+    assert info["project_imported_at"] is not None
+
+
+def test_project_file_info_survives_a_corrupt_sidecar(tmp_path):
+    """A damaged sidecar must not take down the settings screen."""
+    import knx_daemon
+
+    proj = tmp_path / "knx_project.knxproj"
+    proj.write_bytes(b"x")
+    (tmp_path / "knx_project_meta.json").write_text("{not json")
+
+    info = knx_daemon._project_file_info(str(proj))
+
+    assert info["project_display_name"] == "knx_project.knxproj"
+    assert info["project_imported_at"] is not None
+
+
+def test_project_file_info_reports_ets_metadata():
+    """The ETS project's own name and modification date are distinct from when
+    it was imported here, and are already parsed (#425)."""
+    import knx_daemon
+
+    project = {"info": {"name": "Musterhaus", "last_modified": "2026-07-01T08:00:00Z", "created_by": "ETS6"}}
+    with patch.object(knx_daemon, "global_knx_project", project):
+        info = knx_daemon._project_file_info(None)
+
+    assert info["project_ets_name"] == "Musterhaus"
+    assert info["project_ets_last_modified"] == "2026-07-01T08:00:00Z"
+    assert info["project_created_by"] == "ETS6"
+    assert info["project_loaded"] is True
+
+
+def test_project_file_info_without_a_project():
+    import knx_daemon
+
+    with patch.object(knx_daemon, "global_knx_project", None):
+        info = knx_daemon._project_file_info(None)
+
+    assert info["project_loaded"] is False
+    assert info["project_display_name"] is None
+    assert info["project_ets_name"] is None
+
+
 @pytest.mark.parametrize("feed_connected", [True, False])
 def test_get_server_config_companion_reports_live_feed(feed_connected):
     """Sqlite companion mode must not report the daemon's bus connection (#184)."""

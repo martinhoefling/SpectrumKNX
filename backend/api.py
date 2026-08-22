@@ -1,5 +1,7 @@
 import asyncio
 import dataclasses
+import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -40,6 +42,8 @@ from parsers import (
     get_simplified_type,
 )
 from ws_manager import manager
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter()
 
@@ -841,6 +845,17 @@ def _project_upload_path() -> tuple[str, str | None]:
     return proj_file, pwd_file
 
 
+def _project_meta_path() -> str:
+    """Sidecar holding the original upload filename and import time (#425).
+
+    Uploads are all written to the same fixed path, so the name the user
+    actually chose — which many people use for versioning — is otherwise lost.
+    Sits next to the project file like the password sidecar.
+    """
+    proj_file, _ = _project_upload_path()
+    return os.path.splitext(proj_file)[0] + "_meta.json"
+
+
 def _project_upload_writable() -> bool:
     """Returns True if the upload destination is writable."""
     proj_file, _ = _project_upload_path()
@@ -891,12 +906,33 @@ async def upload_project(file: UploadFile = File(...), password: str = Form(""))
     # Trigger reload
     success = await knx_daemon._load_project_data()
 
+    meta_file = _project_meta_path()
     if not success:
         if os.path.exists(proj_file) and not os.getenv("KNX_PROJECT_PATH"):
             os.remove(proj_file)
         if pwd_file and os.path.exists(pwd_file):
             os.remove(pwd_file)
+        # A stale sidecar would otherwise describe a project that is no longer there.
+        if os.path.exists(meta_file):
+            os.remove(meta_file)
         raise HTTPException(status_code=400, detail="Failed to load project. Incorrect password or invalid file.")
+
+    # Record what the user uploaded, now that we know it parses (#425). Never
+    # fatal: the project is loaded either way, this only feeds the settings UI.
+    def save_meta():
+        with open(meta_file, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "original_filename": file.filename,
+                    "imported_at": datetime.now(UTC).isoformat(),
+                },
+                f,
+            )
+
+    try:
+        await asyncio.to_thread(save_meta)
+    except OSError as e:
+        logger.warning("Could not write project metadata sidecar: %s", e)
 
     return {"status": "ok", "message": "Project loaded successfully"}
 

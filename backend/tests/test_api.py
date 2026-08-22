@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -583,6 +584,50 @@ def test_upload_project_with_env_path(monkeypatch, tmp_path):
     # Password sidecar written next to the project file
     pwd_file = tmp_path / "my_password"
     assert pwd_file.read_text() == "test_pass"
+
+
+def test_upload_project_records_original_filename(monkeypatch, tmp_path):
+    """The uploaded name is kept in a sidecar so the settings screen can show it
+    instead of the fixed path we store every project under (#425)."""
+    proj_file = tmp_path / "my.knxproj"
+    monkeypatch.setenv("KNX_PROJECT_PATH", str(proj_file))
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+
+    async def mock_load():
+        knx_daemon.global_knx_project = {"fake": "project"}
+        return True
+
+    monkeypatch.setattr(knx_daemon, "_load_project_data", mock_load)
+
+    response = client.post(
+        "/api/project/upload", data={"password": ""}, files={"file": ("Home-v42.knxproj", b"dummy_content")}
+    )
+    assert response.status_code == 200
+
+    meta = json.loads((tmp_path / "my_meta.json").read_text())
+    assert meta["original_filename"] == "Home-v42.knxproj"
+    assert meta["imported_at"]
+
+
+def test_upload_project_failure_removes_stale_metadata(monkeypatch, tmp_path):
+    """A sidecar left from an earlier upload must not outlive the project it
+    describes, or the settings screen would name a file that is gone."""
+    proj_file = tmp_path / "my.knxproj"
+    meta_file = tmp_path / "my_meta.json"
+    meta_file.write_text('{"original_filename": "Old.knxproj", "imported_at": "2026-01-01T00:00:00+00:00"}')
+    monkeypatch.setenv("KNX_PROJECT_PATH", str(proj_file))
+    monkeypatch.delenv("KNX_PASSWORD", raising=False)
+
+    async def mock_load_fails():
+        return False
+
+    monkeypatch.setattr(knx_daemon, "_load_project_data", mock_load_fails)
+
+    response = client.post(
+        "/api/project/upload", data={"password": "wrong"}, files={"file": ("New.knxproj", b"dummy_content")}
+    )
+    assert response.status_code == 400
+    assert not meta_file.exists()
 
 
 def test_upload_project_invalid_file(monkeypatch):
