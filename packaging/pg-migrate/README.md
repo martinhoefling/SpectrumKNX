@@ -39,37 +39,50 @@ first start after the bundled major changes. Take a Home Assistant backup first.
 
 ## Docker Compose
 
-Run the migration against the existing volume before changing the `db` image
-tag:
+Use **`compose-migrate.sh`**, not the `pg_upgrade` image above:
 
 ```bash
 docker compose down
-docker compose -f docker-compose.yml -f docker-compose.migrate.yml run --rm pg-migrate
-# then update the db image tag in docker-compose.yml and:
-docker compose up -d
+SOURCE_VOLUME=<project>_knx_db_data packaging/pg-migrate/compose-migrate.sh
 ```
 
-> **Only for Debian-based PostgreSQL images.** The stock
-> `timescale/timescaledb` images are Alpine/musl, and a cluster created there
-> must not be opened with the Debian/glibc binaries this image carries —
-> collation differs, which silently corrupts text index ordering. For those,
-> use the logical route below instead.
+It starts your existing cluster and a fresh target cluster side by side, copies the
+schema and the four Spectrum KNX tables across, verifies the row counts, and prints
+the `docker-compose.yml` / `.env` edits to apply. The source volume is only ever
+read from, so rollback is an edit rather than a restore.
 
-### Logical alternative (any image, any version)
+### Why not `pg_upgrade` here
 
-Spectrum KNX rebuilds its own TimescaleDB state on startup: `telegrams` is
-re-created as a hypertable (`migrate_data => TRUE`) and the compression policy
-re-applied every time the application initialises. So a plain dump/restore of
-the four tables into a fresh cluster is sufficient — TimescaleDB's own catalog
-does not need to be preserved and the extension versions need not match.
+The stock `timescale/timescaledb` images are Alpine/musl, and a cluster created by
+them reports `lc_collate=en_US.utf8` — which musl treats as byte ordering and glibc
+as linguistic ordering. Running the Debian-based image above against such a cluster
+would rebuild system catalog indexes under glibc collation, to then be served under
+musl. `pg_upgrade` also cannot bridge the PostgreSQL 18 layout change on its own
+(see below).
+
+Copying the data out and back in through same-family images avoids both problems,
+because every index is rebuilt in its final environment. It is slower than
+`pg_upgrade`, which is the price of not having to reason about collation at all.
+
+The `pg_upgrade` path remains the right one for the Home Assistant add-on, which is
+Debian end to end and therefore has no such mismatch.
+
+### The PostgreSQL 18 layout change
+
+PostgreSQL 18 images keep their data in `/var/lib/postgresql/<major>/docker` and
+expect the volume mounted one level up; 17 and older use `/var/lib/postgresql/data`.
+A pg18 image pointed at an old-layout volume does not fail — it initialises an empty
+cluster next to the untouched data. `compose-migrate.sh` and the `db-precheck`
+service in `docker-compose.yml` both understand either shape; `DB_DATA_MOUNT`
+selects the mount path.
+
+### Checking without migrating
+
+The `pg_upgrade` image can report a mismatch without touching anything:
 
 ```bash
-# from the old container
-pg_dump -U knxuser -d knx_analyzer --data-only \
-    -t telegrams -t last_ga_telegrams -t string_lookup -t store_metadata \
-    > spectrum-knx-data.sql
-# into a fresh cluster on the new major, after Spectrum KNX has created the schema
-psql -U knxuser -d knx_analyzer < spectrum-knx-data.sql
+docker run --rm -v <volume>:/var/lib/postgresql/data \
+    -e CHECK_ONLY=true -e TARGET_MAJOR=18 <image>
 ```
 
 ## Kubernetes

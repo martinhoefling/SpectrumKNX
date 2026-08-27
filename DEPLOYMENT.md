@@ -605,7 +605,7 @@ Current versions:
 | Deployment | PostgreSQL | Migration |
 | --- | --- | --- |
 | Home Assistant add-on | 18 | automatic, on first start |
-| Docker Compose (`docker-compose.yml`) | 15 | tooling provided, run manually |
+| Docker Compose (`docker-compose.yml`) | 18 | one script, startup blocked until done |
 | Kubernetes (`kubernetes/timescaledb-sts.yaml`) | 16 | by hand, not covered |
 
 ### 10.1 Home Assistant add-on — automatic
@@ -632,31 +632,69 @@ refuses up front and changes nothing — free some space and restart the add-on.
 
 Do not stop the add-on while a migration is running.
 
-### 10.2 Docker Compose — one command
+### 10.2 Docker Compose — one script
 
-You own the database container, so the migration is a step you run. Before changing the `db`
-image tag:
+New installations get **PostgreSQL 18**. If you already have a `knx_db_data` volume from an
+older major, you must migrate it — you own the database container, so this is a step you run.
+
+**You will not fail silently into it.** A preflight container compares the volume's actual
+version against the configured image before the database starts, and stops the stack with
+instructions on a mismatch:
+
+```
+============================================================
+PostgreSQL version mismatch — refusing to start.
+
+  your data was written by PostgreSQL 15
+  the configured image expects PostgreSQL 18
+
+Nothing has been changed and no data has been lost.
+...
+============================================================
+```
+
+That guard matters more than it looks. PostgreSQL 18 images moved their data directory to
+`/var/lib/postgresql/<major>/docker` and expect the volume mounted one level up, whereas 17 and
+older use `/var/lib/postgresql/data`. Without the check, a pg18 image pointed at an old volume
+would not fail — it would quietly **initialise an empty cluster alongside your untouched data**,
+which looks exactly like data loss.
+
+#### Migrating
 
 ```bash
 docker compose down
-docker compose -f docker-compose.yml -f docker-compose.migrate.yml run --rm pg-migrate
+SOURCE_VOLUME=<project>_knx_db_data packaging/pg-migrate/compose-migrate.sh
 ```
 
-Then update the `db` image tag in `docker-compose.yml` and bring the stack back up:
+Run it from the repository root; it prints the exact `docker-compose.yml` and `.env` edits to
+make when it finishes. Omit `SOURCE_VOLUME` and it will try to work the volume name out, listing
+the candidates if it cannot.
+
+What it does, and why this route rather than `pg_upgrade`: it starts your existing cluster and a
+fresh PostgreSQL 18 one side by side, copies the schema and the four Spectrum KNX tables across,
+and re-points Compose at the new volume. **Your original volume is only ever read from**, so
+rollback is a one-line edit and nothing needs restoring.
+
+`pg_upgrade` is deliberately not used here. The stock `timescale/timescaledb` images are
+Alpine/musl and their clusters report `lc_collate=en_US.utf8`, which musl treats as byte ordering
+while glibc treats as linguistic ordering. Migrating them with Debian-based `pg_upgrade` binaries
+would rebuild system catalog indexes under glibc collation, to be served afterwards under musl.
+Copying the data through same-family images avoids the question entirely, because every index is
+rebuilt in its final environment.
+
+TimescaleDB's own catalog is not carried across and does not need to be: Spectrum KNX rebuilds
+its hypertable and compression policy on the next start. Expect the first minutes after
+migration to be busy while it does.
+
+#### Staying on your current version
+
+Set all three in `.env` — the mount path matters, per the layout change above:
 
 ```bash
-docker compose up -d
+DB_IMAGE=timescale/timescaledb:latest-pg15
+EXPECTED_PG_MAJOR=15
+DB_DATA_MOUNT=/var/lib/postgresql/data
 ```
-
-The same guarantees apply — copy mode, original kept as `<volume>/data.old-<major>`, refuses
-rather than risking a half-finished upgrade.
-
-> **Check which image you run first.** This path is for Debian-based PostgreSQL images. The stock
-> `timescale/timescaledb` images are Alpine/musl and their clusters must not be opened with
-> Debian/glibc binaries — text collation differs, which corrupts index ordering silently. For
-> those, use the logical dump/restore documented in
-> [`packaging/pg-migrate/README.md`](../packaging/pg-migrate/README.md), which rebuilds indexes
-> and is safe across any image or version.
 
 ### 10.3 Kubernetes
 
