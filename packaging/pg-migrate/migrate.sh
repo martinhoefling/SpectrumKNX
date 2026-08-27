@@ -60,6 +60,8 @@ Environment:
   DATADIR               PostgreSQL data directory (default /var/lib/postgresql/data)
   TARGET_MAJOR          Target major version (default: newest installed)
   SPACE_MARGIN_PERCENT  Extra free space required, percent (default 15)
+  CHECK_ONLY            "true" reports a version mismatch and exits 1 without
+                        migrating anything (Compose preflight)
 USAGE
     exit 64
 }
@@ -80,6 +82,38 @@ OLD_MAJOR="$(cat "$DATADIR/PG_VERSION")"
 if [ "$OLD_MAJOR" = "$TARGET_MAJOR" ]; then
     log "Already on PostgreSQL $TARGET_MAJOR — nothing to do."
     exit 0
+fi
+
+# CHECK_ONLY reports a mismatch without touching anything. Used as a Compose
+# preflight so a version bump surfaces this guidance instead of the database
+# container crash-looping on "incompatible data directory" (#432). Deliberately
+# before the binary checks: the check must work in any image, not only one that
+# can actually perform the migration.
+if [ "${CHECK_ONLY:-}" = "true" ]; then
+    cat >&2 <<MISMATCH
+[pg-migrate] ============================================================
+[pg-migrate] PostgreSQL version mismatch — the database cannot start.
+[pg-migrate]
+[pg-migrate]   existing data in $DATADIR was written by PostgreSQL $OLD_MAJOR
+[pg-migrate]   the configured image expects PostgreSQL $TARGET_MAJOR
+[pg-migrate]
+[pg-migrate] Nothing has been changed and no data has been lost.
+[pg-migrate]
+[pg-migrate] Either migrate the data:
+[pg-migrate]
+[pg-migrate]   docker compose down
+[pg-migrate]   docker compose -f docker-compose.yml -f docker-compose.migrate.yml \\
+[pg-migrate]       run --build --rm pg-migrate
+[pg-migrate]   docker compose up -d
+[pg-migrate]
+[pg-migrate] or stay on your current version by setting this in .env:
+[pg-migrate]
+[pg-migrate]   DB_IMAGE=timescale/timescaledb:latest-pg$OLD_MAJOR
+[pg-migrate]
+[pg-migrate] Full guide: DEPLOYMENT.md "PostgreSQL Major Versions & Upgrades"
+[pg-migrate] ============================================================
+MISMATCH
+    exit 1
 fi
 
 # A downgrade is not something pg_upgrade can do; refuse rather than damage.

@@ -1,12 +1,77 @@
 services:
+  # Preflight: a PostgreSQL data directory can only be opened by the major
+  # version that wrote it, so an existing pg15 volume cannot be served by the
+  # pg18 default below. Left to itself the database container just crash-loops
+  # on "incompatible data directory"; this reports the mismatch and how to fix
+  # it, then blocks startup so nothing else fails confusingly behind it (#432).
+  #
+  # Uses the same image as the database, so it costs no extra pull. Reads only
+  # PG_VERSION, and the volume is mounted read-only.
+  db-precheck:
+    image: ${DB_IMAGE:-timescale/timescaledb:latest-pg18}
+    container_name: knx_db_precheck
+    user: root
+    volumes:
+      # Keep in sync with the db service below when switching after a migration.
+      - knx_db_data:/pgdata:ro
+    environment:
+      EXPECTED_PG_MAJOR: ${EXPECTED_PG_MAJOR:-18}
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        # PostgreSQL 18 moved PGDATA from /var/lib/postgresql/data to
+        # /var/lib/postgresql/<major>/docker, so a volume can hold either shape.
+        current=""
+        if [ -s /pgdata/PG_VERSION ]; then
+          current=$$(cat /pgdata/PG_VERSION)
+        else
+          for f in /pgdata/*/docker/PG_VERSION; do
+            [ -s "$$f" ] && { current=$$(cat "$$f"); break; }
+          done
+        fi
+        # No cluster yet (fresh install) — nothing to check.
+        [ -n "$$current" ] || exit 0
+        [ "$$current" = "$$EXPECTED_PG_MAJOR" ] && exit 0
+        cat >&2 <<EOF
+        ============================================================
+        PostgreSQL version mismatch — refusing to start.
+
+          your data was written by PostgreSQL $$current
+          the configured image expects PostgreSQL $$EXPECTED_PG_MAJOR
+
+        Nothing has been changed and no data has been lost.
+
+        Either migrate your data to PostgreSQL $$EXPECTED_PG_MAJOR:
+
+          docker compose down
+          docker compose -f docker-compose.yml -f docker-compose.migrate.yml run --build --rm pg-migrate
+          docker compose up -d
+
+        (see packaging/pg-migrate/compose-migrate.sh)
+
+        or stay on your current version by putting this in .env:
+
+          DB_IMAGE=timescale/timescaledb:latest-pg$$current
+          EXPECTED_PG_MAJOR=$$current
+          DB_DATA_MOUNT=/var/lib/postgresql/data
+
+        Full guide: DEPLOYMENT.md "PostgreSQL Major Versions & Upgrades"
+        ============================================================
+        EOF
+        exit 1
+
   db:
-    # Changing the PostgreSQL major under an existing knx_db_data volume will stop
-    # the container from starting — the data directory belongs to the old major.
-    # Migrate first: see DEPLOYMENT.md "PostgreSQL Major Versions & Upgrades" and
-    # docker-compose.migrate.yml (#432). New installs can set DB_IMAGE to a newer
-    # major straight away; the default stays on pg15 so existing volumes keep
-    # working when this file is updated.
-    image: ${DB_IMAGE:-timescale/timescaledb:latest-pg15}
+    # New installs get PostgreSQL 18. An existing volume from an older major
+    # needs migrating first — db-precheck above stops you with instructions
+    # rather than letting this container fail obscurely. Set DB_IMAGE (and
+    # EXPECTED_PG_MAJOR to match) to stay on an older major.
+    image: ${DB_IMAGE:-timescale/timescaledb:latest-pg18}
+    depends_on:
+      db-precheck:
+        condition: service_completed_successfully
     container_name: knx_timescale
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-knxuser}
@@ -15,7 +80,14 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - knx_db_data:/var/lib/postgresql/data
+      # PostgreSQL 18 images keep their data in /var/lib/postgresql/<major>/docker
+      # and expect the volume one level up; 17 and older use
+      # /var/lib/postgresql/data. DB_DATA_MOUNT switches between the two.
+      #
+      # After running compose-migrate.sh, point this (and the db-precheck mount
+      # above) at the migrated volume, e.g. knx_db_data_pg18. Both volumes are
+      # declared, so rolling back is the same edit in reverse.
+      - knx_db_data:${DB_DATA_MOUNT:-/var/lib/postgresql}
     restart: unless-stopped
 
   backend:
@@ -45,4 +117,8 @@ services:
 
 volumes:
   knx_db_data:
+  # Target for packaging/pg-migrate/compose-migrate.sh. Declared so switching to
+  # it is a one-line change above rather than an edit to this section; unused
+  # (and never created) until a migration runs.
+  knx_db_data_pg18:
   knx_project_data:

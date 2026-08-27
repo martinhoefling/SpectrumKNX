@@ -1,17 +1,18 @@
 # One-shot PostgreSQL major-version migration for the knx_db_data volume (#432).
 #
 #   docker compose down
-#   docker compose -f docker-compose.yml -f docker-compose.migrate.yml run --rm pg-migrate
+#   docker compose -f docker-compose.yml -f docker-compose.migrate.yml run --build --rm pg-migrate
 #
 # Then update the db image tag in docker-compose.yml and bring the stack back up.
 # See packaging/pg-migrate/README.md — in particular the note that this path is
 # for Debian-based PostgreSQL images only.
 services:
   pg-migrate:
+    # Built locally from this repository — there is no published image to pull,
+    # so pass --build (or run "docker compose build pg-migrate" first).
     build:
       context: .
       dockerfile: packaging/pg-migrate/Dockerfile
-    image: ${PG_MIGRATE_IMAGE:-ghcr.io/martinhoefling/spectrumknx-pg-migrate:latest}
     volumes:
       - knx_db_data:/var/lib/postgresql/data
     environment:
