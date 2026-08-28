@@ -6,7 +6,7 @@ anyio==4.14.2
 asyncpg==0.31.0
 cffi==2.1.1
 click==8.4.2
-cryptography==50.0.0
+cryptography==50.0.1
 fastapi==0.141.1
 greenlet==3.5.5
 h11==0.16.0
@@ -31,18 +31,18 @@ starlette==1.6.0
 striprtf==0.0.33
 typing-inspection==0.4.4
 typing_extensions==4.16.0
-uvicorn==0.52.3
+uvicorn==0.52.4
 websockets==17.0.1
 xknx==3.20.0
 xknxproject==3.10.0
 httpx==0.28.1
-ruff==0.16.3
+ruff==0.16.4
 pytest-asyncio==1.4.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
 pre-commit==4.6.2
 # MCP server (SDK + transitives) for the /mcp endpoint.
-mcp==2.0.0
+mcp==2.1.1
 PyJWT==2.13.0
 attrs==26.1.0
 httpx-sse==0.4.3
