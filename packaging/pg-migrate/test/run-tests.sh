@@ -29,5 +29,11 @@ run_case "migration, root -> postgres"      e2e.sh           --user root
 run_case "failure paths, unprivileged"      failure-paths.sh
 run_case "failure paths, root -> postgres"  failure-paths.sh --user root
 
+# The Compose script drives the docker CLI against real volumes rather than
+# running inside the image, so it gets its own host-level test.
+echo
+echo "########## compose-migrate.sh, end to end ##########"
+"$REPO_ROOT/packaging/pg-migrate/test/compose-e2e.sh"
+
 echo
 echo "All migration tests passed."
