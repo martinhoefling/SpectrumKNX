@@ -95,8 +95,20 @@ Not covered — see `DEPLOYMENT.md` §10.3.
 packaging/pg-migrate/test/run-tests.sh
 ```
 
-Builds the image and runs the suite in both privilege modes (unprivileged, and
-root dropping to postgres as the add-on does). Covers a real hypertable with
-compressed and uncompressed chunks, a collation-sensitive text index, an
-extension deliberately created at an older version, and the failure paths —
-each of which must leave the original directory untouched.
+Runs both suites:
+
+- **`migrate.sh`** (`e2e.sh`, `failure-paths.sh`) inside the migration image, in both
+  privilege modes — unprivileged, and root dropping to postgres as the add-on does.
+  Covers a real hypertable with compressed and uncompressed chunks, a
+  collation-sensitive text index, an extension deliberately created at an older
+  version, and the failure paths, each of which must leave the original directory
+  untouched.
+- **`compose-migrate.sh`** (`compose-e2e.sh`) against real Docker volumes, since it
+  drives the docker CLI rather than running inside the image. Seeds a PostgreSQL 15
+  store, migrates it, then verifies row counts, the value checksum, indexes,
+  sequence positions, UTF-8 round-tripping and writability on the target — and that
+  the source volume is byte-for-byte unchanged.
+
+Both run in CI as the `pg-migration-test` and `compose-migration-test` jobs. The
+Compose test uses prefixed volume names and refuses to start if they already exist,
+so it cannot disturb a real deployment.
