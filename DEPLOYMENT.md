@@ -819,7 +819,23 @@ in again.
 | `AUTH_INGRESS_PEER` | Address Home Assistant ingress is expected to arrive from. | `172.30.32.2` |
 | `AUTH_STATE_DIR` | Override where `auth.json` is kept. | next to the ETS project |
 
-> **Reverse proxies:** do not start uvicorn with `--proxy-headers` or `--forwarded-allow-ips`
-> without revisiting the ingress check. Those make uvicorn trust `X-Forwarded-For` and overwrite
-> the client address, which is what the Home Assistant bypass is decided on — any client on the
-> network could then forge it.
+> **Reverse proxies.** Every launcher starts uvicorn with `--no-proxy-headers`, deliberately.
+> uvicorn otherwise trusts `X-Forwarded-For` from loopback and rewrites the client address — the
+> very address the Home Assistant ingress bypass is decided on. Re-enabling proxy headers, or
+> widening `--forwarded-allow-ips`, means the peer address is no longer something a client cannot
+> choose, so revisit the ingress check first. A test asserts the flag is present in every
+> launcher, because this cannot be detected from inside the application.
+>
+> The practical consequence of the flag: behind a reverse proxy, requests are attributed to the
+> proxy's address rather than the real client. That affects only login throttling, which becomes
+> per-proxy instead of per-client.
+
+### 11.8 CORS
+
+`CORS_ORIGINS` defaults to `*`. With a wildcard, **credentialed cross-origin requests are
+refused** — the browser is not told it may send cookies. That is intentional: a wildcard paired
+with credentials lets any website read authenticated responses.
+
+Set `CORS_ORIGINS` to an explicit, comma-separated list of origins if you genuinely need
+credentialed cross-origin access; credentials are then offered to those origins only. The bundled
+UI does not need this — it is served from the same origin, and dev mode goes through Vite's proxy.

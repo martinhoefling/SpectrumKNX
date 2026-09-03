@@ -441,3 +441,28 @@ def test_repeated_failures_are_throttled():
     # cannot be used as a denial-of-service lever.
     response = client.post("/api/auth/login", json={"username": "admin", "password": PASSWORD})
     assert response.status_code == 429
+
+
+# ── CORS / cookie coupling (#453) ────────────────────────────────────────────
+
+
+def test_credentials_are_never_offered_to_a_wildcard_origin():
+    """Wildcard + credentials lets any site read authenticated responses.
+
+    It is currently only neutralised by the cookie's SameSite=Lax, which
+    couples the two settings: loosening the cookie would silently turn this
+    into cross-origin account takeover.
+    """
+    from auth_middleware import cors_allow_credentials
+
+    assert cors_allow_credentials(["*"]) is False
+    assert cors_allow_credentials(["https://knx.example", "*"]) is False
+    assert cors_allow_credentials(["https://knx.example"]) is True
+    assert cors_allow_credentials(["https://a.example", "https://b.example"]) is True
+
+
+def test_wildcard_cors_response_carries_no_credentials_header():
+    """The default deployment must not advertise credentialed CORS."""
+    response = client.get("/api/version", headers={"Origin": "https://evil.example"})
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-credentials") is None

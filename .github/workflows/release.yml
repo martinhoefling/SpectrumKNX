@@ -118,7 +118,7 @@ jobs:
             mkdir -p /var/lib/spectrum-knx && chown spectrum-knx: /var/lib/spectrum-knx
             set -a; . /etc/spectrum-knx/spectrum-knx.env; set +a
             cd /opt/spectrum-knx/app
-            runuser -u spectrum-knx -- /opt/spectrum-knx/venv/bin/uvicorn main:app --port 8765 &
+            runuser -u spectrum-knx -- /opt/spectrum-knx/venv/bin/uvicorn main:app --no-proxy-headers --port 8765 &
             for i in \$(seq 1 30); do curl -sf http://localhost:8765/api/version && break; sleep 1; done
             curl -sf http://localhost:8765/ | grep -q '<title>Spectrum KNX</title>'
           "

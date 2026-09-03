@@ -18,4 +18,7 @@ ENV BIND_PORT=8765
 
 # `exec` keeps uvicorn as PID 1 so it receives signals for graceful shutdown;
 # the shell form lets BIND_HOST/BIND_PORT expand.
-CMD ["sh", "-c", "exec uvicorn main:app --host \"$BIND_HOST\" --port \"$BIND_PORT\""]
+# --no-proxy-headers is deliberate: authentication identifies Home Assistant
+# ingress by the TCP peer address, and uvicorn trusts X-Forwarded-For from
+# loopback by default, which would let it be rewritten (#453).
+CMD ["sh", "-c", "exec uvicorn main:app --no-proxy-headers --host \"$BIND_HOST\" --port \"$BIND_PORT\""]

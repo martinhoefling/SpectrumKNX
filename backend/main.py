@@ -17,7 +17,7 @@ import mcp_server  # noqa: E402
 import pg_listen_bridge  # noqa: E402
 from api import get_backend_version  # noqa: E402
 from api import router as api_router  # noqa: E402
-from auth_middleware import AuthMiddleware  # noqa: E402
+from auth_middleware import AuthMiddleware, cors_allow_credentials  # noqa: E402
 from database import STORE_MODE, engine  # noqa: E402
 from ha_live_bridge import companion_shutdown, companion_startup  # noqa: E402
 from knx_daemon import knx_shutdown, knx_startup  # noqa: E402
@@ -69,10 +69,26 @@ app = FastAPI(title="Spectrum KNX API", lifespan=lifespan)
 cors_origins_raw = os.getenv("CORS_ORIGINS", "*")
 cors_origins = [origin.strip() for origin in cors_origins_raw.split(",") if origin.strip()]
 
+# Credentials are only offered to an explicit allow-list. Pairing them with "*"
+# is the classic dangerous combination: Starlette's CORSMiddleware echoes the
+# request Origin and adds Access-Control-Allow-Credentials, so any website could
+# read authenticated responses. Today that is neutralised only by the session
+# cookie's SameSite=Lax — which means anyone loosening the cookie (to embed the
+# UI in an iframe, say) would silently turn this into cross-origin account
+# takeover, with nothing to connect the two changes. Decoupling them here (#453).
+#
+# Nothing in-tree needs credentialed cross-origin requests: the UI is served from
+# the same origin, and dev mode goes through Vite's proxy.
+allow_credentials = cors_allow_credentials(cors_origins)
+if not allow_credentials:
+    logger.info(
+        "CORS: wildcard origin — credentialed cross-origin requests are refused. Set CORS_ORIGINS to allow them."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
