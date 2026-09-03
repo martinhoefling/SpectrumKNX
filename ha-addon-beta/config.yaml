@@ -36,7 +36,11 @@ options:
   LOG_LEVEL: "INFO"
   DB_BACKEND: "POSTGRES"
   UPDATE_CHECK: true
+  # "auto" leaves it to the in-app setting; "off" is the way back in after
+  # a lost password, "on" forces login (#451).
+  AUTH_UI: "auto"
 schema:
+  AUTH_UI: "list(auto|on|off)"
   KNX_GATEWAY_IP: "str"
   KNX_GATEWAY_PORT: "port"
   KNX_CONNECTION_TYPE: "list(AUTOMATIC|TUNNELING|TUNNELING_TCP|TUNNELING_TCP_SECURE|ROUTING|ROUTING_SECURE)"

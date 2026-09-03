@@ -28,7 +28,11 @@ options:
   TELEGRAM_DB_PATH: ""
   LOG_LEVEL: "INFO"
   UPDATE_CHECK: true
+  # "auto" leaves it to the in-app setting; "off" is the way back in after
+  # a lost password, "on" forces login (#451).
+  AUTH_UI: "auto"
 schema:
+  AUTH_UI: "list(auto|on|off)"
   COMPANION_MODE: "bool"
   LIVE_SOURCE: "list(ha_websocket|poll|none)"
   TELEGRAM_DB_PATH: "str?"

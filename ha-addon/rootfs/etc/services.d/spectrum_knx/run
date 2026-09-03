@@ -63,6 +63,18 @@ if [ -z "$LOG_LEVEL" ]; then
     export LOG_LEVEL="INFO"
 fi
 
+# Optional UI authentication (#451). "auto" means leave it to the setting stored
+# in the app, so the env var must stay unset — exporting false would make it
+# impossible to switch login on from the UI. "off" is the documented way back in
+# after a lost password, reachable from the add-on configuration rather than
+# needing shell access.
+AUTH_UI=$(bashio::config 'AUTH_UI' 'auto')
+case "$AUTH_UI" in
+    on)  export AUTH_UI_ENABLED=true ;;
+    off) export AUTH_UI_ENABLED=false
+         bashio::log.warning "AUTH_UI=off — the web UI login is disabled. Accounts are kept." ;;
+esac
+
 # Persist uploaded ETS project files across restarts/updates. Home Assistant
 # keeps /data across the container lifecycle, so point the backend's default
 # project directory (/project) at it. This runs in every mode — including

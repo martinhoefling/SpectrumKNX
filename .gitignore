@@ -70,3 +70,6 @@ yarn-error.log*
 
 # Temporary Directories
 tmp/
+
+# pytest's throwaway sqlite database (DATABASE_URL in CI)
+backend/unittest.db*
