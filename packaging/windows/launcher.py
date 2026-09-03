@@ -76,7 +76,15 @@ def run() -> None:
     print(f"Spectrum KNX — web interface: {url} (Ctrl+C to stop)")
     threading.Thread(target=open_browser_when_up, args=(url,), daemon=True).start()
 
-    uvicorn.run(app, host=host, port=port, log_level=os.environ.get("LOG_LEVEL", "info").lower())
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        # See auth.is_ingress_peer: authentication trusts the TCP peer address,
+        # so X-Forwarded-For must never be allowed to rewrite it (#453).
+        proxy_headers=False,
+        log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+    )
 
 
 if __name__ == "__main__":

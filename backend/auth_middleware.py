@@ -145,3 +145,16 @@ def cookie_kwargs() -> dict[str, Any]:
     """
     secure = (os.getenv("AUTH_COOKIE_SECURE", "").strip().lower()) in ("1", "true", "yes", "on")
     return {"httponly": True, "samesite": "lax", "secure": secure, "path": "/"}
+
+
+def cors_allow_credentials(origins: list[str]) -> bool:
+    """Whether CORS should offer credentials to the configured origins.
+
+    Never with a wildcard. Starlette's CORSMiddleware echoes the request Origin
+    and adds Access-Control-Allow-Credentials in that pairing, so any website
+    could read authenticated responses. It is currently neutralised only by the
+    session cookie's SameSite=Lax, which makes the two settings silently
+    coupled: loosening the cookie would turn this into cross-origin account
+    takeover. Keeping them independent instead (#453).
+    """
+    return "*" not in origins
