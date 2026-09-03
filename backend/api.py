@@ -28,6 +28,8 @@ from sqlalchemy import text
 from xknx.exceptions import ConversionError, CouldNotParseAddress
 from xknx.telegram.address import GroupAddress, IndividualAddress
 
+import auth
+import auth_middleware
 import cyclic_send
 import ha_live_bridge
 import knx_daemon  # import global config
@@ -935,6 +937,191 @@ async def upload_project(file: UploadFile = File(...), password: str = Form(""))
         logger.warning("Could not write project metadata sidecar: %s", e)
 
     return {"status": "ok", "message": "Project loaded successfully"}
+
+
+# ── Authentication (#451) ─────────────────────────────────────────────────────
+# Optional and off by default. /api/auth/status, /login and /enable are reachable
+# without a session (see auth_middleware); everything else here needs one.
+
+
+class AuthEnableRequest(BaseModel):
+    # Optional: an installation that already has accounts is re-enabled without
+    # creating another one.
+    username: str | None = Field(default=None, max_length=64)
+    password: str | None = Field(default=None, max_length=256)
+
+
+class AuthLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class AuthUserRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class AuthPasswordRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=256)
+
+
+def _current_user(request: Request) -> str | None:
+    """Who is making this request, if anyone.
+
+    Ingress requests are attributed to Home Assistant rather than a local
+    account: HA authenticated them and the add-on is admin-only.
+    """
+    if auth.is_ingress_peer(request.client.host if request.client else None):
+        return "home-assistant"
+    return auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+
+
+def _require_user(request: Request) -> str:
+    user = _current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+@router.get("/api/auth/status")
+async def auth_status(request: Request):
+    """What the UI needs to decide between a login screen and the app."""
+    return {
+        "ui_auth_enabled": auth.ui_auth_enabled(),
+        "ui_auth_forced_off": auth.ui_auth_forced_off(),
+        "configured": bool(auth.usernames()),
+        "authenticated": _current_user(request) is not None,
+        "user": _current_user(request),
+        "mcp_token_required": auth.mcp_token_required(),
+        "mcp_token_env": bool(os.getenv("AUTH_MCP_TOKEN")),
+    }
+
+
+@router.post("/api/auth/enable")
+async def auth_enable(payload: AuthEnableRequest, request: Request, response: Response):
+    """Turn UI login on.
+
+    With no account yet, this also creates the first one — atomically, because
+    enabling first and creating the account afterwards would leave a window in
+    which anyone arriving could claim admin.
+
+    Reachability is enforced by the middleware, not here: once login is on, this
+    endpoint is guarded like any other, so only an ingress peer or an existing
+    session reaches it. It is open only while login is off, which is the state in
+    which the entire API is open anyway.
+    """
+    if auth.ui_auth_enabled() and auth.usernames():
+        raise HTTPException(status_code=409, detail="Authentication is already enabled")
+
+    # Accounts exist already (login was switched off, or is being re-enabled):
+    # flip the flag without touching them. The caller then logs in normally.
+    if auth.usernames():
+        try:
+            auth.enable_existing()
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"status": "ok", "user": None}
+
+    if not payload.username or not payload.password:
+        raise HTTPException(status_code=422, detail="username and password are required to create the first account")
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=422, detail="password must be at least 8 characters")
+    try:
+        auth.enable_with_admin(payload.username, payload.password)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    # peer is passed so this path counts towards the login throttle like any
+    # other credential check.
+    token = auth.login(payload.username, payload.password, peer=request.client.host if request.client else "")
+    if token:
+        response.set_cookie(auth.SESSION_COOKIE, token, **auth_middleware.cookie_kwargs())
+    return {"status": "ok", "user": payload.username.strip().lower()}
+
+
+@router.post("/api/auth/login")
+async def auth_login(payload: AuthLoginRequest, request: Request, response: Response):
+    if not auth.ui_auth_enabled():
+        raise HTTPException(status_code=400, detail="Authentication is not enabled")
+    peer = request.client.host if request.client else ""
+    if auth.throttled(peer):
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Try again shortly.")
+    token = auth.login(payload.username, payload.password, peer=peer)
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    response.set_cookie(auth.SESSION_COOKIE, token, **auth_middleware.cookie_kwargs())
+    return {"status": "ok", "user": payload.username.strip().lower()}
+
+
+@router.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    auth.logout(request.cookies.get(auth.SESSION_COOKIE))
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"status": "ok"}
+
+
+@router.post("/api/auth/disable")
+async def auth_disable(request: Request, response: Response):
+    _require_user(request)
+    auth.disable()
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"status": "ok"}
+
+
+@router.get("/api/auth/users")
+async def auth_list_users(request: Request):
+    _require_user(request)
+    return {"users": auth.usernames()}
+
+
+@router.post("/api/auth/users")
+async def auth_add_user(payload: AuthUserRequest, request: Request):
+    _require_user(request)
+    try:
+        auth.add_user(payload.username, payload.password)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "ok"}
+
+
+@router.delete("/api/auth/users/{username}")
+async def auth_delete_user(username: str, request: Request):
+    _require_user(request)
+    try:
+        auth.delete_user(username)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "ok"}
+
+
+@router.post("/api/auth/password")
+async def auth_change_password(payload: AuthPasswordRequest, request: Request):
+    """Change the password of the account making the request."""
+    user = _require_user(request)
+    if user == "home-assistant":
+        raise HTTPException(status_code=400, detail="Ingress sessions have no local password")
+    try:
+        auth.change_password(user, payload.password)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "ok"}
+
+
+@router.post("/api/auth/mcp-token")
+async def auth_new_mcp_token(request: Request):
+    """Generate a token for the MCP endpoint. Shown once and never again."""
+    _require_user(request)
+    if os.getenv("AUTH_MCP_TOKEN"):
+        raise HTTPException(status_code=409, detail="The MCP token is set via AUTH_MCP_TOKEN")
+    return {"token": auth.new_mcp_token()}
+
+
+@router.delete("/api/auth/mcp-token")
+async def auth_clear_mcp_token(request: Request):
+    _require_user(request)
+    if os.getenv("AUTH_MCP_TOKEN"):
+        raise HTTPException(status_code=409, detail="The MCP token is set via AUTH_MCP_TOKEN")
+    auth.clear_mcp_token()
+    return {"status": "ok"}
 
 
 @router.get("/api/server/config")

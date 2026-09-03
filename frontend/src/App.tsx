@@ -40,6 +40,9 @@ import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
 import { WriteToBusPanel } from './components/WriteToBusPanel';
 import { UpdateNotification } from './components/UpdateNotification';
+import { LoginScreen } from './components/LoginScreen';
+import { AuthSettings } from './components/AuthSettings';
+import { useAuthStatus, loginRequired } from './hooks/useAuthStatus';
 import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
   DEFAULT_FILTERS,
@@ -271,6 +274,7 @@ function App() {
   const [isUploadWizardOpen, setIsUploadWizardOpen] = useState(false);
   const [isKeysWizardOpen, setIsKeysWizardOpen] = useState(false);
   const [knxkeysStatus, setKnxkeysStatus] = useState<{ upload_feature_active: boolean; knxkeys_found: boolean } | null>(null);
+  const { status: authStatus, reload: reloadAuth } = useAuthStatus();
   const updateInfo = useUpdateCheck();
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [updateClosed, setUpdateClosed] = useState(false);
@@ -714,6 +718,13 @@ function App() {
     </span>
   ) : null;
 
+  // Replace the app with a login screen when authentication is required. Early
+  // so an unauthenticated visitor triggers no data fetching or WebSocket work
+  // (those requests would 401 and the socket would be refused anyway).
+  if (loginRequired(authStatus)) {
+    return <LoginScreen status={authStatus!} onAuthenticated={reloadAuth} />;
+  }
+
   return (
     <div className="container dashboard-grid" style={{ padding: '1.5rem', gap: '1.5rem' }}>
 
@@ -1040,6 +1051,9 @@ function App() {
                         </div>
                       )}
                     </div>
+
+                    {/* Authentication (#451) */}
+                    {authStatus && <AuthSettings status={authStatus} onChanged={reloadAuth} />}
 
                     {/* Security */}
                     {Object.entries(serverConfig.security || {}).some(([, v]) => v != null) && (

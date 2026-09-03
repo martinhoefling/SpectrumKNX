@@ -17,6 +17,7 @@ import mcp_server  # noqa: E402
 import pg_listen_bridge  # noqa: E402
 from api import get_backend_version  # noqa: E402
 from api import router as api_router  # noqa: E402
+from auth_middleware import AuthMiddleware  # noqa: E402
 from database import STORE_MODE, engine  # noqa: E402
 from ha_live_bridge import companion_shutdown, companion_startup  # noqa: E402
 from knx_daemon import knx_shutdown, knx_startup  # noqa: E402
@@ -77,6 +78,19 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+# Optional authentication (#451). A pure ASGI middleware so WebSocket
+# connections and the mounted MCP app are gated by the same rules as the REST
+# API — no route can be forgotten. Inert unless auth is switched on.
+#
+# NOTE: this relies on scope["client"] being the real TCP peer, which is how the
+# Home Assistant ingress bypass is identified. uvicorn's ProxyHeadersMiddleware
+# is on by default and rewrites that from X-Forwarded-For for callers in
+# forwarded_allow_ips (default 127.0.0.1), so the trust boundary is that
+# allow-list. Widening it — --forwarded-allow-ips, FORWARDED_ALLOW_IPS, or a
+# reverse proxy in front — means revisiting auth.is_ingress_peer, because the
+# peer address stops being something a client cannot choose.
+app.add_middleware(AuthMiddleware)
 
 # Mount the MCP Streamable HTTP endpoint before the SPA catch-all so /mcp is not
 # swallowed by static routing (#332). Disabled when MCP_MODE=off.

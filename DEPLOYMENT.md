@@ -708,3 +708,118 @@ policy is re-applied every time the application initialises. So a plain logical 
 four tables (`telegrams`, `last_ga_telegrams`, `string_lookup`, `store_metadata`) into a fresh
 cluster is sufficient — you do not need to preserve TimescaleDB's own catalog, and the extension
 version does not have to match.
+
+## 11. Authentication (Optional)
+
+**Off by default.** Nothing changes for an existing installation unless you switch it on. Two
+switches, independent of each other:
+
+- **UI login** — username and password for the web interface and its API.
+- **MCP token** — a bearer token for `/mcp`, which is otherwise open (see §7).
+
+### 11.1 Turning UI login on
+
+Settings → *Login* → enter a username and password → **Enable login**.
+
+Creating the first account and enabling login are a **single step**, so there is never a moment
+where authentication is on but nobody owns it.
+
+> **Create the account before forcing login on.** If you set `AUTH_UI_ENABLED=true` (or the add-on
+> option `AUTH_UI: "on"`) on an installation that has no account yet, account creation is treated
+> as a guarded action like any other: it is reachable only through Home Assistant ingress, or after
+> setting the flag back to `auto`/`off` for the setup step. That is deliberate — an open
+> account-creation endpoint on an instance that reports "login required" would let anyone who can
+> reach the port claim it. The settings panel warns while an instance is in that state.
+
+Further accounts can be added afterwards from the same panel. All accounts are equal — there are
+no roles.
+
+### 11.2 What stays reachable without logging in
+
+| Path | Why |
+| --- | --- |
+| `/health`, `/health/liveness`, `/health/readiness` (+ `/api` variants) | Kubernetes probes send no credentials (§8) |
+| `/api/version` | Needed to render before login |
+| The web assets themselves | They only draw the login screen |
+
+Everything else under `/api/` — and the `/ws/telegrams` live feed — needs a session.
+
+### 11.3 Home Assistant add-on
+
+**Requests through ingress are already authenticated.** Home Assistant has logged the user in and
+the add-on is admin-only, so opening it from the sidebar never asks for a second password.
+
+UI login therefore only matters if you reach the add-on directly on its port (8765) rather than
+through Home Assistant.
+
+This is decided by the address the request comes from — Home Assistant's Supervisor proxies ingress
+from `172.30.32.2` — and never by a request header, which any client could send. Override with
+`AUTH_INGRESS_PEER` if your setup differs.
+
+### 11.4 Locked out? Turn the flag off
+
+Losing the admin password does not mean losing the installation.
+
+**Home Assistant add-on:** set the **`AUTH_UI`** option to `off` in the add-on configuration and
+restart. Login is skipped, accounts are kept. Change the password in Settings, then set `AUTH_UI`
+back to `auto`.
+
+**Docker / Debian / Windows:** set `AUTH_UI_ENABLED=false` and restart, with the same effect.
+
+```bash
+# .env
+AUTH_UI_ENABLED=false
+```
+
+Only as a last resort, delete `auth.json` from the state directory (next to the ETS project — see
+below). That resets accounts **and** the MCP token.
+
+Passwords are stored as scrypt hashes and cannot be read back or edited by hand; there is
+deliberately no way to write a plaintext password into the file.
+
+### 11.5 MCP token
+
+Settings → *MCP token* → **Generate**. The token is displayed **once** and stored only as a hash —
+if you lose it, generate a new one.
+
+Then point the client at it:
+
+```json
+{
+  "mcpServers": {
+    "spectrum-knx": {
+      "url": "http://<host>:8765/mcp/",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+Alternatively set `AUTH_MCP_TOKEN` in the environment, which takes precedence and needs no
+writable state directory — useful with Kubernetes secrets. While it is set, the token cannot be
+managed from the UI.
+
+### 11.6 Where state is kept
+
+`auth.json`, owner-readable only, in the same directory as the ETS project: `/project` for Docker
+and the add-on (persisted at `/data/project` there), or alongside `KNX_PROJECT_PATH` for the
+Debian package. It is deliberately **not** in the database — the telegram store is read-only in
+companion modes, and file storage keeps login working when the database does not.
+
+Home Assistant backups include it. Sessions are held in memory, so restarting asks everyone to log
+in again.
+
+### 11.7 Configuration variables
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `AUTH_UI_ENABLED` | Force UI login on or off, overriding the stored setting. Unset means "use the stored setting". | unset |
+| `AUTH_MCP_TOKEN` | Supply the MCP token directly; takes precedence over the stored one. | unset |
+| `AUTH_COOKIE_SECURE` | Mark the session cookie `Secure`. Only for HTTPS deployments — on plain HTTP the cookie would never be sent. | `false` |
+| `AUTH_INGRESS_PEER` | Address Home Assistant ingress is expected to arrive from. | `172.30.32.2` |
+| `AUTH_STATE_DIR` | Override where `auth.json` is kept. | next to the ETS project |
+
+> **Reverse proxies:** do not start uvicorn with `--proxy-headers` or `--forwarded-allow-ips`
+> without revisiting the ingress check. Those make uvicorn trust `X-Forwarded-For` and overwrite
+> the client address, which is what the Home Assistant bypass is decided on — any client on the
+> network could then forge it.
