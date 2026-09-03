@@ -54,7 +54,7 @@ jobs:
             APP_VERSION=${{ github.ref_name }}
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           # A semver pre-release tag ("v2.0.0-beta.7") carries a hyphen; a
@@ -124,7 +124,7 @@ jobs:
           "
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.deb
 
@@ -184,6 +184,6 @@ jobs:
           Compress-Archive -Path dist/windows/spectrum-knx -DestinationPath "dist/spectrum-knx-$version-windows-x64.zip"
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.zip
