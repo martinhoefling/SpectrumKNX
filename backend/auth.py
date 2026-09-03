@@ -94,18 +94,29 @@ def auth_file() -> str:
     return os.path.join(state_dir(), "auth.json")
 
 
+def _blank() -> dict[str, Any]:
+    """Unconfigured state — no accounts, no token, login off."""
+    return {"version": 1, "ui_auth_enabled": False, "users": [], "mcp_token": None}
+
+
 def _load() -> dict[str, Any]:
     try:
         with open(auth_file(), encoding="utf-8") as handle:
             data = json.load(handle)
     except FileNotFoundError:
-        return {"version": 1, "ui_auth_enabled": False, "users": [], "mcp_token": None}
+        return _blank()
     except (OSError, ValueError) as err:
         # A damaged file must not lock everyone out silently, but it must also
         # not fail open: report it and treat auth as unconfigured so the
         # documented recovery (delete the file) applies.
         logger.error("Could not read %s (%s) — treating authentication as unconfigured", auth_file(), err)
-        return {"version": 1, "ui_auth_enabled": False, "users": [], "mcp_token": None}
+        return _blank()
+    if not isinstance(data, dict):
+        # Valid JSON that is not an object ("[]", "3", a bare string). Without
+        # this the setdefault calls below raise AttributeError on every single
+        # request, including /api/auth/status.
+        logger.error("%s does not contain a JSON object — treating authentication as unconfigured", auth_file())
+        return _blank()
     data.setdefault("users", [])
     data.setdefault("ui_auth_enabled", False)
     data.setdefault("mcp_token", None)
@@ -207,6 +218,10 @@ def enable_with_admin(username: str, password: str) -> None:
     Deliberately atomic: enabling first and creating the account later would
     leave a window in which auth is on with no owner, and whoever arrived first
     would claim it.
+
+    Only valid when no account exists yet. Refusing otherwise matters because
+    this used to assign ``data["users"]`` wholesale, so calling it on a
+    populated file would have discarded every existing account.
     """
     username = _normalise(username)
     if not username:
@@ -214,12 +229,22 @@ def enable_with_admin(username: str, password: str) -> None:
     if len(password) < 8:
         raise ValueError("password must be at least 8 characters")
     data = _load()
-    if data.get("ui_auth_enabled") and data.get("users"):
-        raise ValueError("authentication is already enabled")
+    if data.get("users"):
+        raise ValueError("an account already exists; enable login from Settings instead")
     data["ui_auth_enabled"] = True
     data["users"] = [{"username": username, "password": hash_password(password), "created_at": _now()}]
     _save(data)
     logger.info("UI authentication enabled; admin user '%s' created", username)
+
+
+def enable_existing() -> None:
+    """Turn UI auth back on for an installation that already has accounts."""
+    data = _load()
+    if not data.get("users"):
+        raise ValueError("no accounts exist yet")
+    data["ui_auth_enabled"] = True
+    _save(data)
+    logger.info("UI authentication enabled")
 
 
 def disable() -> None:
@@ -365,10 +390,17 @@ def verify_mcp_token(token: str | None) -> bool:
 def is_ingress_peer(peer: str | None) -> bool:
     """Whether a request came from Home Assistant's ingress proxy.
 
-    Decided by the TCP peer address, never by a header. Any client can send
-    X-Ingress-Path or X-Forwarded-For; none of them can change the peer address
-    — provided uvicorn is *not* started with --proxy-headers, which would let
-    X-Forwarded-For overwrite it and reopen this as a bypass.
+    Decided by the TCP peer address, never by a header: any client can send
+    X-Ingress-Path or X-Forwarded-For, and neither is consulted here.
+
+    One caveat on the peer address itself. uvicorn enables its
+    ProxyHeadersMiddleware **by default** (proxy_headers=True) with
+    forwarded_allow_ips defaulting to 127.0.0.1, so a caller connecting *from
+    loopback* can set X-Forwarded-For and have the peer address rewritten before
+    it reaches here. That needs code execution on the host already — other
+    add-ons sit on the Supervisor bridge, not loopback — but it means the trust
+    boundary is uvicorn's allow-list, not the absence of a flag. See the backlog
+    note on pinning --forwarded-allow-ips in the launchers.
     """
     if not peer:
         return False

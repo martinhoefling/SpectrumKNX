@@ -945,8 +945,10 @@ async def upload_project(file: UploadFile = File(...), password: str = Form(""))
 
 
 class AuthEnableRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=8, max_length=256)
+    # Optional: an installation that already has accounts is re-enabled without
+    # creating another one.
+    username: str | None = Field(default=None, max_length=64)
+    password: str | None = Field(default=None, max_length=256)
 
 
 class AuthLoginRequest(BaseModel):
@@ -996,19 +998,41 @@ async def auth_status(request: Request):
 
 
 @router.post("/api/auth/enable")
-async def auth_enable(payload: AuthEnableRequest, response: Response):
-    """Turn UI auth on and create the first account in one step.
+async def auth_enable(payload: AuthEnableRequest, request: Request, response: Response):
+    """Turn UI login on.
 
-    Atomic on purpose: enabling first and creating the account afterwards would
-    leave a window where anyone arriving could claim admin.
+    With no account yet, this also creates the first one — atomically, because
+    enabling first and creating the account afterwards would leave a window in
+    which anyone arriving could claim admin.
+
+    Reachability is enforced by the middleware, not here: once login is on, this
+    endpoint is guarded like any other, so only an ingress peer or an existing
+    session reaches it. It is open only while login is off, which is the state in
+    which the entire API is open anyway.
     """
     if auth.ui_auth_enabled() and auth.usernames():
         raise HTTPException(status_code=409, detail="Authentication is already enabled")
+
+    # Accounts exist already (login was switched off, or is being re-enabled):
+    # flip the flag without touching them. The caller then logs in normally.
+    if auth.usernames():
+        try:
+            auth.enable_existing()
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"status": "ok", "user": None}
+
+    if not payload.username or not payload.password:
+        raise HTTPException(status_code=422, detail="username and password are required to create the first account")
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=422, detail="password must be at least 8 characters")
     try:
         auth.enable_with_admin(payload.username, payload.password)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
-    token = auth.login(payload.username, payload.password)
+    # peer is passed so this path counts towards the login throttle like any
+    # other credential check.
+    token = auth.login(payload.username, payload.password, peer=request.client.host if request.client else "")
     if token:
         response.set_cookie(auth.SESSION_COOKIE, token, **auth_middleware.cookie_kwargs())
     return {"status": "ok", "user": payload.username.strip().lower()}

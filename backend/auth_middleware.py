@@ -17,15 +17,22 @@ import auth
 #
 # The health endpoints are documented Kubernetes probes and probes send no
 # credentials; locking them would report a healthy instance as down. /api/version
-# is what the UI uses to render before anyone logs in, and the auth endpoints
-# below are how you log in at all.
+# is what the UI uses to render before anyone logs in, and /status and /login are
+# how you log in at all.
+#
+# /api/auth/enable is deliberately NOT here. It used to be, so that first-run
+# setup could reach it — but that made it reachable even when login was already
+# required, and with AUTH_UI_ENABLED=true on an install that has no account yet
+# any anonymous caller could claim the admin account and be handed a session.
+# It is instead admitted only while UI auth is off (below), which is the state in
+# which the whole API is open anyway, or to an already-trusted caller — an
+# ingress peer, or a valid session.
 _OPEN_PREFIXES = (
     "/health",
     "/api/health",
     "/api/version",
     "/api/auth/status",
     "/api/auth/login",
-    "/api/auth/enable",
 )
 
 # Paths the API owns. Anything else is the single-page app and its assets, which
@@ -85,6 +92,9 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Auth off: everything is open, including first-run setup via
+        # /api/auth/enable. Once it is on, that endpoint is treated like any
+        # other guarded route and needs an ingress peer or a session.
         if not auth.ui_auth_enabled():
             await self.app(scope, receive, send)
             return

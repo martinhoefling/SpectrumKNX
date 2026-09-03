@@ -84,10 +84,12 @@ app.include_router(api_router)
 # API — no route can be forgotten. Inert unless auth is switched on.
 #
 # NOTE: this relies on scope["client"] being the real TCP peer, which is how the
-# Home Assistant ingress bypass is identified. Do not start uvicorn with
-# --proxy-headers / --forwarded-allow-ips without revisiting auth.is_ingress_peer:
-# that makes uvicorn trust X-Forwarded-For and overwrite the peer address, which
-# any client on the network could then forge.
+# Home Assistant ingress bypass is identified. uvicorn's ProxyHeadersMiddleware
+# is on by default and rewrites that from X-Forwarded-For for callers in
+# forwarded_allow_ips (default 127.0.0.1), so the trust boundary is that
+# allow-list. Widening it — --forwarded-allow-ips, FORWARDED_ALLOW_IPS, or a
+# reverse proxy in front — means revisiting auth.is_ingress_peer, because the
+# peer address stops being something a client cannot choose.
 app.add_middleware(AuthMiddleware)
 
 # Mount the MCP Streamable HTTP endpoint before the SPA catch-all so /mcp is not

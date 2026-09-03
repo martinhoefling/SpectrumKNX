@@ -78,12 +78,44 @@ export function AuthSettings({ status, onChanged }: AuthSettingsProps) {
         </div>
       )}
 
+      {/* Login is forced on by the environment but nobody owns the instance
+          yet. Without this the panel would show a reassuring green "Required"
+          while the account is still unclaimed. */}
+      {status.ui_auth_enabled && !status.configured && (
+        <div style={{
+          marginTop: '0.4rem', padding: '0.45rem 0.55rem', borderRadius: 6, fontSize: '0.72rem',
+          background: 'rgba(239,68,68,0.1)', border: '1px solid var(--error, #ef4444)',
+          color: 'var(--error, #ef4444)', lineHeight: 1.5,
+        }}>
+          <strong>No account exists yet.</strong> Login is switched on by AUTH_UI_ENABLED (or the
+          add-on&apos;s AUTH_UI option), but nobody has claimed the administrator account. Create it
+          now — until you do, this installation has no owner.
+        </div>
+      )}
+
       {error && (
         <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--error, #ef4444)' }}>{error}</div>
       )}
 
       {/* Enabling requires creating the first account in the same step. */}
-      {!status.ui_auth_enabled && !status.ui_auth_forced_off && (
+      {/* Accounts exist but login is off: flip it back on without creating one. */}
+      {!status.ui_auth_enabled && !status.ui_auth_forced_off && status.configured && (
+        <div style={{ marginTop: '0.5rem' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '0.35rem' }}>
+            Accounts already exist. Turning login on keeps them; you will be asked to sign in.
+          </div>
+          <button
+            style={button}
+            onClick={async () => {
+              if (await call('/api/auth/enable', { method: 'POST', body: JSON.stringify({}) })) onChanged();
+            }}
+          >
+            Enable login
+          </button>
+        </div>
+      )}
+
+      {!status.ui_auth_enabled && !status.ui_auth_forced_off && !status.configured && (
         <div style={{ marginTop: '0.5rem' }}>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '0.35rem' }}>
             Turning login on creates the first account at the same time.

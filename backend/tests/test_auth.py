@@ -74,6 +74,77 @@ def test_username_is_normalised():
     assert auth.usernames() == ["admin"]
 
 
+# ── Forced-on with no account (the vuln.md finding) ──────────────────────────
+
+
+def test_anonymous_cannot_claim_the_admin_account_when_login_is_forced_on(monkeypatch):
+    """The reported authentication bypass.
+
+    With AUTH_UI_ENABLED=true and no account yet, /api/auth/enable used to be
+    unconditionally open, so any anonymous caller who could reach the port
+    created the admin account and was handed a session — while every other route
+    correctly returned 401 and the UI reported "Login: Required".
+    """
+    monkeypatch.setenv("AUTH_UI_ENABLED", "true")
+    client.cookies.clear()
+    assert auth.ui_auth_enabled() is True
+    assert auth.usernames() == []
+
+    # Everything else is locked...
+    assert client.get("/api/server/config").status_code == 401
+    # ...and so is this, now.
+    response = client.post("/api/auth/enable", json={"username": "attacker", "password": "hunter2hunter2"})
+    assert response.status_code == 401, response.text
+    assert auth.usernames() == [], "an anonymous caller created an account"
+    assert client.get("/api/server/config").status_code == 401
+
+
+def test_ingress_can_still_create_the_first_account_when_forced_on(monkeypatch):
+    """The operator must not be locked out by the fix above.
+
+    In the add-on, Home Assistant has already authenticated an admin, so setup
+    over ingress has to keep working even with the flag forced on — otherwise
+    turning the option on before creating an account would be unrecoverable
+    from the UI.
+    """
+    monkeypatch.setenv("AUTH_UI_ENABLED", "true")
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "token")
+    monkeypatch.setenv("AUTH_INGRESS_PEER", "testclient")
+    client.cookies.clear()
+
+    response = client.post("/api/auth/enable", json={"username": "admin", "password": PASSWORD})
+    assert response.status_code == 200, response.text
+    assert auth.usernames() == ["admin"]
+
+
+def test_setup_still_open_when_login_is_off():
+    """First-run setup on a normal install is unaffected."""
+    client.cookies.clear()
+    assert auth.ui_auth_enabled() is False
+    assert _enable().status_code == 200
+
+
+def test_enable_never_discards_existing_accounts():
+    """It used to assign users wholesale, so this would have wiped them."""
+    _enable()
+    client.post("/api/auth/users", json={"username": "bob", "password": PASSWORD})
+    auth.disable()  # login off, accounts kept
+    client.cookies.clear()
+
+    # Re-enabling touches the flag only.
+    response = client.post("/api/auth/enable", json={"username": "attacker", "password": "hunter2hunter2"})
+    assert response.status_code == 200, response.text
+    assert set(auth.usernames()) == {"admin", "bob"}
+    assert "attacker" not in auth.usernames()
+    assert auth.ui_auth_enabled() is True
+
+
+def test_enable_is_refused_once_login_is_on_and_an_account_exists():
+    """Unchanged behaviour — this case was already correct."""
+    _enable()
+    assert client.post("/api/auth/enable", json={"username": "x", "password": PASSWORD}).status_code == 409
+
+
 # ── Protection ───────────────────────────────────────────────────────────────
 
 
@@ -251,6 +322,18 @@ def test_deleting_the_state_file_resets_everything():
     auth._reset_for_tests()
     assert auth.ui_auth_enabled() is False
     assert auth.usernames() == []
+
+
+def test_json_that_is_not_an_object_is_treated_as_unconfigured():
+    """A valid-JSON non-object used to raise AttributeError on every request,
+    including /api/auth/status, taking the app down rather than degrading."""
+    _enable()
+    for content in ("[]", '"nope"', "3"):
+        with open(auth.auth_file(), "w", encoding="utf-8") as handle:
+            handle.write(content)
+        assert auth.ui_auth_enabled() is False
+        assert auth.usernames() == []
+        assert client.get("/api/auth/status").status_code == 200
 
 
 def test_a_corrupt_state_file_does_not_fail_open_into_a_broken_state():

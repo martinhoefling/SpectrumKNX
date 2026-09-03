@@ -724,6 +724,13 @@ Settings → *Login* → enter a username and password → **Enable login**.
 Creating the first account and enabling login are a **single step**, so there is never a moment
 where authentication is on but nobody owns it.
 
+> **Create the account before forcing login on.** If you set `AUTH_UI_ENABLED=true` (or the add-on
+> option `AUTH_UI: "on"`) on an installation that has no account yet, account creation is treated
+> as a guarded action like any other: it is reachable only through Home Assistant ingress, or after
+> setting the flag back to `auto`/`off` for the setup step. That is deliberate — an open
+> account-creation endpoint on an instance that reports "login required" would let anyone who can
+> reach the port claim it. The settings panel warns while an instance is in that state.
+
 Further accounts can be added afterwards from the same panel. All accounts are equal — there are
 no roles.
 
