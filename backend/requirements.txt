@@ -5,7 +5,7 @@ annotated-types==0.8.0
 anyio==4.14.2
 asyncpg==0.31.0
 cffi==2.1.1
-click==8.4.2
+click==8.5.0
 cryptography==50.0.1
 fastapi==0.141.1
 greenlet==3.5.5
@@ -20,7 +20,7 @@ pycparser==3.0
 pycryptodomex==3.23.0
 # pydantic-core is deliberately unpinned: pydantic requires an exact core
 # version itself, so pinning it here only creates unresolvable Dependabot PRs.
-pydantic==2.13.4
+pydantic==2.13.5
 Pygments==2.21.0
 pytest==9.1.1
 python-dotenv==1.2.3
@@ -32,11 +32,11 @@ striprtf==0.0.33
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvicorn==0.52.4
-websockets==17.0.1
+websockets==17.1
 xknx==3.20.0
 xknxproject==3.10.0
 httpx==0.28.1
-ruff==0.16.4
+ruff==0.16.5
 pytest-asyncio==1.4.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
