@@ -51,7 +51,12 @@ def _ha_token() -> str:
 
 
 def _as_utc(dt: datetime) -> datetime:
-    """The sqlite store round-trips timestamps naive; they are UTC by convention."""
+    """Normalise a timestamp to aware UTC.
+
+    knx-telegram-store>=0.14 already returns aware UTC, so the naive branch
+    only covers a store written by an older version that has not been
+    converted yet, and HA event payloads parsed straight from ISO strings.
+    """
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
