@@ -1,4 +1,5 @@
 import os
+from datetime import UTC
 
 from knx_telegram_store.backends.postgres import PostgresStore
 from knx_telegram_store.backends.sqlite import SqliteStore
@@ -44,7 +45,11 @@ elif DATABASE_URL.startswith(_SQLITE_PREFIX):
         # The raw engine (used by /api/statistics) must also open read-only
         DATABASE_URL = f"{_SQLITE_PREFIX}file:{_db_path}?mode=ro&uri=true"
     else:
-        store = BufferedSqliteStore(_db_path, flush_interval=1.0)
+        # Our daemon has always written datetime.now(UTC), so the rows already
+        # hold UTC and nothing needs shifting. Declaring the zone still matters:
+        # it marks the database converted, which otherwise stays pending and
+        # logs a warning on every start (knx-telegram-store>=0.14).
+        store = BufferedSqliteStore(_db_path, flush_interval=1.0, legacy_timestamp_timezone=UTC)
 elif READ_ONLY:
     raise RuntimeError("STORE_MODE=external-readonly requires a sqlite DATABASE_URL")
 else:
