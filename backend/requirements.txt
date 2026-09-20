@@ -2,13 +2,13 @@
 # Direct dependencies are declared in pyproject.toml — update both together.
 annotated-doc==0.0.5
 annotated-types==0.8.0
-anyio==4.14.2
+anyio==4.15.1
 asyncpg==0.31.0
 cffi==2.1.1
 click==8.5.0
 cryptography==50.0.1
 fastapi==0.141.1
-greenlet==3.5.5
+greenlet==3.5.6
 h11==0.16.0
 idna==3.19
 ifaddr==0.2.0
@@ -26,24 +26,24 @@ pytest==9.1.1
 python-dotenv==1.2.3
 PyYAML==6.0.3
 pyzipper==0.4.0
-SQLAlchemy==2.0.52
+SQLAlchemy==2.0.54
 starlette==1.6.0
 striprtf==0.0.33
 typing-inspection==0.4.4
 typing_extensions==4.16.0
-uvicorn==0.52.4
+uvicorn==0.53.0
 websockets==17.1
 xknx==3.20.0
 xknxproject==3.10.0
 httpx==0.28.1
-ruff==0.16.5
+ruff==0.16.7
 pytest-asyncio==1.4.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
 pre-commit==4.6.2
 # MCP server (SDK + transitives) for the /mcp endpoint.
-mcp==2.1.1
-PyJWT==2.13.0
+mcp==2.2.0
+PyJWT==2.14.0
 attrs==26.1.0
 httpx-sse==0.4.3
 jsonschema==4.26.0
@@ -51,4 +51,4 @@ jsonschema-specifications==2025.9.1
 pydantic-settings==2.15.0
 referencing==0.37.0
 rpds-py==2026.6.3
-sse-starlette==3.4.8
+sse-starlette==3.4.11
