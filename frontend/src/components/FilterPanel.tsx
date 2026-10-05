@@ -40,7 +40,6 @@ interface FilterPanelProps {
   onFiltersChange: (f: ActiveFilters) => void;
   /** Live-only: count of telegrams that would match each option in isolation */
   counts?: FilterCounts;
-  mode: 'live' | 'history';
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
   /**
    * Whether an ETS project is loaded. Source/target/DPT options are derived from
@@ -53,10 +52,9 @@ interface FilterPanelProps {
   onUploadProject?: () => void;
   writeEnabled?: boolean;
   /**
-   * Master enable/disable of the whole filter set (live mode only, #370). When
-   * `false` the list shows all telegrams while `activeFilters` is preserved. Absent
-   * behaves as enabled; the toggle renders only when `onFiltersEnabledChange` is
-   * provided and `mode === 'live'`.
+   * Master enable/disable of the whole filter set (#370, #436). When `false` the
+   * list shows all telegrams while `activeFilters` is preserved. Absent behaves as
+   * enabled; the toggle renders only when `onFiltersEnabledChange` is provided.
    */
   filtersEnabled?: boolean;
   onFiltersEnabledChange?: (enabled: boolean) => void;
@@ -203,7 +201,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   activeFilters,
   onFiltersChange,
   counts,
-  mode,
   onQuickLastSeen,
   projectLoaded,
   onUploadProject,
@@ -216,7 +213,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   // Active filters (the current set). No auto-inserted active block, so editing
   // never repositions entries (#87).
   const [view, setView] = useState<'edit' | 'active'>('edit');
-  const showMasterToggle = mode === 'live' && !!onFiltersEnabledChange;
+  const showMasterToggle = !!onFiltersEnabledChange;
 
   // Source/target/DPT options come from the ETS project. Without one, those
   // filters are empty and searching them turns up nothing — surface why.
