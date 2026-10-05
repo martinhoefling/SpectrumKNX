@@ -291,6 +291,29 @@ test('quick info bar (#311): toggled via the header button and summarizes the vi
   expect(screen.getByText(/Newest:/)).toBeInTheDocument();
 });
 
+test('quick info bar shows the busiest second as a max rate (#441)', () => {
+  const at = (ts: string) => makeTelegram({ timestamp: ts, raw_hex: ts });
+  render(
+    <TelegramTable
+      telegrams={[
+        at('2024-01-01T10:00:09.000Z'),
+        at('2024-01-01T10:00:05.900Z'),
+        at('2024-01-01T10:00:05.300Z'),
+        at('2024-01-01T10:00:05.000Z'),
+        at('2024-01-01T10:00:01.000Z'),
+      ]}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByTitle('Show info bar'));
+  expect(screen.getByText('Max rate: 3/s')).toBeInTheDocument();
+});
+
 test('context rows (#343): marked with a distinct class/tooltip and counted in the info bar', () => {
   const rows = makeList(3, 2);
   const contextKeys = new Set([anchorKey(rows[1])]); // the middle row is context-only
