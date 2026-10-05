@@ -39,7 +39,7 @@ interface LastSeenOverlayProps {
 const getTypeColor = (type?: string | null) => {
   switch (type) {
     case 'Write': return 'var(--accent-primary)';
-    case 'Read': return '#fbbf24';
+    case 'Read': return 'var(--warning-text)';
     case 'Response': return '#10b981';
     default: return 'var(--text-dim)';
   }
