@@ -16,7 +16,6 @@ const renderTree = (selected: string[], onChange = vi.fn(), searchQuery = '') =>
       entries={ENTRIES}
       selected={selected}
       onChange={onChange}
-      mode="history"
       searchQuery={searchQuery}
     />,
   );
