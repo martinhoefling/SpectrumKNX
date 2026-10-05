@@ -105,6 +105,10 @@ const COLUMNS: ColumnDef[] = [
 
 const COLUMN_WIDTHS_PREF = 'columnWidths';
 
+// Keys that scroll a list. Modifiers must not count: ctrl-click on a toolbar
+// button is not the user scrolling (#435).
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
+
 const getTypeColor = (type?: string | null) => {
   switch (type) {
     case 'Write': return 'var(--accent-primary)';
@@ -364,6 +368,12 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const markedSet = useMemo(() => new Set(markedKeysList), [markedKeysList]);
   // Row the prev/next-mark jumps continue from (#442); null after a user scroll.
   const markCursorRef = useRef<string | null>(null);
+  // The selected row for scroll anchoring (#435): the last-clicked one, as long
+  // as it is still marked. A ref, because scroll handlers read it outside render.
+  const selectedKeyRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    selectedKeyRef.current = lastMarked && markedSet.has(lastMarked) ? lastMarked : null;
+  }, [lastMarked, markedSet]);
 
   const clearMarks = useCallback(() => {
     setMarkedKeysList([]);
@@ -559,12 +569,50 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const liveEdge = primarySort?.direction === 'asc' ? 'bottom' : 'top';
   const atEdgeRef = useRef(listFollow ?? true);
   const [newSinceAnchor, setNewSinceAnchor] = useState(0);
-  // The row pinned to the top of the viewport while anchored, and its offset
-  // from the scroll-container top. Captured from user scrolls only.
+  // The row held still while anchored, and its offset from the scroll-container
+  // top: the selected (last-marked) row while it is on screen (#435), otherwise
+  // the top-most visible one. Captured from user scrolls and row clicks only.
   const anchorRef = useRef<{ key: string; offset: number } | null>(
     listAnchorKey ? { key: listAnchorKey, offset: 0 } : null
   );
   const programmaticScrollRef = useRef(false);
+  // Whether the user is scrolling right now — wheel, touch, keys, or a held
+  // scrollbar. Lets pinAnchor tell "the anchor left the rendered window
+  // because the user jumped away" from "because rows were inserted" (#435).
+  const scrollbarHeldRef = useRef(false);
+  const userScrollUntilRef = useRef(0);
+  const noteUserScroll = () => { userScrollUntilRef.current = performance.now() + 300; };
+  const userScrolling = () => scrollbarHeldRef.current || performance.now() < userScrollUntilRef.current;
+  useEffect(() => {
+    const release = () => {
+      if (!scrollbarHeldRef.current) return;
+      scrollbarHeldRef.current = false;
+      noteUserScroll();
+    };
+    // Keys scroll the list without it holding focus, so listen globally.
+    const onKey = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) userScrollUntilRef.current = performance.now() + 300;
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+  // The row list the anchor was last seen in. Unchanged list + missing anchor
+  // can only mean the viewport moved, never that rows were inserted.
+  const anchorRowsRef = useRef<typeof telegramRows | null>(null);
+  // Latest rows for callbacks that outlive a render (scroll handlers, frames).
+  const telegramRowsRef = useRef(telegramRows);
+  useLayoutEffect(() => { telegramRowsRef.current = telegramRows; });
+  // Bounds captureAnchor's wait for the virtualizer to draw rows on screen.
+  const captureRetriesRef = useRef(0);
+  // Set while pinAnchor is bringing back an anchor that left the virtualized
+  // window; the scrolls that causes are ours, not the user's.
+  const refindingAnchorRef = useRef(false);
   // Zebra stripes must stay with a telegram, not with a row index (#266):
   // prepends at the live edge shift every index by the number of new rows, so
   // this offset accumulates those shifts and is added back to the index parity.
@@ -611,27 +659,56 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       : el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
   };
 
-  // Record the top-most visible row so we can pin it across list updates.
-  const captureAnchor = () => {
+  // Record the row to pin across list updates. `selectedKey` is the row the
+  // user is working on; it wins while any part of it is inside the viewport, so
+  // rows arriving above it (a reload, Time-Delta-Context) can't push it away
+  // (#435). Without one on screen, the top-most visible row is pinned (#202).
+  const captureAnchor = (selectedKey: string | null = selectedKeyRef.current) => {
     const el = parentRef.current;
     if (!el) return;
-    const cTop = el.getBoundingClientRect().top;
+    const cRect = el.getBoundingClientRect();
+    const cTop = cRect.top;
+    if (selectedKey) {
+      const row = el.querySelector<HTMLElement>(`[data-akey="${CSS.escape(selectedKey)}"]`);
+      const rr = row?.getBoundingClientRect();
+      if (rr && rr.bottom > cTop && rr.top < cRect.bottom) {
+        anchorRef.current = { key: selectedKey, offset: rr.top - cTop };
+        anchorRowsRef.current = telegramRowsRef.current;
+        onListAnchorKeyChange?.(selectedKey);
+        return;
+      }
+    }
     for (const row of el.querySelectorAll<HTMLElement>('.log-row')) {
       const rr = row.getBoundingClientRect();
-      if (rr.bottom - cTop > 0) {
+      if (rr.bottom - cTop > 0 && rr.top < cRect.bottom) {
         const key = row.getAttribute('data-akey');
         if (key) {
           anchorRef.current = { key, offset: rr.top - cTop };
+          anchorRowsRef.current = telegramRowsRef.current;
           onListAnchorKeyChange?.(key);
+          captureRetriesRef.current = 0;
         }
         return;
       }
+    }
+    // Nothing rendered is on screen: after a long jump (scrollbar drag) the
+    // virtualizer has not drawn the new rows yet. A row from the old position
+    // must not become the anchor — pinAnchor would scroll back to it — so
+    // wait for the next frames instead.
+    anchorRef.current = null;
+    if (captureRetriesRef.current < 5) {
+      captureRetriesRef.current++;
+      requestAnimationFrame(() => {
+        if (!atEdgeRef.current && !anchorRef.current) captureAnchor();
+      });
+    } else {
+      captureRetriesRef.current = 0;
     }
   };
 
   const handleScroll = () => {
     // Ignore the scrolls our own compensation triggers.
-    if (programmaticScrollRef.current) return;
+    if (programmaticScrollRef.current || refindingAnchorRef.current) return;
     markCursorRef.current = null;
     const atEdge = checkAtEdge();
     if (atEdge !== atEdgeRef.current) {
@@ -683,12 +760,16 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     setMarkedKeysList(nextKeys);
     setLastMarked(key);
     markCursorRef.current = key;
+    // Not yet in selectedKeyRef — that follows the state update above.
+    const selectedKey = nextKeys.includes(key) ? key : null;
 
     // ── Pause live-following on an edge click (#266), unchanged ──
-    if (!isTimeSort || !atEdgeRef.current) return;
-    atEdgeRef.current = false;
-    onListFollowChange?.(false);
-    captureAnchor();
+    if (isTimeSort && atEdgeRef.current) {
+      atEdgeRef.current = false;
+      onListFollowChange?.(false);
+    }
+    // Hold the clicked row still from here on (#435).
+    if (!atEdgeRef.current) captureAnchor(selectedKey);
   };
 
   const scrollToEdge = () => {
@@ -713,6 +794,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     atEdgeRef.current = false;
     onListFollowChange?.(false);
     setNewSinceAnchor(0);
+    // The old anchor is about to leave the rendered window on purpose.
+    anchorRef.current = null;
     markProgrammatic();
     virtualizer.scrollToIndex(idx, { align: 'center' });
     // Pin the row we land on once the virtualizer has settled the scroll (rows
@@ -779,14 +862,43 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     if (!el || !anchor || atEdgeRef.current) return;
     const now = rowOffset(anchor.key);
     if (now == null) {
-      captureAnchor();
+      // Not rendered. Either the user jumped far away (scrollbar drag) and
+      // the scroll handler has not caught up — then the anchor is stale and
+      // whatever is on screen now takes over. Or so many rows arrived that the
+      // anchor left the virtualized window: it is still in the list, so have
+      // the virtualizer bring it back (it copes with unmeasured rows) and then
+      // restore its offset.
+      if (refindingAnchorRef.current) return;
+      const inserted = anchorRowsRef.current !== telegramRows && !userScrolling();
+      const idx = inserted ? telegramRows.findIndex(r => anchorKey(r) === anchor.key) : -1;
+      if (idx === -1) {
+        captureAnchor();
+        return;
+      }
+      refindingAnchorRef.current = true;
+      virtualizer.scrollToIndex(idx, { align: 'start' });
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const found = rowOffset(anchor.key);
+        if (found != null && anchorRef.current === anchor) {
+          el.scrollTop += found - anchor.offset;
+          anchorRowsRef.current = telegramRowsRef.current;
+        }
+        // One more frame for the scroll event to pass before tracking resumes.
+        requestAnimationFrame(() => {
+          refindingAnchorRef.current = false;
+          if (found == null) captureAnchor();
+          else pinAnchor();
+        });
+      }));
       return;
     }
+    if (refindingAnchorRef.current) return;
     const delta = now - anchor.offset;
     if (Math.abs(delta) > 0.5) {
       markProgrammatic();
       el.scrollTop += delta;
     }
+    anchorRowsRef.current = telegramRows;
   };
 
   // Changing sort moves (or removes) the live edge — drop the anchor state.
@@ -872,6 +984,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
 
     if (added <= 0) {
+      // The previous edge row is gone — the list was replaced or refiltered
+      // (e.g. Time-Delta-Context switched off). Keep holding the anchor if its
+      // row survived (#435); otherwise start over.
+      const anchor = anchorRef.current;
+      if (anchor && !atEdgeRef.current && rows.some(r => anchorKey(r) === anchor.key)) {
+        setStripeOffset(0);
+        pinAnchor();
+        return;
+      }
       anchorRef.current = null;
       onListAnchorKeyChange?.(null);
       setNewSinceAnchor(0);
@@ -1459,6 +1580,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       <div
         ref={parentRef}
         onScroll={handleScroll}
+        onWheel={noteUserScroll}
+        onTouchMove={noteUserScroll}
+        // A press on the container itself (not on a row) is the scrollbar.
+        onPointerDown={e => { if (e.target === e.currentTarget) scrollbarHeldRef.current = true; }}
         // overflow-anchor off: we compensate scrollTop manually on prepend (#202),
         // so the browser's native anchoring must not also move the viewport.
         style={{ flex: 1, overflowY: 'auto', position: 'relative', overflowAnchor: 'none' }}
