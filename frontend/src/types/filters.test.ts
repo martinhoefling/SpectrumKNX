@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_FILTERS, dptKey, effectiveDeltaContext, matchesDpt, matchesTelegram } from './filters';
+import { DEFAULT_FILTERS, countFilterOptions, dptKey, effectiveDeltaContext, matchesDpt, matchesTelegram } from './filters';
 
 describe('effectiveDeltaContext', () => {
   test('returns the stored before/after values when enabled', () => {
@@ -102,4 +102,22 @@ describe('matchesTelegram source/target combination (#275)', () => {
     expect(matchesTelegram({ ...t, target_address: '9/9/9' }, legacy)).toBe(false);
     expect(matchesTelegram(t, legacy)).toBe(true);
   });
+});
+
+test('countFilterOptions tallies telegrams per filter option', () => {
+  const t = (source_address: string, target_address: string, simplified_type: string, dpt_main: number | null, dpt_sub: number | null) =>
+    ({ source_address, target_address, simplified_type, direction: 'Incoming', dpt_main, dpt_sub });
+  const counts = countFilterOptions([
+    t('1.1.1', '1/0/1', 'Write', 9, 1),
+    t('1.1.1', '1/0/2', 'Write', 9, 4),
+    t('1.1.2', '1/0/1', 'Read', 9, 1),
+    t('1.1.2', '2/0/0', 'Write', 14, null),
+    t('1.1.3', '3/0/0', 'Write', null, null),
+  ]);
+  expect(counts.sources).toEqual({ '1.1.1': 2, '1.1.2': 2, '1.1.3': 1 });
+  expect(counts.targets).toEqual({ '1/0/1': 2, '1/0/2': 1, '2/0/0': 1, '3/0/0': 1 });
+  expect(counts.types).toEqual({ Write: 4, Read: 1 });
+  expect(counts.directions).toEqual({ Incoming: 5 });
+  // Subtypes count under their own key and under the bare main type.
+  expect(counts.dpts).toEqual({ '9.001': 2, '9.004': 1, '9': 3, '14': 1 });
 });

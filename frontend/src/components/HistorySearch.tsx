@@ -11,6 +11,7 @@ import { FilterPanel } from './FilterPanel';
 import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
 import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
+  countFilterOptions,
   effectiveDeltaContext,
   hasActiveFilters,
   matchesTelegram,
@@ -177,6 +178,13 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     );
   }, [activeFilters, filtersAtLoad, telegrams.length]);
 
+  // Count bubbles for the filter pane (#446), over everything loaded — not just
+  // the rows passing the current filters — so they match the Group Monitor's.
+  const filterCounts = useMemo(
+    () => (telegrams.length > 0 ? countFilterOptions(telegrams) : undefined),
+    [telegrams]
+  );
+
   const activeFilterCount = hasActiveFilters(activeFilters)
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
     : 0;
@@ -293,6 +301,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               options={filterOptions}
               activeFilters={activeFilters}
               onFiltersChange={onFiltersChange}
+              counts={filterCounts}
               mode="history"
               projectLoaded={projectLoaded}
               onUploadProject={onOpenSettings}
