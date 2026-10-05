@@ -17,6 +17,88 @@ The application provides a ready-to-use production stack that pulls the monolith
 docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
+### 1.1 Unraid
+
+Unraid can run the same image as a single container with a local SQLite database — no
+separate database container. Save the template below as
+`/boot/config/plugins/dockerMan/templates-user/SpectrumKNX-Unraid.xml`, then open
+**Docker → Add Container**, pick **SpectrumKNX** from the template list, adjust the
+settings and apply.
+
+<details>
+<summary><code>SpectrumKNX-Unraid.xml</code></summary>
+
+```xml
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>SpectrumKNX</Name>
+  <Repository>ghcr.io/martinhoefling/spectrumknx:latest</Repository>
+  <Registry>https://ghcr.io/</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/martinhoefling/SpectrumKNX/issues</Support>
+  <Project>https://github.com/martinhoefling/SpectrumKNX</Project>
+  <Overview>
+Spectrum KNX standalone: KNX bus monitor and telegram analyzer.
+This Unraid template uses the official GHCR image and SQLite. No separate database container is required.
+The project directory is persisted under /mnt/user/appdata/spectrumknx/project.
+  </Overview>
+  <Category>Network:Management</Category>
+  <WebUI>http://[IP]:[PORT:8765]</WebUI>
+
+  <Config Name="Web Port" Target="8765" Default="8765" Mode="tcp" Description="SpectrumKNX web interface port." Type="Port" Display="always" Required="true" Mask="false">8765</Config>
+
+  <Config Name="SpectrumKNX Data" Target="/data" Default="/mnt/user/appdata/spectrumknx/data" Mode="rw" Description="Persistent SQLite database." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/spectrumknx/data</Config>
+
+  <Config Name="KNX Project" Target="/project" Default="/mnt/user/appdata/spectrumknx/project" Mode="rw" Description="Persistent project directory. The web UI can upload the .knxproj and .knxkeys files here." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/spectrumknx/project</Config>
+
+  <Config Name="Database URL" Target="DATABASE_URL" Default="sqlite+aiosqlite:////data/spectrum_knx.db" Description="SQLite database connection string." Type="Variable" Display="advanced-hide" Required="true" Mask="false">sqlite+aiosqlite:////data/spectrum_knx.db</Config>
+
+  <Config Name="KNX Connection Type" Target="KNX_CONNECTION_TYPE" Default="AUTOMATIC" Description="AUTOMATIC, TUNNELING, TUNNELING_TCP, TUNNELING_TCP_SECURE, ROUTING or ROUTING_SECURE." Type="Variable" Display="always" Required="true" Mask="false">AUTOMATIC</Config>
+
+  <Config Name="KNX Gateway IP" Target="KNX_GATEWAY_IP" Default="AUTO" Description="IP address of the KNX IP gateway/router, or AUTO." Type="Variable" Display="always" Required="true" Mask="false">AUTO</Config>
+
+  <Config Name="KNX Gateway Port" Target="KNX_GATEWAY_PORT" Default="3671" Description="KNX IP gateway port." Type="Variable" Display="advanced-hide" Required="true" Mask="false">3671</Config>
+
+  <Config Name="KNX Route Back" Target="KNX_ROUTE_BACK" Default="false" Description="Set to true if the gateway's replies do not reach the container in bridge mode." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+
+  <Config Name="KNX Project Path" Target="KNX_PROJECT_PATH" Default="" Description="Leave empty to use the web Project Setup wizard. If set, use /project/filename.knxproj." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+
+  <Config Name="KNX Project Password" Target="KNX_PASSWORD" Default="" Description="Optional ETS project password. Leave empty when using the web upload wizard." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="KNX Keys File" Target="KNX_KNXKEYS_FILE" Default="" Description="Optional .knxkeys path. Leave empty for automatic /project/knx_keys.knxkeys detection or web upload." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="KNX Keys Password" Target="KNX_KNXKEYS_PASSWORD" Default="" Description="Optional password for the .knxkeys file." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="KNX Allow Write" Target="KNX_ALLOW_WRITE" Default="false" Description="Allow sending GroupValueRead/Write commands. Keep false for initial setup." Type="Variable" Display="always" Required="true" Mask="false">false</Config>
+
+  <Config Name="Log Level" Target="LOG_LEVEL" Default="INFO" Description="DEBUG, INFO, WARNING, ERROR or CRITICAL." Type="Variable" Display="advanced-hide" Required="true" Mask="false">INFO</Config>
+
+  <Config Name="MCP Mode" Target="MCP_MODE" Default="off" Description="off, read-only or read-write. Off is recommended initially because the endpoint has no authentication by default." Type="Variable" Display="advanced" Required="true" Mask="false">off</Config>
+
+  <Config Name="Update Check" Target="UPDATE_CHECK" Default="true" Description="Check GitHub periodically for new stable releases." Type="Variable" Display="advanced-hide" Required="true" Mask="false">true</Config>
+</Container>
+```
+
+</details>
+
+Notes:
+
+- **Two paths are persisted:** `/data` holds the SQLite database, `/project` the uploaded
+  `.knxproj` / `.knxkeys` (and `auth.json` if you enable [authentication](#11-authentication-optional)).
+- **Bridge networking:** the template uses Unraid's `bridge` network. Gateway discovery
+  (`KNX_GATEWAY_IP=AUTO`) and `ROUTING` rely on multicast, which does not cross the bridge —
+  enter the gateway's IP for tunneling, set `KNX_ROUTE_BACK=true` if its replies do not
+  arrive, or switch the container to `host` networking for routing.
+- **Image tag:** `:latest` is the newest stable release. To run a pre-release, change the
+  repository tag as described in [Release channels](#9-release-channels-stable-vs-beta).
+  `MCP_MODE` only has an effect from 2.0 on.
+- All other variables from [Section 5](#5-configuration-variables-docker--kubernetes) can be
+  added as extra variables in the Unraid container form.
+
+Template contributed by [@martmiwp](https://github.com/martmiwp) in
+[#466](https://github.com/martinhoefling/SpectrumKNX/issues/466).
+
 ---
 
 ## 2. Home Assistant Add-on
