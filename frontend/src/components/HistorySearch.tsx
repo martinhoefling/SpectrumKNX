@@ -8,6 +8,7 @@ import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart,
 import { HistoryLoader } from './HistoryLoader';
 import { Visualizer } from './Visualizer';
 import { FilterPanel } from './FilterPanel';
+import { ResizablePane } from './ResizablePane';
 import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
 import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
@@ -304,13 +305,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       {/* Content row: filter panel + table */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {/* Filter panel (slide-in) */}
-        <div style={{
-          width: isFilterOpen ? 'clamp(260px, 18vw, 340px)' : '0px',
-          overflow: 'hidden',
-          transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
-          flexShrink: 0,
-        }}>
-          <div style={{ width: 'clamp(260px, 18vw, 340px)', height: '100%' }}>
+        <ResizablePane open={isFilterOpen} prefKey="filter-pane-width">
             <FilterPanel
               options={filterOptions}
               activeFilters={activeFilters}
@@ -321,8 +316,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               projectLoaded={projectLoaded}
               onUploadProject={onOpenSettings}
             />
-          </div>
-        </div>
+        </ResizablePane>
 
         {/* Table/Chart area */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
