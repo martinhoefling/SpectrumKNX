@@ -29,7 +29,7 @@ const SortIcon = ({ column, sortConfig }: SortIconProps) => {
 const getTypeColor = (type?: string | null) => {
   switch (type) {
     case 'Write': return 'var(--accent-primary)';
-    case 'Read': return '#fbbf24'; // Amber
+    case 'Read': return 'var(--warning-text)'; // Amber
     case 'Response': return '#10b981'; // Emerald
     default: return 'var(--text-dim)';
   }

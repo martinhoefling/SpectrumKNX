@@ -301,13 +301,18 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             <button
               onClick={() => onFiltersEnabledChange!(!filtersEnabled)}
               title={filtersEnabled ? 'Disable all filters (keeps them)' : 'Enable filters'}
+              aria-pressed={filtersEnabled}
+              // Filled when on, hollow when off: colour alone did not tell the
+              // two states apart, least of all in the light theme (#438).
               style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                color: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
-                display: 'flex', alignItems: 'center', padding: '0.2rem', borderRadius: '4px',
+                background: filtersEnabled ? 'var(--accent-primary)' : 'transparent',
+                border: `1px solid ${filtersEnabled ? 'var(--accent-primary)' : 'var(--border-hover)'}`,
+                cursor: 'pointer',
+                color: filtersEnabled ? 'white' : 'var(--text-dim)',
+                display: 'flex', alignItems: 'center', padding: '0.2rem', borderRadius: '999px',
               }}
             >
-              <Power size={14} />
+              <Power size={13} strokeWidth={2.5} />
             </button>
           )}
           {activeCount > 0 && (

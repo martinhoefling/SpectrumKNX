@@ -702,7 +702,7 @@ function App() {
     <span
       onClick={() => setIsSettingsOpen(true)}
       title={`Buffer full (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
-      style={{ display: 'inline-flex', alignItems: 'center', color: '#fbbf24', cursor: 'pointer' }}
+      style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--warning-text)', cursor: 'pointer' }}
     >
       <AlertTriangle size={13} />
     </span>
@@ -804,7 +804,7 @@ function App() {
                     </span>
                   </span>
                   {isPaused && (
-                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24' }}>
+                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--warning-text)' }}>
                       Paused: <span style={{ fontWeight: 600 }}>{pausedCount}</span>
                     </span>
                   )}

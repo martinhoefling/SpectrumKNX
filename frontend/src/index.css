@@ -26,7 +26,11 @@
   --error: #ef4444;
   --success: #22c55e;
   --warning: #f59e0b;
+  /* Amber as text: bright on dark, darkened on light where #fbbf24 is unreadable (#438) */
+  --warning-text: #fbbf24;
   --info: #3b82f6;
+  /* Native form controls (date picker icon, select popup) follow the theme (#438) */
+  --native-scheme: dark;
 
   /* KNX Specific Colors */
   --dpt-1: #3b82f6;  /* Switch */
@@ -56,6 +60,9 @@
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
     --gradient-1: rgba(99, 102, 241, 0.07);
     --gradient-2: rgba(168, 85, 247, 0.05);
+    --warning-text: #b45309;
+    --success: #15803d;
+    --native-scheme: light;
   }
 }
 
@@ -79,6 +86,9 @@
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
   --gradient-1: rgba(99, 102, 241, 0.15);
   --gradient-2: rgba(168, 85, 247, 0.1);
+  --warning-text: #fbbf24;
+  --success: #22c55e;
+  --native-scheme: dark;
 }
 
 /* === Explicit light override === */
@@ -101,6 +111,9 @@
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
   --gradient-1: rgba(99, 102, 241, 0.07);
   --gradient-2: rgba(168, 85, 247, 0.05);
+  --warning-text: #b45309;
+  --success: #15803d;
+  --native-scheme: light;
 }
 
 * {
@@ -149,6 +162,7 @@ code, pre {
 }
 
 .glass-input {
+  color-scheme: var(--native-scheme);
   background: var(--bg-inset);
   border: 1px solid var(--border-color);
   border-radius: 6px;

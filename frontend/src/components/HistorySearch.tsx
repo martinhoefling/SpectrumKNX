@@ -224,7 +224,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           )}
           {filtersLessRestrictive && (
             <span
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--warning-text)', cursor: 'pointer' }}
               onClick={() => setIsLoaderOpen(true)}
               title="Filters were broadened after the last load — some matching telegrams may not be in the loaded set. Click to reload."
             >
@@ -233,7 +233,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           )}
           {metadata?.limit_reached && (
             <span
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--warning-text)', cursor: 'pointer' }}
               onClick={onOpenSettings}
               title={`Limit reached (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
             >
