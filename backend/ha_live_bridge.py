@@ -35,10 +35,15 @@ _last_seen: datetime | None = None
 _active_source: str = "none"  # resolved live source after fallbacks
 _connected: bool = False
 
+# How often to look again while the store still holds pre-UTC timestamps (#462).
+TIMESTAMP_RECHECK_INTERVAL = 300.0
+_timestamp_task: asyncio.Task | None = None
+_legacy_timestamps: bool = False
+
 
 def live_feed_status() -> dict:
     """Current live-feed state for the status API (companion mode, #184)."""
-    return {"source": _active_source, "connected": _connected}
+    return {"source": _active_source, "connected": _connected, "legacy_timestamps": _legacy_timestamps}
 
 
 def get_last_telegram_timestamp() -> datetime | None:
@@ -58,6 +63,43 @@ def _as_utc(dt: datetime) -> datetime:
     converted yet, and HA event payloads parsed straight from ISO strings.
     """
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+async def check_timestamp_convention() -> bool:
+    """Record whether the store still holds pre-UTC timestamps (#462).
+
+    Home Assistant used to stamp telegrams with its local wall clock, and
+    knx-telegram-store>=0.14 reads every stored timestamp as UTC. Until Home
+    Assistant converts its database those rows are off by its UTC offset, which
+    shifts history and makes `_fetch_since` compare stored rows against real
+    instants from the live feed: east of UTC they all look new and repeat, west
+    of UTC new ones are dropped. Only the owner may convert, so all we can do
+    is say so. The check is a plain SELECT and safe on a read-only connection.
+    """
+    global _legacy_timestamps
+    try:
+        pending = await store.needs_timestamp_migration()
+    except Exception as err:
+        logger.debug(f"Could not determine the store's timestamp convention: {err}")
+        return _legacy_timestamps
+    if pending and not _legacy_timestamps:
+        logger.warning(
+            "Home Assistant's KNX telegram database still holds local-time timestamps. "
+            "History is shown shifted by Home Assistant's UTC offset and the live view may "
+            "repeat or miss telegrams. Only Home Assistant can convert it: update to a release "
+            "whose KNX integration does. This warning clears by itself once that has happened."
+        )
+    elif _legacy_timestamps and not pending:
+        logger.info("Home Assistant has converted its KNX telegram database to UTC timestamps.")
+    _legacy_timestamps = pending
+    return pending
+
+
+async def _timestamp_watch_loop() -> None:
+    """Re-check until Home Assistant has converted its database, then stop."""
+    while _legacy_timestamps:
+        await asyncio.sleep(TIMESTAMP_RECHECK_INTERVAL)
+        await check_timestamp_convention()
 
 
 def ha_telegram_to_frontend(t: dict) -> dict:
@@ -157,6 +199,10 @@ async def _bridge_loop() -> None:
                 logger.info("Connected to Home Assistant websocket, subscribed to KNX telegrams")
                 _connected = True
                 backoff = 1.0
+                # Home Assistant converts on start, and a restart drops this
+                # socket — so a reconnect is when the answer is likely to change.
+                if _legacy_timestamps:
+                    await check_timestamp_convention()
                 await _replay_gap()
 
                 async for raw in ws:
@@ -197,7 +243,7 @@ async def _poll_loop() -> None:
 
 async def companion_startup() -> None:
     """Initialize the read-only store and start the configured live source."""
-    global _task, _active_source
+    global _task, _timestamp_task, _active_source
 
     conn_check = await store.check_connection()
     if not conn_check.ok:
@@ -210,6 +256,8 @@ async def companion_startup() -> None:
             "The telegram store schema needs a migration that only its owner "
             "(Home Assistant) may run — queries may fail or miss data until then."
         )
+    if await check_timestamp_convention():
+        _timestamp_task = asyncio.create_task(_timestamp_watch_loop())
     logger.info("Companion mode: reading external telegram store (read-only)")
 
     # A KNX project file is optional here (live names come from Home Assistant),
@@ -237,13 +285,14 @@ async def companion_startup() -> None:
 
 async def companion_shutdown() -> None:
     """Stop the live source and close the store."""
-    global _task, _connected
+    global _task, _timestamp_task, _connected
     _connected = False
-    if _task is not None:
-        _task.cancel()
-        try:
-            await _task
-        except asyncio.CancelledError:
-            pass
-        _task = None
+    for task in (_task, _timestamp_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    _task = _timestamp_task = None
     await store.close()

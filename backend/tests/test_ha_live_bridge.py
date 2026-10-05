@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -111,10 +112,69 @@ def test_live_feed_status_reflects_bridge_state():
         patch.object(ha_live_bridge, "_active_source", "poll"),
         patch.object(ha_live_bridge, "_connected", True),
     ):
-        assert ha_live_bridge.live_feed_status() == {"source": "poll", "connected": True}
+        assert ha_live_bridge.live_feed_status() == {
+            "source": "poll",
+            "connected": True,
+            "legacy_timestamps": False,
+        }
 
     with (
         patch.object(ha_live_bridge, "_active_source", "none"),
         patch.object(ha_live_bridge, "_connected", False),
     ):
-        assert ha_live_bridge.live_feed_status() == {"source": "none", "connected": False}
+        assert ha_live_bridge.live_feed_status() == {
+            "source": "none",
+            "connected": False,
+            "legacy_timestamps": False,
+        }
+
+
+def _needs_migration(*answers):
+    """Patch the store's read-only timestamp probe to return `answers` in turn."""
+    return patch.object(ha_live_bridge.store, "needs_timestamp_migration", AsyncMock(side_effect=answers), create=True)
+
+
+@pytest.mark.asyncio
+async def test_timestamp_check_flags_unconverted_store_and_warns_once(caplog):
+    """A Home Assistant database still on local-time timestamps is surfaced (#462)."""
+    with patch.object(ha_live_bridge, "_legacy_timestamps", False), _needs_migration(True, True):
+        with caplog.at_level("WARNING", logger="uvicorn.error"):
+            assert await ha_live_bridge.check_timestamp_convention() is True
+            assert await ha_live_bridge.check_timestamp_convention() is True
+        assert ha_live_bridge.live_feed_status()["legacy_timestamps"] is True
+
+    warnings = [r for r in caplog.records if "local-time timestamps" in r.getMessage()]
+    assert len(warnings) == 1  # not repeated on every re-check
+
+
+@pytest.mark.asyncio
+async def test_timestamp_check_clears_once_home_assistant_converted(caplog):
+    with patch.object(ha_live_bridge, "_legacy_timestamps", True), _needs_migration(False):
+        with caplog.at_level("INFO", logger="uvicorn.error"):
+            assert await ha_live_bridge.check_timestamp_convention() is False
+        assert ha_live_bridge.live_feed_status()["legacy_timestamps"] is False
+
+    assert any("converted" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_timestamp_check_keeps_last_answer_when_probe_fails():
+    probe = AsyncMock(side_effect=RuntimeError("database is locked"))
+    with (
+        patch.object(ha_live_bridge, "_legacy_timestamps", True),
+        patch.object(ha_live_bridge.store, "needs_timestamp_migration", probe, create=True),
+    ):
+        assert await ha_live_bridge.check_timestamp_convention() is True
+
+
+@pytest.mark.asyncio
+async def test_timestamp_watch_stops_once_converted():
+    """The re-check loop ends by itself, so a converted store costs nothing."""
+    with (
+        patch.object(ha_live_bridge, "_legacy_timestamps", True),
+        patch.object(ha_live_bridge, "TIMESTAMP_RECHECK_INTERVAL", 0),
+        _needs_migration(True, True, False) as probe,
+    ):
+        await asyncio.wait_for(ha_live_bridge._timestamp_watch_loop(), timeout=2)
+        assert probe.await_count == 3
+        assert ha_live_bridge._legacy_timestamps is False

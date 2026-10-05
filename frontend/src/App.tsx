@@ -41,6 +41,7 @@ import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
 import { WriteToBusPanel } from './components/WriteToBusPanel';
 import { UpdateNotification } from './components/UpdateNotification';
+import { LegacyTimestampBanner } from './components/LegacyTimestampBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { AuthSettings } from './components/AuthSettings';
 import { useAuthStatus, loginRequired } from './hooks/useAuthStatus';
@@ -440,6 +441,15 @@ function App() {
     refreshServerConfig();
   }, [refreshServerConfig]);
 
+  // Companion mode: Home Assistant's store still holds pre-UTC timestamps
+  // (#462). Only Home Assistant can convert it, so keep asking until it has.
+  const legacyTimestamps = serverConfig?.status?.legacy_timestamps === true;
+  useEffect(() => {
+    if (!legacyTimestamps) return;
+    const id = window.setInterval(refreshServerConfig, 60_000);
+    return () => window.clearInterval(id);
+  }, [legacyTimestamps, refreshServerConfig]);
+
   const wsEndpoint = wsUrl('/ws/telegrams');
   const { isConnected } = useWebSocket(wsEndpoint, handleTelegram, handleConnectionState);
 
@@ -710,6 +720,8 @@ function App() {
 
       {/* ── Main area (Full Width) ─── */}
       <main style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, borderRadius: '12px' }} className="glass">
+
+        {legacyTimestamps && <LegacyTimestampBanner />}
 
         {/* === GLOBAL HEADER === */}
         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>

@@ -44,3 +44,31 @@ test('play/pause and the filter toggle live with the Telegram List (#374)', asyn
   expect(await screen.findByRole('button', { name: 'Toggle filter panel' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
 });
+
+test('companion mode warns while Home Assistant\'s store holds pre-UTC timestamps (#462)', async () => {
+  const fetchMock = vi.mocked(fetch);
+  const original = fetchMock.getMockImplementation();
+  const respondWith = (legacy: boolean) =>
+    fetchMock.mockImplementation(((url: string) =>
+      Promise.resolve({
+        json: () => Promise.resolve(
+          String(url).includes('/api/server/config')
+            ? { mode: 'companion', status: { connected: true, write_enabled: false, legacy_timestamps: legacy } }
+            : {},
+        ),
+      })) as unknown as typeof fetch);
+
+  try {
+    respondWith(true);
+    const first = render(<App />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Telegram times may be wrong/);
+    first.unmount();
+
+    respondWith(false);
+    render(<App />);
+    await screen.findAllByRole('tab');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  } finally {
+    fetchMock.mockImplementation(original!);
+  }
+});

@@ -605,6 +605,8 @@ def get_server_config() -> dict:
             "status": {
                 "connected": feed["connected"],
                 "write_enabled": False,
+                # The store still holds Home Assistant's pre-UTC timestamps (#462).
+                "legacy_timestamps": feed.get("legacy_timestamps", False),
             },
         }
 
