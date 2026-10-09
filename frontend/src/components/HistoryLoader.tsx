@@ -144,7 +144,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
               <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>tgt: {t}</span>
             ))}
             {filters.types.map(t => (
-              <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>{t}</span>
+              <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: 'var(--warning-text)', border: '1px solid rgba(251,191,36,0.3)' }}>{t}</span>
             ))}
             {filters.dpts.map(d => (
               <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>
@@ -273,7 +273,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
             <CheckCircle2 size={18} style={{ color: '#10b981', flexShrink: 0 }} />
             <span style={{ fontSize: '0.875rem' }}>
               Loaded <strong>{resultMeta.total_count.toLocaleString()}</strong> telegrams
-              {resultMeta.limit_reached && <span style={{ color: '#fbbf24', marginLeft: '0.5rem' }}>(limit reached)</span>}
+              {resultMeta.limit_reached && <span style={{ color: 'var(--warning-text)', marginLeft: '0.5rem' }}>(limit reached)</span>}
             </span>
           </div>
         )}
@@ -294,7 +294,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
         .quick-load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .glass-input { background: var(--bg-tag); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem 0.75rem; color: var(--text-main); font-family: inherit; font-size: 0.8125rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
         .glass-input:focus { border-color: var(--accent-primary); }
-        .glass-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+        .glass-input::-webkit-calendar-picker-indicator { cursor: pointer; }
         .search-submit-btn { display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 0.8rem; background: rgba(99,102,241,0.12); border: 1px solid var(--accent-primary); border-radius: 8px; color: var(--accent-primary); font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.2s; }
         .search-submit-btn:hover:not(:disabled) { background: var(--accent-primary); color: white; }
         .search-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
