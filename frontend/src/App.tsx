@@ -1120,7 +1120,6 @@ function App() {
                     onFiltersChange={handleFiltersChange}
                     counts={filterCounts}
                     onQuickLastSeen={handleQuickLastSeen}
-                    mode="live"
                     projectLoaded={projectStatus?.project_loaded}
                     onUploadProject={() => setIsSettingsOpen(true)}
                     writeEnabled={serverConfig?.status?.write_enabled}
@@ -1293,6 +1292,8 @@ function App() {
             selectedVisualizationTargets={selectedVisualizationTargets}
             onVisualizationTargetsChange={setSelectedVisualizationTargets}
             initialView={initialView}
+            filtersEnabled={filtersEnabled}
+            onFiltersEnabledChange={setFiltersEnabled}
           />
         )}
       </main>

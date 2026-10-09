@@ -123,6 +123,11 @@ export function hasActiveFilters(f: ActiveFilters): boolean {
   );
 }
 
+/** The same filter settings with every selection cleared (master switch off). */
+export function withoutSelections(f: ActiveFilters): ActiveFilters {
+  return { ...f, sources: [], targets: [], types: [], directions: [], dpts: [] };
+}
+
 export interface FilterCounts {
   sources: Record<string, number>;
   targets: Record<string, number>;
