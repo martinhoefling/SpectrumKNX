@@ -126,3 +126,23 @@ test('clicking a row still pauses live-following (#266) while marking it', () =>
   expect(onListFollowChange).toHaveBeenCalledWith(false);
   expect(marked(container)[0]).toBe(true);
 });
+
+test('prev/next-mark arrows appear with the marks and stop live-following (#442)', () => {
+  const onListFollowChange = vi.fn();
+  const { container } = renderTable({ listFollow: true, onListFollowChange });
+  expect(screen.queryByTitle('Jump to next mark')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Jump to previous mark')).not.toBeInTheDocument();
+
+  fireEvent.click(rows(container)[1]);
+  fireEvent.click(rows(container)[3], { ctrlKey: true });
+  onListFollowChange.mockClear();
+
+  fireEvent.click(screen.getByTitle('Jump to next mark'));
+  expect(onListFollowChange).toHaveBeenLastCalledWith(false);
+  onListFollowChange.mockClear();
+  fireEvent.click(screen.getByTitle('Jump to previous mark'));
+  expect(onListFollowChange).toHaveBeenLastCalledWith(false);
+
+  // Jumping never changes what is marked.
+  expect(marked(container)).toEqual([false, true, false, true, false]);
+});

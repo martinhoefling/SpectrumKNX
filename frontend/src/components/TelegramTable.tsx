@@ -11,6 +11,7 @@ import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
 import { makeAddressPatternMatcher } from '../utils/addressPattern';
 import { makeValueMatcher } from '../utils/valuePattern';
 import { anchorKey } from '../utils/anchorKey';
+import { adjacentMark } from '../utils/adjacentMark';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -360,6 +361,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   }, [onLastMarkedKeyChange]);
 
   const markedSet = useMemo(() => new Set(markedKeysList), [markedKeysList]);
+  // Row the prev/next-mark jumps continue from (#442); null after a user scroll.
+  const markCursorRef = useRef<string | null>(null);
 
   const clearMarks = useCallback(() => {
     setMarkedKeysList([]);
@@ -625,6 +628,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const handleScroll = () => {
     // Ignore the scrolls our own compensation triggers.
     if (programmaticScrollRef.current) return;
+    markCursorRef.current = null;
     const atEdge = checkAtEdge();
     if (atEdge !== atEdgeRef.current) {
       atEdgeRef.current = atEdge;
@@ -674,6 +678,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
     setMarkedKeysList(nextKeys);
     setLastMarked(key);
+    markCursorRef.current = key;
 
     // ── Pause live-following on an edge click (#266), unchanged ──
     if (!isTimeSort || !atEdgeRef.current) return;
@@ -713,6 +718,34 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       atEdgeRef.current = false;
       onListFollowChange?.(false);
     }));
+  };
+
+  // Jump between marked rows (#442), in display order and wrapping around. The
+  // starting point is the mark last jumped to or clicked; once the user scrolls
+  // away it is whatever row sits in the middle of the viewport instead.
+  const markedIndices = useMemo(() => {
+    if (markedSet.size === 0) return [];
+    const out: number[] = [];
+    telegramRows.forEach((r, i) => { if (markedSet.has(anchorKey(r))) out.push(i); });
+    return out;
+  }, [telegramRows, markedSet]);
+
+  const viewportCenterIndex = () => {
+    const el = parentRef.current;
+    if (!el) return 0;
+    const center = el.scrollTop + el.clientHeight / 2;
+    const item = virtualizer.getVirtualItems().find(v => v.start <= center && center < v.end);
+    return item ? item.index : 0;
+  };
+
+  const jumpToMark = (dir: 1 | -1) => {
+    if (markedIndices.length === 0) return;
+    const cursor = markCursorRef.current;
+    const cursorIdx = cursor ? telegramRows.findIndex(r => anchorKey(r) === cursor) : -1;
+    const from = cursorIdx !== -1 ? cursorIdx : viewportCenterIndex();
+    const target = adjacentMark(markedIndices, from, dir);
+    markCursorRef.current = anchorKey(telegramRows[target]);
+    gotoIndex(target);
   };
 
   // "Quick goto time" (#282): jump to the telegram nearest a given time. Only
@@ -1391,16 +1424,23 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         </button>
       )}
 
-      {/* Clear-marks pill — shown only while rows are marked (#310) */}
+      {/* Marks pill — shown only while rows are marked (#310); the arrows jump
+          to the previous / next marked row (#442) */}
       {markedKeysList.length > 0 && (
-        <button
-          onClick={clearMarks}
-          className="clear-marks-pill"
+        <div
+          className="marks-pill"
           style={{ position: 'absolute', right: '1rem', top: '0.75rem', zIndex: 20 }}
-          title="Clear all marks"
         >
-          <X size={13} /> Clear {markedKeysList.length} mark{markedKeysList.length === 1 ? '' : 's'}
-        </button>
+          <button onClick={() => jumpToMark(-1)} disabled={markedIndices.length === 0} title="Jump to previous mark">
+            <ChevronUp size={14} />
+          </button>
+          <button onClick={() => jumpToMark(1)} disabled={markedIndices.length === 0} title="Jump to next mark">
+            <ChevronDown size={14} />
+          </button>
+          <button onClick={clearMarks} className="marks-pill-clear" title="Clear all marks">
+            <X size={13} /> Clear {markedKeysList.length} mark{markedKeysList.length === 1 ? '' : 's'}
+          </button>
+        </div>
       )}
 
       {/* Virtualized Body */}
@@ -1562,25 +1602,47 @@ style.textContent = `
     transform: translateX(-50%) scale(1.03);
   }
 
-  .clear-marks-pill {
+  .marks-pill {
     display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.3rem 0.7rem;
+    align-items: stretch;
     border: 1px solid var(--border-color);
     border-radius: 999px;
     background: var(--bg-panel);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+  }
+
+  .marks-pill button {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.45rem;
+    border: none;
+    background: transparent;
     color: var(--text-dim);
     font-size: 0.72rem;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: var(--shadow-lg);
-    transition: color 0.15s, border-color 0.15s;
+    transition: color 0.15s, background 0.15s;
   }
 
-  .clear-marks-pill:hover {
+  .marks-pill button:first-child {
+    padding-left: 0.6rem;
+  }
+
+  .marks-pill .marks-pill-clear {
+    padding-right: 0.7rem;
+    border-left: 1px solid var(--border-color);
+  }
+
+  .marks-pill button:hover:not(:disabled) {
     color: var(--accent-primary);
-    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+  }
+
+  .marks-pill button:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .quick-filter-bar-toggle {
