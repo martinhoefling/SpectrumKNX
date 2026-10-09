@@ -32,6 +32,7 @@ import { HistorySearch } from './components/HistorySearch';
 import { ImportExportView } from './components/ImportExportView';
 import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
+import { ResizablePane } from './components/ResizablePane';
 import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import { KeysUploadWizard } from './components/KeysUploadWizard';
 import { LastSeenOverlay } from './components/LastSeenOverlay';
@@ -1104,16 +1105,7 @@ function App() {
 
               {/* Filter panel (slide-in). Filters apply to the Telegram List only,
                   so the pane is list-only now (#374; contents redesign is #370). */}
-              <div style={{
-                width: showFilterPane ? 'clamp(260px, 18vw, 340px)' : '0px',
-                overflow: 'hidden',
-                transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
-                flexShrink: 0,
-                borderRight: showFilterPane ? '1px solid var(--border-color)' : 'none',
-                display: 'flex',
-                flexDirection: 'column'
-              }}>
-                <div style={{ width: 'clamp(260px, 18vw, 340px)', flex: 1, overflow: 'hidden' }}>
+              <ResizablePane open={showFilterPane} prefKey="filter-pane-width">
                   <FilterPanel
                     options={filterOptions}
                     activeFilters={activeFilters}
@@ -1126,8 +1118,7 @@ function App() {
                     filtersEnabled={filtersEnabled}
                     onFiltersEnabledChange={setFiltersEnabled}
                   />
-                </div>
-              </div>
+              </ResizablePane>
 
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
