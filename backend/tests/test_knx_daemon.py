@@ -491,6 +491,21 @@ def test_get_server_config_companion_reports_live_feed(feed_connected):
     assert "knxkeys_found" not in config["files"]
 
 
+@pytest.mark.parametrize("legacy", [True, False])
+def test_get_server_config_companion_reports_legacy_timestamps(legacy):
+    """The UI needs to know when Home Assistant's store is still pre-UTC (#462)."""
+    import ha_live_bridge
+    import knx_daemon
+
+    with (
+        patch.object(knx_daemon, "STORE_MODE", "external-readonly"),
+        patch.object(ha_live_bridge, "_legacy_timestamps", legacy),
+    ):
+        config = knx_daemon.get_server_config()
+
+    assert config["status"]["legacy_timestamps"] is legacy
+
+
 @pytest.mark.parametrize("feed_connected", [True, False])
 def test_get_server_config_postgres_readonly_reports_bus_and_store(feed_connected):
     """postgres-readonly reports a real bus connection (own daemon) alongside the shared store."""

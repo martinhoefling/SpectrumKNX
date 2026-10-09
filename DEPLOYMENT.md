@@ -225,6 +225,15 @@ Home Assistant, and uploading a project additionally enables the building view.
 Both add-ons can run side by side (e.g. the standalone one on a dedicated tunnel
 for long-term recording, the companion for HA's own history).
 
+**"Telegram times may be wrong" banner.** Home Assistant used to store telegram
+timestamps in its local time, while Spectrum KNX reads them as UTC. Until Home
+Assistant has converted its database, history appears shifted by your UTC offset
+and the live view can repeat or miss telegrams. The companion cannot fix this —
+the database belongs to Home Assistant and is opened read-only. Update Home
+Assistant to a release whose KNX integration performs the conversion; the banner
+(and the matching warning in the add-on log) then clears by itself within a few
+minutes, without a restart.
+
 ---
 
 ## 3. Kubernetes
