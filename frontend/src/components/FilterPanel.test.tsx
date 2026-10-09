@@ -15,7 +15,6 @@ test('shows the no-project notice and CTA when no project is loaded', () => {
       options={EMPTY_OPTIONS}
       activeFilters={DEFAULT_FILTERS}
       onFiltersChange={() => {}}
-      mode="history"
       projectLoaded={false}
       onUploadProject={onUploadProject}
     />
@@ -33,7 +32,6 @@ test('hides the notice while project status is unknown', () => {
       options={EMPTY_OPTIONS}
       activeFilters={DEFAULT_FILTERS}
       onFiltersChange={() => {}}
-      mode="history"
     />
   );
   expect(screen.queryByText(/No ETS project loaded/i)).not.toBeInTheDocument();
@@ -47,7 +45,6 @@ test('toggles the direction filter (#194)', () => {
       activeFilters={DEFAULT_FILTERS}
       onFiltersChange={onFiltersChange}
       counts={{ sources: {}, targets: {}, types: {}, directions: { Incoming: 7, Outgoing: 2 }, dpts: {} }}
-      mode="live"
       projectLoaded={true}
     />
   );
@@ -73,7 +70,6 @@ test('active target rows offer send-to-GA and last-seen actions (#214)', () => {
       options={GA_OPTIONS}
       activeFilters={ACTIVE}
       onFiltersChange={() => {}}
-      mode="live"
       projectLoaded={true}
       writeEnabled={true}
       onQuickLastSeen={onQuickLastSeen}
@@ -99,7 +95,6 @@ test('hides the send action on active rows when writes are disabled', () => {
       options={GA_OPTIONS}
       activeFilters={ACTIVE}
       onFiltersChange={() => {}}
-      mode="live"
       projectLoaded={true}
       writeEnabled={false}
       onQuickLastSeen={() => {}}
@@ -120,7 +115,6 @@ test('opens the quick-send popover from an active target row', async () => {
       options={GA_OPTIONS}
       activeFilters={ACTIVE}
       onFiltersChange={() => {}}
-      mode="live"
       projectLoaded={true}
       writeEnabled={true}
     />
@@ -141,7 +135,6 @@ test('toggles Edit ↔ Active views, keeps the count badge, and has no AND/OR co
       options={GA_OPTIONS}
       activeFilters={ACTIVE}
       onFiltersChange={() => {}}
-      mode="live"
       projectLoaded={true}
       writeEnabled={true}
       onQuickLastSeen={() => {}}
@@ -164,14 +157,13 @@ test('toggles Edit ↔ Active views, keeps the count badge, and has no AND/OR co
   expect(within(header).getByText('2')).toBeInTheDocument();
 });
 
-test('master toggle disables the whole set (live only, #370)', () => {
+test('master toggle disables the whole set (#370)', () => {
   const onFiltersEnabledChange = vi.fn();
   const { rerender } = render(
     <FilterPanel
       options={GA_OPTIONS}
       activeFilters={ACTIVE}
       onFiltersChange={() => {}}
-      mode="live"
       projectLoaded={true}
       filtersEnabled={true}
       onFiltersEnabledChange={onFiltersEnabledChange}
@@ -180,17 +172,22 @@ test('master toggle disables the whole set (live only, #370)', () => {
   fireEvent.click(screen.getByTitle('Disable all filters (keeps them)'));
   expect(onFiltersEnabledChange).toHaveBeenCalledWith(false);
 
-  // Not offered in history mode (there the filter is the query).
   rerender(
     <FilterPanel
       options={GA_OPTIONS}
       activeFilters={ACTIVE}
       onFiltersChange={() => {}}
-      mode="history"
       projectLoaded={true}
-      filtersEnabled={true}
+      filtersEnabled={false}
       onFiltersEnabledChange={onFiltersEnabledChange}
     />
+  );
+  fireEvent.click(screen.getByTitle('Enable filters'));
+  expect(onFiltersEnabledChange).toHaveBeenLastCalledWith(true);
+
+  // Only offered where the owner can act on it.
+  rerender(
+    <FilterPanel options={GA_OPTIONS} activeFilters={ACTIVE} onFiltersChange={() => {}} projectLoaded={true} />
   );
   expect(screen.queryByTitle(/Disable all filters|Enable filters/)).not.toBeInTheDocument();
 });
@@ -201,9 +198,24 @@ test('hides the notice when a project is loaded', () => {
       options={EMPTY_OPTIONS}
       activeFilters={DEFAULT_FILTERS}
       onFiltersChange={() => {}}
-      mode="live"
       projectLoaded={true}
     />
   );
   expect(screen.queryByText(/No ETS project loaded/i)).not.toBeInTheDocument();
+});
+
+test('history mode shows count bubbles when counts are supplied (#446)', () => {
+  const counts = { sources: {}, targets: {}, types: { Write: 41, Read: 3 }, directions: {}, dpts: {} };
+  const { rerender } = render(
+    <FilterPanel options={EMPTY_OPTIONS} activeFilters={DEFAULT_FILTERS} onFiltersChange={() => {}} counts={counts} />
+  );
+  expect(screen.getByText('41')).toBeInTheDocument();
+  expect(screen.getByText('3')).toBeInTheDocument();
+
+  // Nothing loaded yet → no counts → no bubbles at all (not a column of zeros).
+  rerender(
+    <FilterPanel options={EMPTY_OPTIONS} activeFilters={DEFAULT_FILTERS} onFiltersChange={() => {}} />
+  );
+  expect(screen.queryByText('41')).not.toBeInTheDocument();
+  expect(screen.queryByText('0')).not.toBeInTheDocument();
 });

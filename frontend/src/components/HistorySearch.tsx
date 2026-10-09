@@ -8,10 +8,13 @@ import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart,
 import { HistoryLoader } from './HistoryLoader';
 import { Visualizer } from './Visualizer';
 import { FilterPanel } from './FilterPanel';
+import { ResizablePane } from './ResizablePane';
 import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
 import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
+  countFilterOptions,
   effectiveDeltaContext,
+  withoutSelections,
   hasActiveFilters,
   matchesTelegram,
   type ActiveFilters,
@@ -40,11 +43,15 @@ interface HistorySearchProps {
   onVisualizationTargetsChange: (targets: string[] | ((prev: string[]) => string[])) => void;
   /** Shared-view state parsed from the URL — triggers an auto-load on mount (#150). */
   initialView?: VizViewState | null;
+  /** Master filter switch, shared with the Group Monitor (#370, #436). */
+  filtersEnabled?: boolean;
+  onFiltersEnabledChange?: (enabled: boolean) => void;
 }
 
 export const HistorySearch: React.FC<HistorySearchProps> = ({
   visibleColumns, loadLimit, filterOptions, activeFilters, onFiltersChange, onOpenSettings,
-  projectLoaded, selectedVisualizationTargets, onVisualizationTargetsChange, initialView
+  projectLoaded, selectedVisualizationTargets, onVisualizationTargetsChange, initialView,
+  filtersEnabled = true, onFiltersEnabledChange,
 }) => {
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [isLoaderOpen, setIsLoaderOpen] = useState(false);
@@ -125,6 +132,14 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     [telegrams, sortConfig]
   );
 
+  // Master switch off (#436): behave as if no filter were set — for the rows
+  // shown and for what the next load asks the server for — but keep the set.
+  const filtering = filtersEnabled && hasActiveFilters(activeFilters);
+  const effectiveFilters = useMemo(
+    () => (filtersEnabled ? activeFilters : withoutSelections(activeFilters)),
+    [filtersEnabled, activeFilters]
+  );
+
   const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }, range?: LoadedRange) => {
     setTelegrams(prev => {
       const existingTs = new Set(prev.map(t => t.timestamp));
@@ -140,7 +155,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     });
     setMetadata(meta || null);
     // Snapshot the filters at load time so we can detect when they diverge
-    setFiltersAtLoad(activeFilters);
+    setFiltersAtLoad(effectiveFilters);
     if (range) setLoadedRange(range);
   };
 
@@ -149,12 +164,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   // applies the Time-Delta-Context window client-side (#309/#319), since
   // per-message flags are set after the historical load already happened.
   const deltaExpandedHistory = useMemo(() => {
-    const noFilter = !hasActiveFilters(activeFilters);
+    const noFilter = !filtering;
     const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, activeFilters));
     const { before, after } = effectiveDeltaContext(activeFilters);
     const flags = activeFilters.deltaContextEnabled ? new Set(flaggedKeys) : EMPTY_FLAG_SET;
     return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after);
-  }, [sortedTelegrams, activeFilters, flaggedKeys]);
+  }, [sortedTelegrams, activeFilters, filtering, flaggedKeys]);
   const filteredSortedTelegrams = deltaExpandedHistory.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedHistory.contextKeys;
@@ -170,12 +185,19 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     const nowHasFewer = (now: (string | number)[], then: (string | number)[]) =>
       then.some(v => !now.includes(v as never));
     return (
-      (wasFiltered(atLoad.sources) && nowHasFewer(activeFilters.sources, atLoad.sources)) ||
-      (wasFiltered(atLoad.targets) && nowHasFewer(activeFilters.targets, atLoad.targets)) ||
-      (wasFiltered(atLoad.types)   && nowHasFewer(activeFilters.types,   atLoad.types))   ||
-      (wasFiltered(atLoad.dpts)    && nowHasFewer(activeFilters.dpts,    atLoad.dpts))
+      (wasFiltered(atLoad.sources) && nowHasFewer(effectiveFilters.sources, atLoad.sources)) ||
+      (wasFiltered(atLoad.targets) && nowHasFewer(effectiveFilters.targets, atLoad.targets)) ||
+      (wasFiltered(atLoad.types)   && nowHasFewer(effectiveFilters.types,   atLoad.types))   ||
+      (wasFiltered(atLoad.dpts)    && nowHasFewer(effectiveFilters.dpts,    atLoad.dpts))
     );
-  }, [activeFilters, filtersAtLoad, telegrams.length]);
+  }, [effectiveFilters, filtersAtLoad, telegrams.length]);
+
+  // Count bubbles for the filter pane (#446), over everything loaded — not just
+  // the rows passing the current filters — so they match the Group Monitor's.
+  const filterCounts = useMemo(
+    () => (telegrams.length > 0 ? countFilterOptions(telegrams) : undefined),
+    [telegrams]
+  );
 
   const activeFilterCount = hasActiveFilters(activeFilters)
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
@@ -194,7 +216,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               fontSize: '0.75rem', color: 'var(--text-dim)', background: 'var(--bg-tag)',
               padding: '0.2rem 0.6rem', borderRadius: '999px', border: '1px solid var(--border-color)',
             }}>
-              {hasActiveFilters(activeFilters)
+              {filtering
                 ? <>{filteredSortedTelegrams.length.toLocaleString()}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}> / {telegrams.length.toLocaleString()}</span></>
                 : telegrams.length.toLocaleString()
               } telegrams
@@ -202,7 +224,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           )}
           {filtersLessRestrictive && (
             <span
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--warning-text)', cursor: 'pointer' }}
               onClick={() => setIsLoaderOpen(true)}
               title="Filters were broadened after the last load — some matching telegrams may not be in the loaded set. Click to reload."
             >
@@ -211,7 +233,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           )}
           {metadata?.limit_reached && (
             <span
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#fbbf24', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--warning-text)', cursor: 'pointer' }}
               onClick={onOpenSettings}
               title={`Limit reached (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
             >
@@ -228,7 +250,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
             title="Toggle filter panel"
             style={{
               position: 'relative',
-              color: isFilterOpen || hasActiveFilters(activeFilters) ? 'var(--accent-primary)' : 'var(--text-dim)',
+              color: isFilterOpen || filtering ? 'var(--accent-primary)' : 'var(--text-dim)',
             }}
           >
             <SlidersHorizontal size={18} />
@@ -237,7 +259,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
                 position: 'absolute', top: -5, right: -5,
                 fontSize: '0.55rem', fontWeight: 700, minWidth: 14, height: 14,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--accent-primary)', color: 'white', borderRadius: '999px',
+                background: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
+                color: 'white', borderRadius: '999px',
               }}>{activeFilterCount}</span>
             )}
           </button>
@@ -282,23 +305,18 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
       {/* Content row: filter panel + table */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {/* Filter panel (slide-in) */}
-        <div style={{
-          width: isFilterOpen ? 'clamp(260px, 18vw, 340px)' : '0px',
-          overflow: 'hidden',
-          transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
-          flexShrink: 0,
-        }}>
-          <div style={{ width: 'clamp(260px, 18vw, 340px)', height: '100%' }}>
+        <ResizablePane open={isFilterOpen} prefKey="filter-pane-width">
             <FilterPanel
               options={filterOptions}
               activeFilters={activeFilters}
               onFiltersChange={onFiltersChange}
-              mode="history"
+              counts={filterCounts}
+              filtersEnabled={filtersEnabled}
+              onFiltersEnabledChange={onFiltersEnabledChange}
               projectLoaded={projectLoaded}
               onUploadProject={onOpenSettings}
             />
-          </div>
-        </div>
+        </ResizablePane>
 
         {/* Table/Chart area */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -321,7 +339,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.4rem' }}>No data loaded</div>
                 <div style={{ color: 'var(--text-dim)', fontSize: '0.875rem' }}>
-                  {hasActiveFilters(activeFilters)
+                  {filtering
                     ? 'Filters are set — click "Load history" to fetch matching data.'
                     : 'Select a time range to search historical bus traffic.'}
                 </div>
@@ -363,7 +381,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
           onClose={() => setIsLoaderOpen(false)}
           onLoad={handleLoad}
           limit={loadLimit}
-          filters={activeFilters}
+          filters={effectiveFilters}
           timeRange={timeRange}
           onTimeRangeChange={setTimeRange}
         />

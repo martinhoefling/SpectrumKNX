@@ -9,7 +9,6 @@ interface DptTypeTreeProps {
   selected: string[];
   onChange: (keys: string[]) => void;
   counts?: Record<string, number>;
-  mode: 'live' | 'history';
   searchQuery: string;
 }
 
@@ -58,7 +57,7 @@ const CountBubble: React.FC<{ count: number }> = ({ count }) => (
  * (`matchesDpt`) already treats as "every subtype of this main type".
  */
 export const DptTypeTree: React.FC<DptTypeTreeProps> = ({
-  entries, selected, onChange, counts, mode, searchQuery,
+  entries, selected, onChange, counts, searchQuery,
 }) => {
   // Explicit user choice wins; otherwise groups with a selection (or an active
   // search, whose matches would be invisible in collapsed groups) start open.
@@ -148,7 +147,7 @@ export const DptTypeTree: React.FC<DptTypeTreeProps> = ({
                   }}>{width}</div>
                 )}
               </div>
-              {mode === 'live' && counts && <CountBubble count={groupCount(main)} />}
+              {counts && <CountBubble count={groupCount(main)} />}
             </div>
 
             {open && options.map(o => {
@@ -180,7 +179,7 @@ export const DptTypeTree: React.FC<DptTypeTreeProps> = ({
                       }}>{o.label}</div>
                     )}
                   </div>
-                  {mode === 'live' && counts && <CountBubble count={counts[key] ?? 0} />}
+                  {counts && <CountBubble count={counts[key] ?? 0} />}
                 </div>
               );
             })}

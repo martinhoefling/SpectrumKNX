@@ -32,6 +32,7 @@ import { HistorySearch } from './components/HistorySearch';
 import { ImportExportView } from './components/ImportExportView';
 import { Visualizer } from './components/Visualizer';
 import { FilterPanel } from './components/FilterPanel';
+import { ResizablePane } from './components/ResizablePane';
 import { ProjectUploadWizard } from './components/ProjectUploadWizard';
 import { KeysUploadWizard } from './components/KeysUploadWizard';
 import { LastSeenOverlay } from './components/LastSeenOverlay';
@@ -40,19 +41,19 @@ import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
 import { WriteToBusPanel } from './components/WriteToBusPanel';
 import { UpdateNotification } from './components/UpdateNotification';
+import { LegacyTimestampBanner } from './components/LegacyTimestampBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { AuthSettings } from './components/AuthSettings';
 import { useAuthStatus, loginRequired } from './hooks/useAuthStatus';
 import { useUpdateCheck } from './hooks/useUpdateCheck';
 import {
   DEFAULT_FILTERS,
-  dptKey,
+  countFilterOptions,
   effectiveDeltaContext,
   hasActiveFilters,
   matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
-  type FilterCounts,
 } from './types/filters';
 
 declare const __APP_VERSION__: string;
@@ -440,6 +441,15 @@ function App() {
     refreshServerConfig();
   }, [refreshServerConfig]);
 
+  // Companion mode: Home Assistant's store still holds pre-UTC timestamps
+  // (#462). Only Home Assistant can convert it, so keep asking until it has.
+  const legacyTimestamps = serverConfig?.status?.legacy_timestamps === true;
+  useEffect(() => {
+    if (!legacyTimestamps) return;
+    const id = window.setInterval(refreshServerConfig, 60_000);
+    return () => window.clearInterval(id);
+  }, [legacyTimestamps, refreshServerConfig]);
+
   const wsEndpoint = wsUrl('/ws/telegrams');
   const { isConnected } = useWebSocket(wsEndpoint, handleTelegram, handleConnectionState);
 
@@ -672,28 +682,8 @@ function App() {
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedLive.contextKeys;
 
-  // ── Count bubbles (live only) ───────────────────────────────────────────────
-  const filterCounts = useMemo((): FilterCounts => {
-    const sources: Record<string, number> = {};
-    const targets: Record<string, number> = {};
-    const types: Record<string, number> = {};
-    const directions: Record<string, number> = {};
-    const dpts: Record<string, number> = {};
-
-    for (const t of sortedLiveTelegrams) {
-      sources[t.source_address] = (sources[t.source_address] ?? 0) + 1;
-      targets[t.target_address] = (targets[t.target_address] ?? 0) + 1;
-      if (t.simplified_type) types[t.simplified_type] = (types[t.simplified_type] ?? 0) + 1;
-      if (t.direction) directions[t.direction] = (directions[t.direction] ?? 0) + 1;
-      if (t.dpt_main != null) {
-        const key = dptKey(t.dpt_main, t.dpt_sub);
-        dpts[key] = (dpts[key] ?? 0) + 1;
-        // A bare-main option ("all 1.x") counts every subtype
-        if (t.dpt_sub != null) dpts[`${t.dpt_main}`] = (dpts[`${t.dpt_main}`] ?? 0) + 1;
-      }
-    }
-    return { sources, targets, types, directions, dpts };
-  }, [sortedLiveTelegrams]);
+  // ── Count bubbles ───────────────────────────────────────────────
+  const filterCounts = useMemo(() => countFilterOptions(sortedLiveTelegrams), [sortedLiveTelegrams]);
 
   const activeFilterCount = hasActiveFilters(activeFilters)
     ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.directions.length + activeFilters.dpts.length
@@ -712,7 +702,7 @@ function App() {
     <span
       onClick={() => setIsSettingsOpen(true)}
       title={`Buffer full (${loadLimit.toLocaleString()}). Click to adjust in settings.`}
-      style={{ display: 'inline-flex', alignItems: 'center', color: '#fbbf24', cursor: 'pointer' }}
+      style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--warning-text)', cursor: 'pointer' }}
     >
       <AlertTriangle size={13} />
     </span>
@@ -730,6 +720,8 @@ function App() {
 
       {/* ── Main area (Full Width) ─── */}
       <main style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, borderRadius: '12px' }} className="glass">
+
+        {legacyTimestamps && <LegacyTimestampBanner />}
 
         {/* === GLOBAL HEADER === */}
         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
@@ -812,7 +804,7 @@ function App() {
                     </span>
                   </span>
                   {isPaused && (
-                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24' }}>
+                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--warning-text)' }}>
                       Paused: <span style={{ fontWeight: 600 }}>{pausedCount}</span>
                     </span>
                   )}
@@ -1125,31 +1117,20 @@ function App() {
 
               {/* Filter panel (slide-in). Filters apply to the Telegram List only,
                   so the pane is list-only now (#374; contents redesign is #370). */}
-              <div style={{
-                width: showFilterPane ? 'clamp(260px, 18vw, 340px)' : '0px',
-                overflow: 'hidden',
-                transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
-                flexShrink: 0,
-                borderRight: showFilterPane ? '1px solid var(--border-color)' : 'none',
-                display: 'flex',
-                flexDirection: 'column'
-              }}>
-                <div style={{ width: 'clamp(260px, 18vw, 340px)', flex: 1, overflow: 'hidden' }}>
+              <ResizablePane open={showFilterPane} prefKey="filter-pane-width">
                   <FilterPanel
                     options={filterOptions}
                     activeFilters={activeFilters}
                     onFiltersChange={handleFiltersChange}
                     counts={filterCounts}
                     onQuickLastSeen={handleQuickLastSeen}
-                    mode="live"
                     projectLoaded={projectStatus?.project_loaded}
                     onUploadProject={() => setIsSettingsOpen(true)}
                     writeEnabled={serverConfig?.status?.write_enabled}
                     filtersEnabled={filtersEnabled}
                     onFiltersEnabledChange={setFiltersEnabled}
                   />
-                </div>
-              </div>
+              </ResizablePane>
 
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -1314,6 +1295,8 @@ function App() {
             selectedVisualizationTargets={selectedVisualizationTargets}
             onVisualizationTargetsChange={setSelectedVisualizationTargets}
             initialView={initialView}
+            filtersEnabled={filtersEnabled}
+            onFiltersEnabledChange={setFiltersEnabled}
           />
         )}
       </main>

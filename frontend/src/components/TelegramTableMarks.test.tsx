@@ -126,3 +126,46 @@ test('clicking a row still pauses live-following (#266) while marking it', () =>
   expect(onListFollowChange).toHaveBeenCalledWith(false);
   expect(marked(container)[0]).toBe(true);
 });
+
+test('prev/next-mark arrows appear with the marks and stop live-following (#442)', () => {
+  const onListFollowChange = vi.fn();
+  const { container } = renderTable({ listFollow: true, onListFollowChange });
+  expect(screen.queryByTitle('Jump to next mark')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Jump to previous mark')).not.toBeInTheDocument();
+
+  fireEvent.click(rows(container)[1]);
+  fireEvent.click(rows(container)[3], { ctrlKey: true });
+  onListFollowChange.mockClear();
+
+  fireEvent.click(screen.getByTitle('Jump to next mark'));
+  expect(onListFollowChange).toHaveBeenLastCalledWith(false);
+  onListFollowChange.mockClear();
+  fireEvent.click(screen.getByTitle('Jump to previous mark'));
+  expect(onListFollowChange).toHaveBeenLastCalledWith(false);
+
+  // Jumping never changes what is marked.
+  expect(marked(container)).toEqual([false, true, false, true, false]);
+});
+
+test('the selected row becomes the scroll anchor while it is on screen (#435)', () => {
+  const onListAnchorKeyChange = vi.fn();
+  // Not following the live edge, as after scrolling into the list.
+  const { container } = renderTable({ listFollow: false, onListFollowChange: vi.fn(), onListAnchorKeyChange });
+
+  fireEvent.click(rows(container)[2]);
+  expect(onListAnchorKeyChange).toHaveBeenLastCalledWith(rows(container)[2].getAttribute('data-akey'));
+
+  // Unmarking it hands the anchor back to the top-most visible row.
+  fireEvent.click(rows(container)[2], { ctrlKey: true });
+  expect(onListAnchorKeyChange).toHaveBeenLastCalledWith(rows(container)[0].getAttribute('data-akey'));
+});
+
+test('clicking a row at the live edge anchors that row, not the top one (#435)', () => {
+  const onListAnchorKeyChange = vi.fn();
+  const onListFollowChange = vi.fn();
+  const { container } = renderTable({ listFollow: true, onListFollowChange, onListAnchorKeyChange });
+
+  fireEvent.click(rows(container)[3]);
+  expect(onListFollowChange).toHaveBeenLastCalledWith(false);
+  expect(onListAnchorKeyChange).toHaveBeenLastCalledWith(rows(container)[3].getAttribute('data-akey'));
+});
