@@ -12,6 +12,7 @@ import { makeAddressPatternMatcher } from '../utils/addressPattern';
 import { makeValueMatcher } from '../utils/valuePattern';
 import { anchorKey } from '../utils/anchorKey';
 import { adjacentMark } from '../utils/adjacentMark';
+import { peakRate } from '../utils/peakRate';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -499,9 +500,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const dpts = new Set<string>();
     const typeCounts = new Map<string, number>();
     let contextCount = 0;
+    const times = telegramRows.map(t => new Date(t.timestamp).getTime());
     telegramRows.forEach((t, i) => {
-      if (new Date(t.timestamp) < new Date(telegramRows[oldestIdx].timestamp)) oldestIdx = i;
-      if (new Date(t.timestamp) > new Date(telegramRows[newestIdx].timestamp)) newestIdx = i;
+      if (times[i] < times[oldestIdx]) oldestIdx = i;
+      if (times[i] > times[newestIdx]) newestIdx = i;
       if (t.deltaMs != null) {
         if (minDeltaIdx === -1 || t.deltaMs < telegramRows[minDeltaIdx].deltaMs!) minDeltaIdx = i;
         if (maxDeltaIdx === -1 || t.deltaMs > telegramRows[maxDeltaIdx].deltaMs!) maxDeltaIdx = i;
@@ -517,6 +519,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       count: telegramRows.length,
       oldestIdx, newestIdx,
       minDeltaIdx, maxDeltaIdx,
+      // Busiest second of the view (#441); pointless for a single row.
+      peak: telegramRows.length > 1 ? peakRate(times) : null,
       sourceCount: sources.size,
       targetCount: targets.size,
       dptCount: dpts.size,
@@ -1168,6 +1172,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 onClick={() => gotoIndex(infoMetrics.maxDeltaIdx)}
               >
                 Max Δt: {telegramRows[infoMetrics.maxDeltaIdx].deltaStr}
+              </button>
+            )}
+            {infoMetrics.peak && (
+              <button
+                style={infoChipBtnStyle} title="Most telegrams within one second in the current view — jump to the start of that burst"
+                onClick={() => gotoIndex(infoMetrics.peak!.startIdx)}
+              >
+                Max rate: {infoMetrics.peak.count}/s
               </button>
             )}
           </div>
