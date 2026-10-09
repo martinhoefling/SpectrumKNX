@@ -373,7 +373,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 label={s}
                 sublabel={name || undefined}
                 checked={true}
-                count={mode === 'live' ? (counts?.sources[s] ?? 0) : undefined}
+                count={counts ? (counts?.sources[s] ?? 0) : undefined}
                 onToggle={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
                 onRemove={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
                 actions={onQuickLastSeen && <LastSeenButton onClick={() => onQuickLastSeen(s, 'pa')} />}
@@ -388,7 +388,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 label={t}
                 sublabel={opt?.name || undefined}
                 checked={true}
-                count={mode === 'live' ? (counts?.targets[t] ?? 0) : undefined}
+                count={counts ? (counts?.targets[t] ?? 0) : undefined}
                 onToggle={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
                 onRemove={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
                 actions={(writeEnabled || onQuickLastSeen) && (
@@ -413,7 +413,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               key={`active-type-${t}`}
               label={t}
               checked={true}
-              count={mode === 'live' ? (counts?.types[t] ?? 0) : undefined}
+              count={counts ? (counts?.types[t] ?? 0) : undefined}
               onToggle={() => update({ types: activeFilters.types.filter(v => v !== t) })}
               onRemove={() => update({ types: activeFilters.types.filter(v => v !== t) })}
             />
@@ -423,7 +423,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               key={`active-dir-${d}`}
               label={d}
               checked={true}
-              count={mode === 'live' ? (counts?.directions[d] ?? 0) : undefined}
+              count={counts ? (counts?.directions[d] ?? 0) : undefined}
               onToggle={() => update({ directions: activeFilters.directions.filter(v => v !== d) })}
               onRemove={() => update({ directions: activeFilters.directions.filter(v => v !== d) })}
             />
@@ -436,7 +436,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 key={`active-dpt-${d}`}
                 label={label || `DPT ${d}`}
                 checked={true}
-                count={mode === 'live' ? dptCount(d) : undefined}
+                count={counts ? dptCount(d) : undefined}
                 onToggle={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
                 onRemove={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
               />
@@ -527,7 +527,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               separator="."
               onToggle={addresses => update({ sources: addresses })}
               counts={counts?.sources}
-              mode={mode}
               searchQuery={q}
               onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'pa') : undefined}
               writeEnabled={writeEnabled}
@@ -545,7 +544,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               separator="/"
               onToggle={addresses => update({ targets: addresses })}
               counts={counts?.targets}
-              mode={mode}
               searchQuery={q}
               onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'ga') : undefined}
               writeEnabled={writeEnabled}
@@ -561,7 +559,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 key={t}
                 label={t}
                 checked={activeFilters.types.includes(t)}
-                count={mode === 'live' ? (counts?.types[t] ?? 0) : undefined}
+                count={counts ? (counts?.types[t] ?? 0) : undefined}
                 onToggle={() => update({ types: toggle(activeFilters.types, t) })}
               />
             ))}
@@ -576,7 +574,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 key={d}
                 label={d}
                 checked={activeFilters.directions.includes(d)}
-                count={mode === 'live' ? (counts?.directions[d] ?? 0) : undefined}
+                count={counts ? (counts?.directions[d] ?? 0) : undefined}
                 onToggle={() => update({ directions: toggle(activeFilters.directions, d) })}
               />
             ))}
@@ -591,7 +589,6 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               selected={activeFilters.dpts}
               onChange={dpts => update({ dpts })}
               counts={counts?.dpts}
-              mode={mode}
               searchQuery={q}
             />
           </Section>

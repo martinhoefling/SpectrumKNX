@@ -207,3 +207,19 @@ test('hides the notice when a project is loaded', () => {
   );
   expect(screen.queryByText(/No ETS project loaded/i)).not.toBeInTheDocument();
 });
+
+test('history mode shows count bubbles when counts are supplied (#446)', () => {
+  const counts = { sources: {}, targets: {}, types: { Write: 41, Read: 3 }, directions: {}, dpts: {} };
+  const { rerender } = render(
+    <FilterPanel options={EMPTY_OPTIONS} activeFilters={DEFAULT_FILTERS} onFiltersChange={() => {}} mode="history" counts={counts} />
+  );
+  expect(screen.getByText('41')).toBeInTheDocument();
+  expect(screen.getByText('3')).toBeInTheDocument();
+
+  // Nothing loaded yet → no counts → no bubbles at all (not a column of zeros).
+  rerender(
+    <FilterPanel options={EMPTY_OPTIONS} activeFilters={DEFAULT_FILTERS} onFiltersChange={() => {}} mode="history" />
+  );
+  expect(screen.queryByText('41')).not.toBeInTheDocument();
+  expect(screen.queryByText('0')).not.toBeInTheDocument();
+});

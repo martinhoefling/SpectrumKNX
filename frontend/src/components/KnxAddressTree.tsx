@@ -12,7 +12,6 @@ interface KnxAddressTreeProps {
   separator: '/' | '.';
   onToggle: (addresses: string[]) => void;
   counts?: Record<string, number>;
-  mode: 'live' | 'history';
   searchQuery: string;
   onLastSeen?: (address: string) => void;
   writeEnabled?: boolean;
@@ -61,7 +60,6 @@ interface LeafRowProps {
   dptSub?: number | null;
   checked: boolean;
   count?: number;
-  mode: 'live' | 'history';
   onToggle: () => void;
   onLastSeen?: () => void;
   isGA?: boolean;
@@ -69,7 +67,7 @@ interface LeafRowProps {
 }
 
 const LeafRow: React.FC<LeafRowProps> = ({
-  address, name, dptMain, dptSub, checked, count, mode, onToggle, onLastSeen, isGA, writeEnabled,
+  address, name, dptMain, dptSub, checked, count, onToggle, onLastSeen, isGA, writeEnabled,
 }) => {
   const [hovered, setHovered] = useState(false);
   return (
@@ -140,7 +138,7 @@ const LeafRow: React.FC<LeafRowProps> = ({
           <Clock size={12} />
         </button>
       )}
-      {mode === 'live' && count !== undefined && (
+      {count !== undefined && (
         <span style={{
           fontSize: '0.65rem', fontWeight: 600, minWidth: '1.8rem', textAlign: 'center',
           padding: '0.1rem 0.4rem', borderRadius: '999px',
@@ -202,7 +200,7 @@ const GroupNode: React.FC<GroupNodeProps> = ({ label, sublabel, leafAddresses, s
 };
 
 export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
-  entries, selected, groupNames, separator, onToggle, counts, mode, searchQuery, onLastSeen, writeEnabled,
+  entries, selected, groupNames, separator, onToggle, counts, searchQuery, onLastSeen, writeEnabled,
 }) => {
   const q = searchQuery.toLowerCase();
 
@@ -261,7 +259,7 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
               {leaves.map(e => (
                 <LeafRow key={e.address} address={e.address!} name={e.name ?? ''} checked={selected.includes(e.address!)}
                   dptMain={e.main} dptSub={e.sub}
-                  count={counts?.[e.address!]} mode={mode}
+                  count={counts?.[e.address!]}
                   onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
                   onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
                   isGA={separator === '/'} writeEnabled={writeEnabled}
@@ -312,7 +310,7 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
                   {visibleLeaves.map(e => (
                     <LeafRow key={e.address} address={e.address!} name={e.name ?? ''} checked={selected.includes(e.address!)}
                       dptMain={e.main} dptSub={e.sub}
-                      count={counts?.[e.address!]} mode={mode}
+                      count={counts?.[e.address!]}
                       onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
                       onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
                       isGA={separator === '/'} writeEnabled={writeEnabled}
