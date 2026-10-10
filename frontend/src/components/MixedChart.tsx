@@ -9,6 +9,7 @@ import { seriesColor } from '../utils/seriesColors';
 import { isSeriesHidden, setSeriesHidden } from '../utils/legendVisibility';
 import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
 import { metricGutterWidth } from '../utils/chartGutter';
+import { clampChartHeight, readChartHeight, writeChartHeight } from '../utils/chartHeight';
 
 interface MixedChartProps {
   bucket: ChartBucket;
@@ -33,6 +34,8 @@ interface MixedChartProps {
   /** Left gutter shared with the other charts on screen, so all time axes
    * start at the same column. Defaults to what this chart needs on its own. */
   leftGutter?: number;
+  /** Identifies this chart for remembering the height the user dragged it to (#185). */
+  heightKey?: string;
 }
 
 // Ensure we have a shared sync cursor across all charts
@@ -40,7 +43,7 @@ const syncCursor = uPlot.sync('knx-time-axis');
 
 export const MixedChart: React.FC<MixedChartProps> = ({
   bucket, minTime, maxTime, stepped, showDots, autoFollow = false, onZoomRangeChange,
-  groupLabel, locked, onToggleLock, onTimeClick, leftGutter: sharedGutter,
+  groupLabel, locked, onToggleLock, onTimeClick, leftGutter: sharedGutter, heightKey,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
@@ -63,6 +66,34 @@ export const MixedChart: React.FC<MixedChartProps> = ({
   }, []);
 
   const { unit, isBinary, timestamps, series } = bucket;
+
+  // Chart height (#185): draggable at the bottom edge, remembered per chart.
+  const defaultHeight = isBinary ? Math.max(150, series.length * 50) : 300;
+  const [userHeight, setUserHeight] = useState<number | null>(() => (heightKey ? readChartHeight(heightKey) : null));
+  const height = userHeight ?? defaultHeight;
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const [resizing, setResizing] = useState(false);
+  const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = { startY: e.clientY, startHeight: height };
+    setResizing(true);
+  };
+  const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    setUserHeight(clampChartHeight(drag.startHeight + e.clientY - drag.startY));
+  };
+  const handleResizeEnd = () => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setResizing(false);
+    if (heightKey && userHeight !== null) writeChartHeight(heightKey, userHeight);
+  };
+  const handleResizeReset = () => {
+    setUserHeight(null);
+    if (heightKey) writeChartHeight(heightKey, null);
+  };
   const leftGutter = useMemo(
     () => sharedGutter ?? metricGutterWidth(series, unit),
     [sharedGutter, series, unit],
@@ -107,7 +138,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({
   const legendValueRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const legendRowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const options: uPlot.Options = useMemo(() => {
+  const baseOptions: uPlot.Options = useMemo(() => {
     const style = getComputedStyle(document.documentElement);
     const gridStroke = style.getPropertyValue('--border-subtle').trim();
     const axisStroke = style.getPropertyValue('--text-dim').trim();
@@ -129,7 +160,7 @@ export const MixedChart: React.FC<MixedChartProps> = ({
 
     return {
       width,
-      height: isBinary ? Math.max(150, series.length * 50) : 300,
+      height: 300, // overridden below with the chart's current height
       padding: [8, 16, 8, 0],
       legend: { show: false }, // replaced by the fixed overlay legend below (#349)
       cursor: {
@@ -260,6 +291,12 @@ export const MixedChart: React.FC<MixedChartProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structureKey]);
 
+  // Height is applied on top of the stable options: with every other option
+  // unchanged, uplot-react resizes the existing chart instead of rebuilding
+  // it, which keeps dragging the handle smooth. (It compares the option
+  // values, so a fresh wrapper object per render costs nothing.)
+  const options: uPlot.Options = { ...baseOptions, height };
+
   return (
     <div style={{ marginBottom: '2rem', background: 'var(--bg-inset)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -292,6 +329,20 @@ export const MixedChart: React.FC<MixedChartProps> = ({
              visible instead of dropping off a frozen scale. When the user has
              zoomed, autoFollow is false so the range is preserved (#281). */}
          <UplotReact options={options} data={data} resetScales={autoFollow} />
+
+         {/* Drag the bottom edge to change the chart's height (#185). */}
+         <div
+           className={`chart-resize-handle${resizing ? ' dragging' : ''}`}
+           role="separator"
+           aria-orientation="horizontal"
+           aria-label="Chart height"
+           title="Drag to change the chart height · double-click to reset"
+           onPointerDown={handleResizeStart}
+           onPointerMove={handleResizeMove}
+           onPointerUp={handleResizeEnd}
+           onPointerCancel={handleResizeEnd}
+           onDoubleClick={handleResizeReset}
+         />
 
          {/* Fixed legend (#349): stays put while hovering, unlike uPlot's native
              legend, and shows each GA's value at the hovered x-position. */}
@@ -353,6 +404,34 @@ export const MixedChart: React.FC<MixedChartProps> = ({
           <span>{formatFullTime(maxTime, multiDay)}</span>
         </div>
       )}
+      <style>{`
+        .chart-resize-handle {
+          position: absolute;
+          left: 0;
+          bottom: 0;
+          width: 100%;
+          height: 7px;
+          cursor: row-resize;
+          z-index: 11;
+          user-select: none;
+          touch-action: none;
+        }
+        .chart-resize-handle::after {
+          content: '';
+          position: absolute;
+          left: 0;
+          bottom: 0;
+          width: 100%;
+          height: 2px;
+          background: var(--accent-primary);
+          opacity: 0;
+          transition: opacity 0.15s;
+        }
+        .chart-resize-handle:hover::after,
+        .chart-resize-handle.dragging::after {
+          opacity: 0.7;
+        }
+      `}</style>
     </div>
   );
 };
