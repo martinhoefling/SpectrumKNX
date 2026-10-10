@@ -30,7 +30,7 @@ const getTypeColor = (type?: string | null) => {
   switch (type) {
     case 'Write': return 'var(--accent-primary)';
     case 'Read': return 'var(--warning-text)'; // Amber
-    case 'Response': return '#10b981'; // Emerald
+    case 'Response': return 'var(--success)'; // Emerald
     default: return 'var(--text-dim)';
   }
 };
@@ -280,7 +280,7 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
         .active-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
         .inactive-dot { width: 8px; height: 8px; background: var(--error); border-radius: 50%; }
         .icon-button { background: transparent; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; padding: 0.35rem; color: var(--text-dim); }
-        .icon-button:hover { color: var(--text-main) !important; transform: scale(1.1); background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+        .icon-button:hover { color: var(--text-main) !important; transform: scale(1.1); background: var(--bg-tag); border-radius: 4px; }
         .icon-button:hover svg { stroke: var(--error); }
 
         .settings-dropdown {
@@ -316,17 +316,17 @@ export const TelegramLog: React.FC<TelegramLogProps> = ({ telegrams, isConnected
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         .raw-badge {
-          background: rgba(255, 255, 255, 0.05);
+          background: var(--bg-tag);
           padding: 0.15rem 0.4rem;
           border-radius: 3px;
           font-family: 'JetBrains Mono', monospace;
           font-size: 0.65rem;
           color: var(--text-dim);
           display: inline-block;
-          border: 1px solid rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--border-subtle);
         }
 
-        .log-row:hover { background: rgba(255, 255, 255, 0.015); }
+        .log-row:hover { background: var(--bg-subtle); }
         @keyframes slide-up { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
     </div>

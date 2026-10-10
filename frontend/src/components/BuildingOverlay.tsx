@@ -327,7 +327,7 @@ const KoRow: React.FC<{
           {mismatchMain != null && (
             <span
               title={`A connected group address has a different DPT main category (${mismatchMain}.*) than this communication object's own DPT`}
-              style={{ fontSize: '0.65rem', color: 'var(--warning, #f59e0b)', whiteSpace: 'nowrap' }}
+              style={{ fontSize: '0.65rem', color: 'var(--warning-text)', whiteSpace: 'nowrap' }}
             >
               {mismatchMain}.*
             </span>
