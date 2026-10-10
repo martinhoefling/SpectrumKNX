@@ -73,7 +73,7 @@ export function AuthSettings({ status, onChanged }: AuthSettingsProps) {
       </div>
 
       {status.ui_auth_forced_off && (
-        <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--warning, #f59e0b)' }}>
+        <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--warning-text)' }}>
           Held off by AUTH_UI_ENABLED. Accounts are kept — remove the setting to switch login back on.
         </div>
       )}
@@ -244,7 +244,7 @@ export function AuthSettings({ status, onChanged }: AuthSettingsProps) {
                 marginTop: '0.45rem', padding: '0.45rem 0.55rem', borderRadius: 6, fontSize: '0.72rem',
                 background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning, #f59e0b)',
               }}>
-                <div style={{ color: 'var(--warning, #f59e0b)', fontWeight: 600, marginBottom: '0.3rem' }}>
+                <div style={{ color: 'var(--warning-text)', fontWeight: 600, marginBottom: '0.3rem' }}>
                   Copy this now — it is not shown again.
                 </div>
                 <code style={{ wordBreak: 'break-all', color: 'var(--text-main)' }}>{mcpToken}</code>

@@ -175,7 +175,7 @@ export function ImportExportView() {
               <div style={{
                 display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.85rem 1rem',
                 background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)',
-                borderRadius: '8px', color: '#eab308', fontSize: '0.85rem',
+                borderRadius: '8px', color: 'var(--warning-text)', fontSize: '0.85rem',
               }}>
                 <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
                 <span>Import is unavailable in read-only companion mode.</span>
@@ -194,7 +194,7 @@ export function ImportExportView() {
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem',
                     padding: '1.75rem', borderRadius: '10px', cursor: isRunning ? 'not-allowed' : 'pointer',
                     border: `1.5px dashed ${isDragging ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-                    background: isDragging ? 'rgba(99,102,241,0.08)' : 'rgba(0,0,0,0.15)',
+                    background: isDragging ? 'rgba(99,102,241,0.08)' : 'var(--bg-inset)',
                     transition: 'all 0.15s ease', opacity: isRunning ? 0.5 : 1,
                   }}
                 >
@@ -233,7 +233,7 @@ export function ImportExportView() {
               <div style={{
                 display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.75rem 1rem',
                 background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-                borderRadius: '8px', color: '#fca5a5', fontSize: '0.85rem',
+                borderRadius: '8px', color: 'var(--error)', fontSize: '0.85rem',
               }}>
                 <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
                 <span>{error}</span>
@@ -248,7 +248,7 @@ export function ImportExportView() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   {isRunning && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} className="accent-primary" />}
                   {status.state === 'done' && <CheckCircle2 size={16} style={{ color: 'var(--success, #22c55e)' }} />}
-                  {status.state === 'failed' && <XCircle size={16} style={{ color: '#ef4444' }} />}
+                  {status.state === 'failed' && <XCircle size={16} style={{ color: 'var(--error)' }} />}
                   {status.state === 'cancelled' && <Ban size={16} style={{ color: 'var(--text-dim)' }} />}
                   {isRunning ? 'Importing' : `Import ${status.state}`}
                   {status.filename ? ` — ${status.filename}` : ''}
@@ -272,7 +272,7 @@ export function ImportExportView() {
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '0.35rem' }}>
                     {status.current_file || `File ${status.files_done ?? 0} / ${status.files_total}`}
                   </div>
-                  <div style={{ height: 6, borderRadius: 999, background: 'rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+                  <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-inset)', overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 999, background: 'var(--accent-primary)',
                       width: `${Math.round(((status.files_done ?? 0) / (status.files_total || 1)) * 100)}%`,
@@ -294,7 +294,7 @@ export function ImportExportView() {
               </div>
 
               {status.state === 'failed' && status.error && (
-                <div style={{ fontSize: '0.82rem', color: '#fca5a5' }}>{status.error}</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--error)' }}>{status.error}</div>
               )}
             </div>
           )}
@@ -351,12 +351,12 @@ export function ImportExportView() {
 function Stat({ label, value, accent, danger }: { label: string; value?: number; accent?: boolean; danger?: boolean }) {
   return (
     <div style={{
-      padding: '0.65rem 0.85rem', borderRadius: '8px', background: 'rgba(0,0,0,0.18)',
+      padding: '0.65rem 0.85rem', borderRadius: '8px', background: 'var(--bg-inset)',
       border: '1px solid var(--border-color)',
     }}>
       <div style={{
         fontSize: '1.15rem', fontWeight: 700,
-        color: danger ? '#ef4444' : accent ? 'var(--accent-primary)' : 'var(--text-main)',
+        color: danger ? 'var(--error)' : accent ? 'var(--accent-primary)' : 'var(--text-main)',
       }}>
         {(value ?? 0).toLocaleString()}
       </div>

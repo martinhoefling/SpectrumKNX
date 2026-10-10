@@ -17,7 +17,7 @@ export function LegacyTimestampBanner() {
         borderBottom: '1px solid var(--warning)',
       }}
     >
-      <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '0.1rem' }} />
+      <AlertTriangle size={16} style={{ color: 'var(--warning-text)', flexShrink: 0, marginTop: '0.1rem' }} />
       <span>
         <strong>Telegram times may be wrong.</strong>{' '}
         Home Assistant&apos;s KNX database still stores timestamps in local time. Until Home Assistant

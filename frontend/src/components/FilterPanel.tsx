@@ -192,7 +192,7 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
           color: 'var(--text-dim)', padding: '0.2rem', borderRadius: '4px',
           display: 'flex', alignItems: 'center', transition: 'all 0.2s'
         }}
-        onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+        onMouseEnter={e => (e.currentTarget.style.color = 'var(--error)')}
         onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}
       >
         <X size={14} />
@@ -508,7 +508,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             background: 'var(--bg-subtle)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-              <AlertTriangle size={14} style={{ color: 'var(--warning, #f59e0b)', flexShrink: 0 }} />
+              <AlertTriangle size={14} style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
               <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-main)' }}>
                 No ETS project loaded
               </span>

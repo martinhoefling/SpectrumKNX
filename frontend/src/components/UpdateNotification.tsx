@@ -65,7 +65,7 @@ export function UpdateNotification({ info, onClose }: UpdateNotificationProps) {
                   style={{
                     marginLeft: '0.5rem', padding: '0.05rem 0.4rem', borderRadius: '4px',
                     fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.03em',
-                    border: '1px solid var(--warning, #f59e0b)', color: 'var(--warning, #f59e0b)',
+                    border: '1px solid var(--warning, #f59e0b)', color: 'var(--warning-text)',
                   }}
                 >
                   BETA

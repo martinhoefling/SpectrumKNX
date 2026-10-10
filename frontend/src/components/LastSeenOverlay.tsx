@@ -40,7 +40,7 @@ const getTypeColor = (type?: string | null) => {
   switch (type) {
     case 'Write': return 'var(--accent-primary)';
     case 'Read': return 'var(--warning-text)';
-    case 'Response': return '#10b981';
+    case 'Response': return 'var(--success)';
     default: return 'var(--text-dim)';
   }
 };

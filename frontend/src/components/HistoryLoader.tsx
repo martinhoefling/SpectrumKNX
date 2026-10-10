@@ -270,7 +270,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
         )}
         {status === 'success' && resultMeta && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', background: 'rgba(16,185,129,0.08)', borderRadius: '8px', border: '1px solid rgba(16,185,129,0.2)' }}>
-            <CheckCircle2 size={18} style={{ color: '#10b981', flexShrink: 0 }} />
+            <CheckCircle2 size={18} style={{ color: 'var(--success)', flexShrink: 0 }} />
             <span style={{ fontSize: '0.875rem' }}>
               Loaded <strong>{resultMeta.total_count.toLocaleString()}</strong> telegrams
               {resultMeta.limit_reached && <span style={{ color: 'var(--warning-text)', marginLeft: '0.5rem' }}>(limit reached)</span>}

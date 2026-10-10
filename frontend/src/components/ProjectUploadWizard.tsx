@@ -116,7 +116,7 @@ export function ProjectUploadWizard({ onSuccess, isClosable = false, onClose }: 
             display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
             padding: '1rem', background: 'rgba(239, 68, 68, 0.1)',
             border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px',
-            color: '#fca5a5', fontSize: '0.9rem', zIndex: 1
+            color: 'var(--error)', fontSize: '0.9rem', zIndex: 1
           }}>
             <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
             <span>{error}</span>
@@ -136,7 +136,7 @@ export function ProjectUploadWizard({ onSuccess, isClosable = false, onClose }: 
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
                 style={{
                   width: '100%', padding: '0.75rem', borderRadius: '8px',
-                  background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-color)',
+                  background: 'var(--bg-inset)', border: '1px solid var(--border-color)',
                   color: 'var(--text-main)', fontSize: '0.9rem',
                   cursor: 'pointer'
                 }}

@@ -118,7 +118,7 @@ const getTypeColor = (type?: string | null) => {
   switch (type) {
     case 'Write': return 'var(--accent-primary)';
     case 'Read': return 'var(--warning-text)';
-    case 'Response': return '#10b981';
+    case 'Response': return 'var(--success)';
     default: return 'var(--text-dim)';
   }
 };
@@ -1778,7 +1778,7 @@ style.textContent = `
 
   .quick-filter-btn.active:hover .cancel-icon {
     display: block;
-    color: #ef4444; /* red for cancel */
+    color: var(--error); /* red for cancel */
   }
 
   .log-row:hover .quick-filter-btn:not(.active),
@@ -1796,7 +1796,7 @@ style.textContent = `
   }
 
   .quick-visualize-btn:hover {
-    color: #10b981;
+    color: var(--success);
   }
 
   .quick-last-seen-btn:hover {
