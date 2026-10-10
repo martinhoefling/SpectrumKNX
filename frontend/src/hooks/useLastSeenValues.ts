@@ -5,10 +5,16 @@ import type { Telegram } from './useWebSocket';
 // Fetches the last-seen telegram for a set of group addresses and keeps it
 // current from the live feed. Shared by GaValuesTable (#269) and the building
 // view's comm-object summary row (#307).
+//
+// `ignoreReads` keeps a read request arriving on the live feed from replacing
+// the value shown: a GroupValueRead carries none, so where the point is "what
+// is this GA's value" (#439) it would blank the answer until the response.
 export const useLastSeenValues = (
   addresses: string[],
-  latestTelegram?: Telegram | null
+  latestTelegram?: Telegram | null,
+  options: { ignoreReads?: boolean } = {},
 ): Record<string, Telegram> => {
+  const { ignoreReads = false } = options;
   const [valuesByGA, setValuesByGA] = useState<Record<string, Telegram>>({});
   // Dedupe while preserving caller order, so the request URL (and thus the fetch
   // mock/network-log assertions) stays stable across renders with the same set.
@@ -39,9 +45,10 @@ export const useLastSeenValues = (
   // Keep values current from the live feed without re-fetching.
   useEffect(() => {
     if (!latestTelegram || !addressSet.has(latestTelegram.target_address)) return;
+    if (ignoreReads && latestTelegram.simplified_type === 'Read') return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setValuesByGA(prev => ({ ...prev, [latestTelegram.target_address]: latestTelegram }));
-  }, [latestTelegram, addressSet]);
+  }, [latestTelegram, addressSet, ignoreReads]);
 
   return valuesByGA;
 };
