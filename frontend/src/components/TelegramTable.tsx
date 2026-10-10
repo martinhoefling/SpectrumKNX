@@ -13,6 +13,7 @@ import { makeValueMatcher } from '../utils/valuePattern';
 import { anchorKey } from '../utils/anchorKey';
 import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
+import { moveColumn, readColumnOrderPref, writeColumnOrderPref } from '../utils/columnOrder';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -257,6 +258,31 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
     return defaults;
   });
+
+  // ── Column order (persisted, shared across live & history views) ──
+  // Drag a column header onto another to move it before or after that column.
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => readColumnOrderPref(COLUMNS.map(c => c.id)));
+  const [draggingColumn, setDraggingColumn] = useState<ColId | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: ColId; side: 'before' | 'after' } | null>(null);
+  // Where the press that may become a drag started: a drag must not begin from
+  // a text field or the resize handle inside a header cell.
+  const dragOriginRef = useRef<EventTarget | null>(null);
+
+  const endColumnDrag = useCallback(() => {
+    setDraggingColumn(null);
+    setDropTarget(null);
+  }, []);
+
+  const dropColumn = useCallback((target: ColId, side: 'before' | 'after') => {
+    if (draggingColumn && draggingColumn !== target) {
+      setColumnOrder(prev => {
+        const next = moveColumn(prev, draggingColumn, target, side);
+        writeColumnOrderPref(next);
+        return next;
+      });
+    }
+    endColumnDrag();
+  }, [draggingColumn, endColumnDrag]);
 
   const widthFor = useCallback(
     (id: ColId) => columnWidths[id] ?? COLUMNS.find(c => c.id === id)!.defaultWidth,
@@ -1024,8 +1050,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // The delta column is always shown when enabled, regardless of sort (#311) —
   // it's computed from the visible row order under any sort hierarchy.
   const visibleCols = useMemo(
-    () => COLUMNS.filter(c => !c.visibleKey || visibleColumns[c.visibleKey]),
-    [visibleColumns],
+    () => columnOrder
+      .map(id => COLUMNS.find(c => c.id === id)!)
+      .filter(c => !c.visibleKey || visibleColumns[c.visibleKey]),
+    [visibleColumns, columnOrder],
   );
 
   const gridTemplate = useMemo(
@@ -1341,7 +1369,36 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         }}
       >
         {visibleCols.map((c, i) => (
-          <div key={c.id} style={{ padding: cellPadding, position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <div
+            key={c.id}
+            className={`header-col${draggingColumn === c.id ? ' drag-source' : ''}${dropTarget?.id === c.id ? ` drop-${dropTarget.side}` : ''}`}
+            style={{ padding: cellPadding, position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            draggable
+            onMouseDownCapture={e => { dragOriginRef.current = e.target; }}
+            onDragStart={e => {
+              const origin = dragOriginRef.current;
+              if (origin instanceof Element && origin.closest('input, textarea, select, .col-resize-handle')) {
+                e.preventDefault();
+                return;
+              }
+              setDraggingColumn(c.id);
+              e.dataTransfer.setData('text/plain', c.id);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragOver={e => {
+              if (!draggingColumn || draggingColumn === c.id) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              const rect = e.currentTarget.getBoundingClientRect();
+              const side = e.clientX - rect.left < rect.width / 2 ? 'before' : 'after';
+              if (dropTarget?.id !== c.id || dropTarget.side !== side) setDropTarget({ id: c.id, side });
+            }}
+            onDrop={e => {
+              e.preventDefault();
+              dropColumn(c.id, dropTarget?.id === c.id ? dropTarget.side : 'before');
+            }}
+            onDragEnd={endColumnDrag}
+          >
             {c.id === 'time' && (
               <button
                 className={`quick-filter-bar-toggle ${quickOpen ? 'open' : ''}`}
@@ -1869,6 +1926,24 @@ style.textContent = `
   .goto-time-go:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* Column reordering: the dragged header dims, and a bar on the hovered
+     header shows the side the column will land on. */
+  .header-col {
+    cursor: grab;
+  }
+
+  .header-col.drag-source {
+    opacity: 0.4;
+  }
+
+  .header-col.drop-before {
+    box-shadow: inset 3px 0 0 var(--accent-primary);
+  }
+
+  .header-col.drop-after {
+    box-shadow: inset -3px 0 0 var(--accent-primary);
   }
 
   .col-resize-handle {

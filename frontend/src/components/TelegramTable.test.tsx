@@ -1,4 +1,4 @@
-import { render, fireEvent, screen } from '@testing-library/react';
+import { render, fireEvent, createEvent, screen } from '@testing-library/react';
 import { expect, test, vi, beforeAll } from 'vitest';
 import { TelegramTable, type SortConfig } from './TelegramTable';
 import { makeTelegram } from '../test/telegramFactory';
@@ -362,4 +362,49 @@ test('context rows (#343): marking a context row hides the context styling in fa
   fireEvent.click(logRows[1]); // mark the context row
   expect(logRows[1].classList.contains('marked')).toBe(true);
   expect(logRows[1].classList.contains('context')).toBe(false);
+});
+
+test('dragging a column header onto another reorders header and rows, and is remembered', () => {
+  localStorage.removeItem('spectrum-knx.columnOrder');
+  const props = {
+    telegrams: [makeTelegram({ source_address: '1.1.7', target_address: '4/5/6' })],
+    visibleColumns, sortConfig, onSort: vi.fn(), activeFilters: DEFAULT_FILTERS, onQuickFilter: vi.fn(), onQuickVisualize: vi.fn(),
+  };
+  const { container, unmount } = render(<TelegramTable {...props} />);
+  const headers = () => Array.from(container.querySelectorAll('.header-col')).map(h => h.textContent?.trim().split(/\s/)[0]);
+  const header = (label: string) => Array.from(container.querySelectorAll<HTMLElement>('.header-col')).find(h => h.textContent?.includes(label))!;
+  const rowText = () => container.querySelector('.log-row')!.textContent ?? '';
+  const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
+  // jsdom's drag events carry no pointer position, so set it by hand.
+  const drag = (type: 'dragOver' | 'drop', el: HTMLElement, clientX: number) => {
+    const event = createEvent[type](el, { dataTransfer });
+    Object.defineProperty(event, 'clientX', { value: clientX });
+    fireEvent(el, event);
+  };
+
+  expect(headers()).toEqual(['TIME', 'Δt', 'SOURCE', 'TARGET', 'TYPE', 'DPT', 'VALUE']);
+  expect(rowText().indexOf('1.1.7')).toBeLessThan(rowText().indexOf('4/5/6'));
+
+  // jsdom rects are 1000px wide starting at 0: clientX 10 is the left half → "before".
+  fireEvent.dragStart(header('TARGET'), { dataTransfer });
+  drag('dragOver', header('SOURCE'), 10);
+  expect(header('SOURCE').className).toContain('drop-before');
+  drag('drop', header('SOURCE'), 10);
+
+  expect(headers()).toEqual(['TIME', 'Δt', 'TARGET', 'SOURCE', 'TYPE', 'DPT', 'VALUE']);
+  expect(rowText().indexOf('4/5/6')).toBeLessThan(rowText().indexOf('1.1.7'));
+  expect(header('SOURCE').className).not.toContain('drop-');
+
+  // Right half of the last column → lands after it.
+  fireEvent.dragStart(header('TIME'), { dataTransfer });
+  drag('dragOver', header('VALUE'), 900);
+  drag('drop', header('VALUE'), 900);
+  expect(headers()).toEqual(['Δt', 'TARGET', 'SOURCE', 'TYPE', 'DPT', 'VALUE', 'TIME']);
+
+  // A fresh table (reload, or the History view) picks the order up again.
+  unmount();
+  const again = render(<TelegramTable {...props} />);
+  expect(Array.from(again.container.querySelectorAll('.header-col')).map(h => h.textContent?.trim().split(/\s/)[0]))
+    .toEqual(['Δt', 'TARGET', 'SOURCE', 'TYPE', 'DPT', 'VALUE', 'TIME']);
+  localStorage.removeItem('spectrum-knx.columnOrder');
 });
