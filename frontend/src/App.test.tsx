@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { expect, test, vi } from 'vitest';
 import App from './App';
 
@@ -71,4 +71,43 @@ test('companion mode warns while Home Assistant\'s store holds pre-UTC timestamp
   } finally {
     fetchMock.mockImplementation(original!);
   }
+});
+
+test('Back and Forward step through panel changes', async () => {
+  window.history.replaceState(null, '', '/');
+  render(<App />);
+  const selected = () => screen.getAllByRole('tab').find(t => t.getAttribute('aria-selected') === 'true')?.getAttribute('title');
+  await screen.findAllByRole('tab');
+  // Let the first sync pass: it only tidies the URL and adds no entry.
+  await act(() => new Promise(r => setTimeout(r, 600)));
+  const start = window.history.length;
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Visualization' }));
+  await waitFor(() => expect(window.location.search).toContain('panel=visualizer'), { timeout: 2000 });
+  fireEvent.click(screen.getByRole('tab', { name: 'Last Seen Values' }));
+  await waitFor(() => expect(window.location.search).toContain('panel=lastseen'), { timeout: 2000 });
+  expect(window.history.length).toBe(start + 2);
+
+  act(() => window.history.back());
+  await waitFor(() => expect(selected()).toBe('Visualization'));
+  act(() => window.history.back());
+  await waitFor(() => expect(selected()).toBe('Telegram List'));
+  expect(window.location.search).toBe('');
+
+  act(() => window.history.forward());
+  await waitFor(() => expect(selected()).toBe('Visualization'));
+  // Navigating must not have pushed anything itself.
+  expect(window.history.length).toBe(start + 2);
+});
+
+test('toggling the filter pane updates the URL without a history entry', async () => {
+  window.history.replaceState(null, '', '/');
+  render(<App />);
+  const toggle = await screen.findByRole('button', { name: 'Toggle filter panel' });
+  await act(() => new Promise(r => setTimeout(r, 600)));
+  const start = window.history.length;
+
+  fireEvent.click(toggle);
+  await waitFor(() => expect(window.location.search).toContain('fp=0'), { timeout: 2000 });
+  expect(window.history.length).toBe(start);
 });

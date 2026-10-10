@@ -171,14 +171,44 @@ export function parseMonitorSearch(search: string): WorkspaceState | null {
   });
 }
 
-/** Reflects the workspace into the address bar without adding history entries. */
-export function applyWorkspaceUrl(state: WorkspaceState): void {
+/**
+ * Reflects the workspace into the address bar.
+ *
+ * `push` adds a browser-history entry, so Back/Forward step through earlier
+ * workspaces — a filter change, a panel switch — instead of leaving the app.
+ * `replace` rewrites the current entry and is for changes the user did not
+ * make: normalising the URL the app was opened with.
+ */
+export function applyWorkspaceUrl(state: WorkspaceState, mode: 'push' | 'replace' = 'replace'): void {
   const search = buildMonitorSearch(state);
   const url = `${getBasePath()}/${search ? '?' + search : ''}`;
   try {
-    window.history.replaceState(null, '', url);
+    if (mode === 'push') window.history.pushState(null, '', url);
+    else window.history.replaceState(null, '', url);
   } catch {
     // Sandboxed contexts may forbid history access — the workspace is simply
     // not reflected.
   }
+}
+
+/** The workspace an address-bar query describes; the default one for a bare URL. */
+export function workspaceFromSearch(search: string): WorkspaceState {
+  return parseMonitorSearch(search) ?? DEFAULT_WORKSPACE;
+}
+
+/**
+ * Whether two workspace queries differ only in layout (the filter pane being
+ * open or closed). Such a change updates the address bar but is not worth a
+ * browser-history entry of its own.
+ */
+export function sameWorkspaceApartFromLayout(a: string, b: string): boolean {
+  const strip = (search: string) => {
+    const p = new URLSearchParams(search);
+    p.delete('fp');
+    // A workspace that is default apart from the pane serialises to just the marker.
+    if ([...p.keys()].every(k => k === 'view')) return '';
+    p.sort();
+    return p.toString();
+  };
+  return strip(a) === strip(b);
 }
