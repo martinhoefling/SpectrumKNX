@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any
 
 from fastapi import (
@@ -537,6 +538,76 @@ async def knx_read(request: KnxReadRequest):
     return {"status": "sent"}
 
 
+# ── External API (#156) ──────────────────────────────────────────────────────
+#
+# A small, versioned surface for other systems (automations, scripts, webhooks).
+# Unlike the endpoints above, which serve the UI and may change with it, the
+# request and response shapes here are kept stable. Access is controlled by the
+# API token (see auth_middleware); the bus guards are the same as for the UI.
+
+
+class ApiWriteRequest(BaseModel):
+    address: str
+    # Decoded value for the DPT (true, 50, 21.5, "12:30:00"), or raw when the
+    # DPT is neither given nor known from the project: an int is sent as a
+    # 6-bit payload, a list of ints as bytes.
+    value: Any
+    # Defaults to the DPT the loaded ETS project assigns to the address.
+    dpt: str | None = None
+
+
+class ApiReadRequest(BaseModel):
+    address: str
+    dpt: str | None = None
+    # False only triggers the GroupValueRead and returns at once.
+    wait: bool = True
+
+
+def _json_value(value: Any) -> Any:
+    """Decoded KNX values as JSON: enums (1.001 decodes to Switch.ON) become
+    their value, tuples lists, anything exotic a string."""
+    if isinstance(value, Enum):
+        return _json_value(value.value)
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, list | tuple):
+        return [_json_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _json_value(v) for k, v in value.items()}
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _json_value(dataclasses.asdict(value))
+    return str(value)
+
+
+@router.post("/api/v1/knx/write")
+async def api_v1_knx_write(request: ApiWriteRequest):
+    """Send a GroupValueWrite to the bus."""
+    _require_bus_write()
+    dpt = request.dpt or knx_daemon.project_dpt(request.address)
+    try:
+        await knx_daemon.send_group_value(request.address, request.value, dpt)
+    except (ConversionError, CouldNotParseAddress, ValueError, TypeError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "sent", "address": request.address, "dpt": dpt}
+
+
+@router.post("/api/v1/knx/read")
+async def api_v1_knx_read(request: ApiReadRequest):
+    """Send a GroupValueRead and return the value a device answers with."""
+    _require_bus_write()
+    dpt = request.dpt or knx_daemon.project_dpt(request.address)
+    try:
+        if not request.wait:
+            await knx_daemon.read_group_value(request.address)
+            return {"status": "sent", "address": request.address}
+        responded, value = await knx_daemon.read_group_value_response(request.address, dpt)
+    except (ConversionError, CouldNotParseAddress, ValueError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    if not responded:
+        raise HTTPException(status_code=504, detail="No response from the bus")
+    return {"status": "ok", "address": request.address, "dpt": dpt, "value": _json_value(value)}
+
+
 class KnxScheduledSendRequest(BaseModel):
     address: str
     payload: Any
@@ -994,6 +1065,8 @@ async def auth_status(request: Request):
         "user": _current_user(request),
         "mcp_token_required": auth.mcp_token_required(),
         "mcp_token_env": bool(os.getenv("AUTH_MCP_TOKEN")),
+        "api_token_required": auth.api_token_required(),
+        "api_token_env": bool(os.getenv("AUTH_API_TOKEN")),
     }
 
 
@@ -1121,6 +1194,24 @@ async def auth_clear_mcp_token(request: Request):
     if os.getenv("AUTH_MCP_TOKEN"):
         raise HTTPException(status_code=409, detail="The MCP token is set via AUTH_MCP_TOKEN")
     auth.clear_mcp_token()
+    return {"status": "ok"}
+
+
+@router.post("/api/auth/api-token")
+async def auth_new_api_token(request: Request):
+    """Generate a token for the external API (/api/v1/). Shown once and never again."""
+    _require_user(request)
+    if os.getenv("AUTH_API_TOKEN"):
+        raise HTTPException(status_code=409, detail="The API token is set via AUTH_API_TOKEN")
+    return {"token": auth.new_api_token()}
+
+
+@router.delete("/api/auth/api-token")
+async def auth_clear_api_token(request: Request):
+    _require_user(request)
+    if os.getenv("AUTH_API_TOKEN"):
+        raise HTTPException(status_code=409, detail="The API token is set via AUTH_API_TOKEN")
+    auth.clear_api_token()
     return {"status": "ok"}
 
 

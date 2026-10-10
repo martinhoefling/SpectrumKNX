@@ -28,6 +28,7 @@ Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus
 - **Database Maintenance:** Inspect database size, telegram count and covered time range; purge old telegrams with a dry-run preview and reclaim the freed disk space—right from the UI.
 - **Home Assistant Companion Mode:** Run the analyzer directly on Home Assistant's own KNX telegram history—no second bus connection, no separate database.
 - **AI-Ready (MCP):** Expose your telegram store to AI agents (Claude, Cursor, …) via a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `/mcp`—query history and last values in natural language. Read-only by default; opt into bus read/write. See [MCP Server](DEPLOYMENT.md#7-mcp-server-ai-agents).
+- **HTTP API for Automations:** Write to and read from the bus from scripts, Node-RED or any system that can make an HTTP request, via a small versioned API protected by its own token. See [HTTP API](DEPLOYMENT.md#12-http-api-for-automations).
 
 ## 🐳 Quick Start (Docker Compose)
 

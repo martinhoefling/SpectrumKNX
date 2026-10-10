@@ -96,7 +96,7 @@ def auth_file() -> str:
 
 def _blank() -> dict[str, Any]:
     """Unconfigured state — no accounts, no token, login off."""
-    return {"version": 1, "ui_auth_enabled": False, "users": [], "mcp_token": None}
+    return {"version": 1, "ui_auth_enabled": False, "users": [], "mcp_token": None, "api_token": None}
 
 
 def _load() -> dict[str, Any]:
@@ -120,6 +120,7 @@ def _load() -> dict[str, Any]:
     data.setdefault("users", [])
     data.setdefault("ui_auth_enabled", False)
     data.setdefault("mcp_token", None)
+    data.setdefault("api_token", None)
     return data
 
 
@@ -341,47 +342,88 @@ def logout(token: str | None) -> None:
         _sessions.pop(token, None)
 
 
-# ── MCP token ────────────────────────────────────────────────────────────────
+# ── Bearer tokens (MCP endpoint, external API) ───────────────────────────────
+#
+# Both work the same way: generated once, shown once, stored as a sha256 hash,
+# or supplied through the environment. Plain sha256 rather than scrypt because
+# the token is 256 bits of randomness, not a password, and it is checked on
+# every request.
 
 
-def mcp_token_required() -> bool:
-    if os.getenv("AUTH_MCP_TOKEN"):
+def _token_required(key: str, env: str) -> bool:
+    if os.getenv(env):
         return True
-    return bool(_load().get("mcp_token"))
+    return bool(_load().get(key))
 
 
-def new_mcp_token() -> str:
+def _new_token(key: str, label: str) -> str:
     """Generate, store hashed, and return the token — the only time it is visible."""
     token = secrets.token_urlsafe(32)
     data = _load()
-    data["mcp_token"] = {
+    data[key] = {
         "algo": "sha256",
         "hash": hashlib.sha256(token.encode()).hexdigest(),
         "created_at": _now(),
     }
     _save(data)
-    logger.info("MCP token generated")
+    logger.info("%s token generated", label)
     return token
 
 
-def clear_mcp_token() -> None:
+def _clear_token(key: str, label: str) -> None:
     data = _load()
-    data["mcp_token"] = None
+    data[key] = None
     _save(data)
-    logger.info("MCP token cleared")
+    logger.info("%s token cleared", label)
 
 
-def verify_mcp_token(token: str | None) -> bool:
+def _verify_token(key: str, env: str, token: str | None) -> bool:
     if not token:
         return False
-    env_token = os.getenv("AUTH_MCP_TOKEN")
+    env_token = os.getenv(env)
     if env_token:
         return hmac.compare_digest(token, env_token)
-    record = _load().get("mcp_token") or {}
+    record = _load().get(key) or {}
     stored = record.get("hash")
     if not stored:
         return False
     return hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(), stored)
+
+
+def mcp_token_required() -> bool:
+    return _token_required("mcp_token", "AUTH_MCP_TOKEN")
+
+
+def new_mcp_token() -> str:
+    return _new_token("mcp_token", "MCP")
+
+
+def clear_mcp_token() -> None:
+    _clear_token("mcp_token", "MCP")
+
+
+def verify_mcp_token(token: str | None) -> bool:
+    return _verify_token("mcp_token", "AUTH_MCP_TOKEN", token)
+
+
+# The external API (/api/v1/) has its own token, so that an automation which
+# may send telegrams never holds a credential for the MCP endpoint or the UI.
+
+
+def api_token_required() -> bool:
+    return _token_required("api_token", "AUTH_API_TOKEN")
+
+
+def new_api_token() -> str:
+    return _new_token("api_token", "API")
+
+
+def clear_api_token() -> None:
+    _clear_token("api_token", "API")
+
+
+def verify_api_token(token: str | None) -> bool:
+    return _verify_token("api_token", "AUTH_API_TOKEN", token)
 
 
 # ── Home Assistant ingress ───────────────────────────────────────────────────

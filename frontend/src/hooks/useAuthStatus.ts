@@ -12,6 +12,9 @@ export interface AuthStatus {
   mcp_token_required: boolean;
   /** The MCP token comes from AUTH_MCP_TOKEN, so it cannot be managed here. */
   mcp_token_env: boolean;
+  /** A token for the external API (/api/v1/) exists. */
+  api_token_required: boolean;
+  api_token_env: boolean;
 }
 
 /**
