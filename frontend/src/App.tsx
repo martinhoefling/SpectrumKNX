@@ -778,7 +778,7 @@ function App() {
         {legacyTimestamps && <LegacyTimestampBanner />}
 
         {/* === GLOBAL HEADER === */}
-        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', flexShrink: 0, background: 'var(--bg-inset)' }}>
           {/* Left: App Section Dropdown */}
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, zIndex: 50 }}>
             <NavDropdown
