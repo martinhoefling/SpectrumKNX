@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_FILTERS, countFilterOptions, dptKey, effectiveDeltaContext, matchesDpt, matchesTelegram } from './filters';
+import { DEFAULT_FILTERS, countFilterOptions, countSelections, dptKey, effectiveDeltaContext, enabledFilters, hasActiveFilters, isFilterDisabled, matchesDpt, matchesTelegram, pruneDisabled, toggleFilterDisabled } from './filters';
 
 describe('effectiveDeltaContext', () => {
   test('returns the stored before/after values when enabled', () => {
@@ -120,4 +120,54 @@ test('countFilterOptions tallies telegrams per filter option', () => {
   expect(counts.directions).toEqual({ Incoming: 5 });
   // Subtypes count under their own key and under the bare main type.
   expect(counts.dpts).toEqual({ '9.001': 2, '9.004': 1, '9': 3, '14': 1 });
+});
+
+describe('switching single filters off (#437)', () => {
+  const base = { ...DEFAULT_FILTERS, sources: ['1.1.1', '1.1.2'], targets: ['1/0/1'], types: ['Write'], dpts: ['9.001'] };
+
+  test('toggleFilterDisabled switches one entry off and on again', () => {
+    const off = toggleFilterDisabled(base, 'sources', '1.1.2');
+    expect(off.disabled).toEqual(['sources:1.1.2']);
+    expect(isFilterDisabled(off, 'sources', '1.1.2')).toBe(true);
+    expect(isFilterDisabled(off, 'sources', '1.1.1')).toBe(false);
+    // the same value in another category is a different entry
+    expect(isFilterDisabled(off, 'targets', '1.1.2')).toBe(false);
+    expect(toggleFilterDisabled(off, 'sources', '1.1.2').disabled).toEqual([]);
+    // the selections themselves are untouched
+    expect(off.sources).toEqual(base.sources);
+  });
+
+  test('enabledFilters leaves the switched-off entries out', () => {
+    const f = { ...base, disabled: ['sources:1.1.2', 'types:Write'] };
+    const on = enabledFilters(f);
+    expect(on.sources).toEqual(['1.1.1']);
+    expect(on.types).toEqual([]);
+    expect(on.targets).toEqual(['1/0/1']);
+    expect(on.dpts).toEqual(['9.001']);
+    expect(on.disabled).toEqual([]);
+    // nothing switched off: the very same object, so memos downstream hold
+    expect(enabledFilters(base)).toBe(base);
+  });
+
+  test('a switched-off entry no longer filters', () => {
+    const t = { source_address: '1.1.9', target_address: '1/0/1', simplified_type: 'Write', direction: 'Incoming', dpt_main: 9, dpt_sub: 1 };
+    expect(matchesTelegram(t, enabledFilters(base))).toBe(false);          // source 1.1.9 not selected
+    const withoutSources = { ...base, disabled: ['sources:1.1.1', 'sources:1.1.2'] };
+    expect(matchesTelegram(t, enabledFilters(withoutSources))).toBe(true); // category now unfiltered
+  });
+
+  test('switching everything off means no filter at all', () => {
+    const all = { ...base, disabled: ['sources:1.1.1', 'sources:1.1.2', 'targets:1/0/1', 'types:Write', 'dpts:9.001'] };
+    expect(hasActiveFilters(enabledFilters(all))).toBe(false);
+    expect(countSelections(all)).toBe(5);
+    expect(countSelections(enabledFilters(all))).toBe(0);
+  });
+
+  test('pruneDisabled forgets markers of entries that are no longer selected', () => {
+    const f = { ...base, sources: ['1.1.1'], disabled: ['sources:1.1.2', 'targets:1/0/1', 'types:Read'] };
+    expect(pruneDisabled(f).disabled).toEqual(['targets:1/0/1']);
+    expect(pruneDisabled(base)).toBe(base);
+    const clean = { ...base, disabled: ['targets:1/0/1'] };
+    expect(pruneDisabled(clean)).toBe(clean);
+  });
 });

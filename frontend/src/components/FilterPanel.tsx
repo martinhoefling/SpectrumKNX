@@ -6,7 +6,11 @@ import {
   type FilterCounts,
   DEFAULT_FILTERS,
   DIRECTIONS,
-  dptKey
+  dptKey,
+  countSelections,
+  enabledFilters,
+  isFilterDisabled,
+  toggleFilterDisabled,
 } from '../types/filters';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { KnxAddressTree } from './KnxAddressTree';
@@ -96,9 +100,11 @@ interface OptionRowProps {
   onRemove?: () => void;
   /** Hover-revealed quick actions (send-to-GA / last-seen), as on tree rows (#214). */
   actions?: React.ReactNode;
+  /** Renders the row dimmed: selected, but currently switched off (#437). */
+  muted?: boolean;
 }
 
-export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove, actions }) => {
+export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove, actions, muted }) => {
   const [hovered, setHovered] = useState(false);
   return (
   <div style={{
@@ -114,7 +120,7 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
       style={{
       display: 'flex', alignItems: 'center', gap: '0.6rem',
       padding: '0.35rem 0.25rem', cursor: 'pointer', flex: 1, minWidth: 0,
-      userSelect: 'none'
+      userSelect: 'none', opacity: muted ? 0.5 : 1, transition: 'opacity 0.15s',
     }}>
       {/* Custom checkbox */}
       <div
@@ -263,12 +269,10 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   const update = (patch: Partial<ActiveFilters>) =>
     onFiltersChange({ ...activeFilters, ...patch });
 
-  const activeCount =
-    activeFilters.sources.length +
-    activeFilters.targets.length +
-    activeFilters.types.length +
-    activeFilters.directions.length +
-    activeFilters.dpts.length;
+  // Entries listed under "Active filters" — switched off or not — and the
+  // ones actually applied, which is what the badge counts (#437).
+  const activeCount = countSelections(activeFilters);
+  const appliedCount = countSelections(enabledFilters(activeFilters));
 
   return (
     <div style={{
@@ -285,13 +289,16 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           <SlidersHorizontal size={15} style={{ color: 'var(--accent-primary)' }} />
           <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>Filter</span>
           {activeCount > 0 && (
-            <span style={{
-              fontSize: '0.65rem', fontWeight: 700, padding: '0.1rem 0.45rem',
-              borderRadius: '999px',
-              background: filtersEnabled ? 'var(--accent-primary)' : 'var(--text-dim)',
-              color: 'white',
-            }}>
-              {activeCount}
+            <span
+              title={appliedCount === activeCount ? undefined : `${appliedCount} of ${activeCount} filters applied`}
+              style={{
+                fontSize: '0.65rem', fontWeight: 700, padding: '0.1rem 0.45rem',
+                borderRadius: '999px',
+                background: filtersEnabled && appliedCount > 0 ? 'var(--accent-primary)' : 'var(--text-dim)',
+                color: 'white',
+              }}
+            >
+              {appliedCount === activeCount ? activeCount : `${appliedCount}/${activeCount}`}
             </span>
           )}
         </div>
@@ -367,6 +374,11 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               No active filters. Switch to <strong>Edit filters</strong> to add some.
             </div>
           )}
+          {activeCount > 0 && (
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', padding: '0 0.25rem 0.35rem', lineHeight: 1.4 }}>
+              Untick an entry to switch it off without losing it; the × removes it.
+            </div>
+          )}
           {activeFilters.sources.map(s => {
             const name = options.sources.find(opt => opt.address === s)?.name;
             return (
@@ -374,10 +386,11 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 key={`active-s-${s}`}
                 label={s}
                 sublabel={name || undefined}
-                checked={true}
+                checked={!isFilterDisabled(activeFilters, 'sources', s)}
                 count={counts ? (counts?.sources[s] ?? 0) : undefined}
-                onToggle={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
+                onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'sources', s))}
                 onRemove={() => update({ sources: activeFilters.sources.filter(v => v !== s) })}
+                muted={isFilterDisabled(activeFilters, 'sources', s)}
                 actions={onQuickLastSeen && <LastSeenButton onClick={() => onQuickLastSeen(s, 'pa')} />}
               />
             );
@@ -389,10 +402,11 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 key={`active-t-${t}`}
                 label={t}
                 sublabel={opt?.name || undefined}
-                checked={true}
+                checked={!isFilterDisabled(activeFilters, 'targets', t)}
                 count={counts ? (counts?.targets[t] ?? 0) : undefined}
-                onToggle={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
+                onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'targets', t))}
                 onRemove={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
+                muted={isFilterDisabled(activeFilters, 'targets', t)}
                 actions={(writeEnabled || onQuickLastSeen) && (
                   <>
                     {writeEnabled && (
@@ -414,20 +428,22 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             <OptionRow
               key={`active-type-${t}`}
               label={t}
-              checked={true}
+              checked={!isFilterDisabled(activeFilters, 'types', t)}
               count={counts ? (counts?.types[t] ?? 0) : undefined}
-              onToggle={() => update({ types: activeFilters.types.filter(v => v !== t) })}
+              onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'types', t))}
               onRemove={() => update({ types: activeFilters.types.filter(v => v !== t) })}
+              muted={isFilterDisabled(activeFilters, 'types', t)}
             />
           ))}
           {activeFilters.directions.map(d => (
             <OptionRow
               key={`active-dir-${d}`}
               label={d}
-              checked={true}
+              checked={!isFilterDisabled(activeFilters, 'directions', d)}
               count={counts ? (counts?.directions[d] ?? 0) : undefined}
-              onToggle={() => update({ directions: activeFilters.directions.filter(v => v !== d) })}
+              onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'directions', d))}
               onRemove={() => update({ directions: activeFilters.directions.filter(v => v !== d) })}
+              muted={isFilterDisabled(activeFilters, 'directions', d)}
             />
           ))}
           {activeFilters.dpts.map(d => {
@@ -437,10 +453,11 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               <OptionRow
                 key={`active-dpt-${d}`}
                 label={label || `DPT ${d}`}
-                checked={true}
+                checked={!isFilterDisabled(activeFilters, 'dpts', d)}
                 count={counts ? dptCount(d) : undefined}
-                onToggle={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
+                onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'dpts', d))}
                 onRemove={() => update({ dpts: activeFilters.dpts.filter(v => v !== d) })}
+                muted={isFilterDisabled(activeFilters, 'dpts', d)}
               />
             );
           })}

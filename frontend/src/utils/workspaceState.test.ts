@@ -181,3 +181,29 @@ describe('browser history', () => {
     expect(sameWorkspaceApartFromLayout(buildMonitorSearch(open), buildMonitorSearch(otherFilter))).toBe(false);
   });
 });
+
+describe('switched-off filters (#437)', () => {
+  it('round-trip through the URL and storage', () => {
+    const ws: WorkspaceState = {
+      ...DEFAULT_WORKSPACE,
+      filters: { ...DEFAULT_FILTERS, sources: ['1.2.3'], targets: ['0/1/2', '0/1/3'], disabled: ['targets:0/1/3'] },
+    };
+    const search = buildMonitorSearch(ws);
+    expect(new URLSearchParams(search).get('off')).toBe('targets:0/1/3');
+    expect(parseMonitorSearch(search)).toEqual(ws);
+    saveWorkspace(ws);
+    expect(loadWorkspace()).toEqual(ws);
+  });
+
+  it('ignores markers for entries that are not selected', () => {
+    const parsed = parseMonitorSearch('view=monitor&tgt=0/1/2&off=targets:9/9/9,targets:0/1/2,bogus');
+    expect(parsed?.filters.targets).toEqual(['0/1/2']);
+    expect(parsed?.filters.disabled).toEqual(['targets:0/1/2']);
+  });
+
+  it('a workspace stored before this existed loads with nothing switched off', () => {
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({ v: 1, tab: 'live', view: 'none', filterOpen: true, filters: { sources: ['1.2.3'] }, plot: [] }));
+    expect(loadWorkspace()?.filters.disabled).toEqual([]);
+    expect(loadWorkspace()?.filters.sources).toEqual(['1.2.3']);
+  });
+});
