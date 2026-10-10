@@ -622,6 +622,9 @@ function App() {
   // Same lifting rationale as marks; each flagged telegram always anchors a
   // context window around itself regardless of the active filters.
   const [flaggedTelegramKeys, setFlaggedTelegramKeys] = useState<string[]>([]);
+  // Global "all" state: every filter match anchors a window. Off, only the
+  // flagged telegrams do.
+  const [contextForAllMatches, setContextForAllMatches] = useState(true);
 
   // ── Sorting (#311: multi-level, ctrl/cmd-click adds a level) ─────────────────
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
@@ -732,8 +735,8 @@ function App() {
     // "preserving all per-message flags" — inert, not cleared, while off.
     const flags = f.deltaContextEnabled ? new Set(flaggedTelegramKeys) : EMPTY_KEY_SET;
 
-    return expandWithDeltaContext(sortedLiveTelegrams, matches, anchorKey, flags, deltaBeforeMs, deltaAfterMs);
-  }, [sortedLiveTelegrams, appliedFilters, filtersEnabled, flaggedTelegramKeys]);
+    return expandWithDeltaContext(sortedLiveTelegrams, matches, anchorKey, flags, deltaBeforeMs, deltaAfterMs, contextForAllMatches);
+  }, [sortedLiveTelegrams, appliedFilters, filtersEnabled, flaggedTelegramKeys, contextForAllMatches]);
   const filteredLiveTelegrams = deltaExpandedLive.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedLive.contextKeys;
@@ -1327,6 +1330,8 @@ function App() {
                     onLastMarkedKeyChange={setLastMarkedTelegramKey}
                     flaggedKeys={flaggedTelegramKeys}
                     onFlaggedKeysChange={setFlaggedTelegramKeys}
+                    contextForAllMatches={contextForAllMatches}
+                    onContextForAllMatchesChange={setContextForAllMatches}
                     contextKeys={contextTelegramKeys}
                     infoBarOpen={infoBarOpen}
                     onInfoBarOpenChange={setInfoBarOpen}

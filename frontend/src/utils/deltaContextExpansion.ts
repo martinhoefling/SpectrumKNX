@@ -24,6 +24,9 @@ export interface DeltaExpansionResult<T> {
  * @param flaggedKeys Keys of telegrams individually flagged to always anchor a
  *   context window around themselves (#319), regardless of the primary filter.
  * @param beforeMs / @param afterMs The effective (already #318-gated) window.
+ * @param anchorMatches Whether every filter match anchors a window (the global
+ *   "all" state). When false only the flagged telegrams do, so the context can
+ *   be limited to single messages (#319); matches are shown either way.
  */
 export function expandWithDeltaContext<T extends Timestamped>(
   items: T[],
@@ -32,20 +35,24 @@ export function expandWithDeltaContext<T extends Timestamped>(
   flaggedKeys: ReadonlySet<string>,
   beforeMs: number,
   afterMs: number,
+  anchorMatches = true,
 ): DeltaExpansionResult<T> {
   // A flagged telegram is always shown and always anchors its own window,
   // independent of whether it passes the primary filter.
-  const effectiveMatch = items.map((t, i) => matches[i] || flaggedKeys.has(anchorKeyOf(t)));
+  const flagged = items.map(t => flaggedKeys.has(anchorKeyOf(t)));
+  const effectiveMatch = items.map((_, i) => matches[i] || flagged[i]);
 
   if (beforeMs <= 0 && afterMs <= 0) {
     return { items: items.filter((_, i) => effectiveMatch[i]), contextKeys: new Set() };
   }
 
   const anchorTimestamps = items
-    .filter((_, i) => effectiveMatch[i])
+    .filter((_, i) => flagged[i] || (anchorMatches && matches[i]))
     .map(t => new Date(t.timestamp).getTime());
 
-  if (anchorTimestamps.length === 0) return { items: [], contextKeys: new Set() };
+  if (anchorTimestamps.length === 0) {
+    return { items: items.filter((_, i) => effectiveMatch[i]), contextKeys: new Set() };
+  }
 
   const contextKeys = new Set<string>();
   const kept = items.filter((t, i) => {

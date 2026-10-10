@@ -46,7 +46,7 @@ const TELEGRAMS: Telegram[] = [
   makeTelegram({ timestamp: '2024-01-01T10:00:01.000Z', target_address: '2/0/1', target_name: 'Jalousie Bad', raw_hex: '0x01' }),
 ];
 
-const renderTable = () =>
+const renderTable = (props: Partial<React.ComponentProps<typeof TelegramTable>> = {}) =>
   render(
     <TelegramTable
       telegrams={TELEGRAMS}
@@ -56,6 +56,7 @@ const renderTable = () =>
       activeFilters={DEFAULT_FILTERS}
       onQuickFilter={vi.fn()}
       onQuickVisualize={vi.fn()}
+      {...props}
     />,
   );
 
@@ -195,41 +196,65 @@ test('ctrl/cmd-click on the DELTA TIME toggle disables/enables the window withou
   expect(onDeltaContextChange).toHaveBeenCalledWith(750, 250);
 });
 
-test('plain click on the DELTA TIME toggle cycles the per-message flag tristate (#319)', () => {
-  renderTable();
-  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+const flagButton = (row: Element) => row.querySelector('button[title*="around this message"]')!;
+const isFlagged = (row: Element) => flagButton(row).getAttribute('title')!.startsWith('Context is shown');
 
-  // none -> all: flags every currently visible row.
-  fireEvent.click(screen.getByTitle(/none messages flagged/));
-  expect(screen.getByTitle(/all messages flagged/)).toBeInTheDocument();
-
-  // all -> none: clears every flag.
-  fireEvent.click(screen.getByTitle(/all messages flagged/));
-  expect(screen.getByTitle(/none messages flagged/)).toBeInTheDocument();
-});
-
-test('flagging a single row reports the tristate as "some" (#319)', () => {
+test('plain click on the DELTA TIME toggle switches the context between all and no messages (#319)', () => {
   const { container } = renderTable();
   fireEvent.click(screen.getByTitle('Show quick filter bar'));
-  expect(screen.getByTitle(/none messages flagged/)).toBeInTheDocument();
+  const rows = () => [...container.querySelectorAll('.log-row')];
 
-  const row = [...container.querySelectorAll('.log-row')].find(r => r.textContent?.includes('Licht Flur'))!;
-  fireEvent.click(row.querySelector('button[title*="Always show context"]')!);
+  // Default: every message anchors a context window.
+  expect(rows().every(isFlagged)).toBe(true);
 
-  expect(screen.getByTitle(/some messages flagged/)).toBeInTheDocument();
+  fireEvent.click(screen.getByTitle(/around all messages/));
+  expect(screen.getByTitle(/around no message/)).toBeInTheDocument();
+  expect(rows().some(isFlagged)).toBe(false);
+
+  fireEvent.click(screen.getByTitle(/around no message/));
+  expect(screen.getByTitle(/around all messages/)).toBeInTheDocument();
+  expect(rows().every(isFlagged)).toBe(true);
+});
+
+test('flagging a single row limits the context to that message (#319)', () => {
+  const onFlaggedKeysChange = vi.fn();
+  const onContextForAllMatchesChange = vi.fn();
+  const { container } = renderTable({ onFlaggedKeysChange, onContextForAllMatchesChange });
+  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+  fireEvent.click(screen.getByTitle(/around all messages/));
+  expect(onContextForAllMatchesChange).toHaveBeenLastCalledWith(false);
+
+  const rows = [...container.querySelectorAll('.log-row')];
+  const row = rows.find(r => r.textContent?.includes('Licht Flur'))!;
+  fireEvent.click(flagButton(row));
+
+  expect(screen.getByTitle(/around the flagged messages only/)).toBeInTheDocument();
+  expect(rows.filter(isFlagged)).toEqual([row]);
+  expect(onFlaggedKeysChange.mock.lastCall![0]).toHaveLength(1);
+});
+
+test('switching one row off while all are on keeps the context around the others (#319)', () => {
+  const { container } = renderTable();
+  fireEvent.click(screen.getByTitle('Show quick filter bar'));
+  const rows = [...container.querySelectorAll('.log-row')];
+
+  fireEvent.click(flagButton(rows[0]));
+
+  expect(screen.getByTitle(/around the flagged messages only/)).toBeInTheDocument();
+  expect(rows.map(isFlagged)).toEqual([false, ...rows.slice(1).map(() => true)]);
 });
 
 test("ctrl/cmd-click on a row's flag applies its new state to every marked row (#319)", () => {
   const { container } = renderTable();
   fireEvent.click(screen.getByTitle('Show quick filter bar'));
+  fireEvent.click(screen.getByTitle(/around all messages/));
   const rows = [...container.querySelectorAll('.log-row')];
 
   // Mark two rows (row-marks, #310) then ctrl-click a third row's flag.
   fireEvent.click(rows[0]);
   fireEvent.click(rows[1], { ctrlKey: true });
-  const flagBtn = rows[2].querySelector('button[title*="Always show context"]')!;
-  fireEvent.click(flagBtn, { ctrlKey: true });
+  fireEvent.click(flagButton(rows[2]), { ctrlKey: true });
 
-  // All three (the two marked + the clicked one) are now flagged -> tristate is "all".
-  expect(screen.getByTitle(/all messages flagged/)).toBeInTheDocument();
+  // The two marked rows and the clicked one are now flagged.
+  expect(rows.slice(0, 3).every(isFlagged)).toBe(true);
 });
