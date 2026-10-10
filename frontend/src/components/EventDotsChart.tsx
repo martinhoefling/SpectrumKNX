@@ -6,6 +6,7 @@ import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
 import { seriesColor } from '../utils/seriesColors';
 import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
+import { LABEL_GUTTER } from '../utils/chartGutter';
 
 interface EventDotsChartProps {
   bucket: ChartBucket;
@@ -16,6 +17,9 @@ interface EventDotsChartProps {
   /** Click (not drag-select) on the chart: navigate to the telegram list around
    * this timestamp (#308). */
   onTimeClick?: (ms: number) => void;
+  /** Left gutter shared with the other charts on screen, so all time axes
+   * start at the same column. Defaults to this chart's own label gutter. */
+  leftGutter?: number;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
@@ -27,7 +31,7 @@ const syncCursor = uPlot.sync('knx-time-axis');
  * (no forward-fill/held state); its tooltip/legend shows the telegram's
  * formatted value.
  */
-export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime, maxTime, autoFollow = false, onZoomRangeChange, onTimeClick }) => {
+export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime, maxTime, autoFollow = false, onZoomRangeChange, onTimeClick, leftGutter }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -61,7 +65,8 @@ export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime,
   ];
 
   const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
-  const LEFT_GUTTER = 150;
+  // Shared with the other charts on screen so all time axes line up.
+  const LEFT_GUTTER = leftGutter ?? LABEL_GUTTER;
 
   const rowHeight = 32;
   const rowGap = 4;
@@ -73,7 +78,7 @@ export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime,
   const chartHeight = Math.max(160, series.length * (rowHeight + rowGap) + 60);
 
   const structureKey = [
-    width, themeTick, minTime, maxTime, series.map(s => s.name).join('|'),
+    width, themeTick, minTime, maxTime, LEFT_GUTTER, series.map(s => s.name).join('|'),
   ].join('§');
 
   const options: uPlot.Options = useMemo(() => {

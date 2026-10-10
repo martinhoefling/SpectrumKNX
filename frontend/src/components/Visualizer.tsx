@@ -11,6 +11,7 @@ import { getPref, setPref } from '../utils/prefs';
 import { clearSeriesHidden } from '../utils/legendVisibility';
 import { expandDegenerateRange } from '../utils/timeRange';
 import { splitLockedBuckets } from '../utils/chartLock';
+import { sharedLeftGutter } from '../utils/chartGutter';
 
 interface VisualizerProps {
   telegrams: Telegram[];
@@ -87,6 +88,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     () => splitLockedBuckets(buckets, selectedTargets, addressToUnit, lockThresholds),
     [buckets, selectedTargets, addressToUnit, lockThresholds]
   );
+  // One left gutter for every chart on screen, so all time axes start at the
+  // same column and an instant lines up down the page.
+  const leftGutter = useMemo(() => sharedLeftGutter(displayBuckets.map(g => g.bucket)), [displayBuckets]);
   // `openGroupSize` is the currently-open chart's own GA count (for that
   // unit), read fresh from `displayBuckets` at the call site. If the most
   // recent threshold exactly equals it, nothing has been added since that
@@ -184,12 +188,13 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {displayBuckets.map(g => (
         g.bucket.isBinary ? (
-          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} />
+          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} leftGutter={leftGutter} />
         ) : g.bucket.isEvents ? (
-          <EventDotsChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} />
+          <EventDotsChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} leftGutter={leftGutter} />
         ) : (
           <MixedChart
             key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]}
+            leftGutter={leftGutter}
             stepped={stepped} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange}
             groupLabel={g.groupCount > 1 ? `${g.groupIndex}/${g.groupCount}` : undefined}
             // Only the unit's currently-open chart is lockable; earlier ones are permanently closed (#349).

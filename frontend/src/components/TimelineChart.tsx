@@ -5,6 +5,7 @@ import 'uplot/dist/uPlot.min.css';
 import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
 import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
+import { LABEL_GUTTER } from '../utils/chartGutter';
 
 interface TimelineChartProps {
   bucket: ChartBucket;
@@ -20,11 +21,14 @@ interface TimelineChartProps {
   /** Click (not drag-select) on the chart: navigate to the telegram list around
    * this timestamp (#308). Omitted from the deps key since it's stable from callers. */
   onTimeClick?: (ms: number) => void;
+  /** Left gutter shared with the other charts on screen, so all time axes
+   * start at the same column. Defaults to this chart's own label gutter. */
+  leftGutter?: number;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange, onTimeClick }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange, onTimeClick, leftGutter }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -60,7 +64,8 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
 
   // Show a date alongside times once the visible range crosses midnight (#281).
   const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
-  const LEFT_GUTTER = 150;
+  // Shared with the other charts on screen so all time axes line up.
+  const LEFT_GUTTER = leftGutter ?? LABEL_GUTTER;
 
   const rowHeight = 40;
   const rowGap = 4;
@@ -71,7 +76,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
   // recreating it, keeping the cursor/hover alive (#207). The draw plugin below
   // therefore reads timestamps/values from `u.data`, not from this closure.
   const structureKey = [
-    width, themeTick, showDots, minTime, maxTime, series.map(s => s.name).join('|'),
+    width, themeTick, showDots, minTime, maxTime, LEFT_GUTTER, series.map(s => s.name).join('|'),
   ].join('§');
 
   const options: uPlot.Options = useMemo(() => {
