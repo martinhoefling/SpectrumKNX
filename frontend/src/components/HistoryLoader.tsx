@@ -141,7 +141,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
               <span key={s} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(99,102,241,0.12)', color: 'var(--accent-primary)', border: '1px solid rgba(99,102,241,0.3)' }}>src: {s}</span>
             ))}
             {filters.targets.map(t => (
-              <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>tgt: {t}</span>
+              <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(16,185,129,0.1)', color: 'var(--success)', border: '1px solid rgba(16,185,129,0.3)' }}>tgt: {t}</span>
             ))}
             {filters.types.map(t => (
               <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: 'var(--warning-text)', border: '1px solid rgba(251,191,36,0.3)' }}>{t}</span>

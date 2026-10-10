@@ -175,7 +175,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
               if (!el) return;
               const val = isOutside || idx == null ? s.data[s.data.length - 1] : s.data[idx];
               el.textContent = val === 1 ? 'On' : val === 0 ? 'Off' : '-';
-              el.style.color = val === 1 ? '#22c55e' : val === 0 ? '#ef4444' : 'var(--text-dim)';
+              el.style.color = val === 1 ? 'var(--success)' : val === 0 ? 'var(--error)' : 'var(--text-dim)';
             });
           }
         ],
@@ -299,7 +299,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
                   style={{
                     fontSize: '0.7rem',
                     fontWeight: 700,
-                    color: lastVal === 1 ? '#22c55e' : lastVal === 0 ? '#ef4444' : 'var(--text-dim)',
+                    color: lastVal === 1 ? 'var(--success)' : lastVal === 0 ? 'var(--error)' : 'var(--text-dim)',
                     marginTop: '2px',
                   }}
                 >
