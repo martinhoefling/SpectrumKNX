@@ -3,6 +3,7 @@
 # running both against the same bus is not supported.
 name: "Spectrum KNX (HA Companion, Beta)"
 description: "BETA — KNX analyzer UI on top of Home Assistant's own KNX telegram history — no second bus connection, no separate database"
+url: "https://github.com/martinhoefling/SpectrumKNX"
 version: "2.0.0-beta.10"
 slug: "spectrum_knx_companion_beta"
 image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"

@@ -1,5 +1,6 @@
 name: "Spectrum KNX (HA Companion)"
 description: "KNX analyzer UI on top of Home Assistant's own KNX telegram history — no second bus connection, no separate database"
+url: "https://github.com/martinhoefling/SpectrumKNX"
 # Shares the image built from ha-addon/ — keep version in sync with ha-addon/config.yaml
 version: "2.0.0-beta.6"
 slug: "spectrum_knx_companion"
