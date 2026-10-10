@@ -61,6 +61,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   const [sortConfig, setSortConfig] = useState<SortConfig>(readSortConfigPref);
   // Per-message Time-Delta-Context flags (#319) — local to this view, like marks.
   const [flaggedKeys, setFlaggedKeys] = useState<string[]>([]);
+  const [contextForAllMatches, setContextForAllMatches] = useState(true);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
 
@@ -171,8 +172,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, effectiveFilters));
     const { before, after } = effectiveDeltaContext(activeFilters);
     const flags = activeFilters.deltaContextEnabled ? new Set(flaggedKeys) : EMPTY_FLAG_SET;
-    return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after);
-  }, [sortedTelegrams, activeFilters, effectiveFilters, filtering, flaggedKeys]);
+    return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after, contextForAllMatches);
+  }, [sortedTelegrams, activeFilters, effectiveFilters, filtering, flaggedKeys, contextForAllMatches]);
   const filteredSortedTelegrams = deltaExpandedHistory.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedHistory.contextKeys;
@@ -372,6 +373,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
               flaggedKeys={flaggedKeys}
               onFlaggedKeysChange={setFlaggedKeys}
+              contextForAllMatches={contextForAllMatches}
+              onContextForAllMatchesChange={setContextForAllMatches}
               contextKeys={contextTelegramKeys}
             />
           )}

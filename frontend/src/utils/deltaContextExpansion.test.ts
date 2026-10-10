@@ -67,4 +67,21 @@ describe('expandWithDeltaContext', () => {
     expect(onlyBefore.items.map(keyOf)).toEqual(['before', 'anchor']);
     expect(onlyBefore.contextKeys).toEqual(new Set(['before']));
   });
+
+  it('with anchorMatches off, only flagged items pull in context; matches stay visible (#319)', () => {
+    const items = [
+      item('m1', '2024-01-01T10:00:00.000Z'), // match, not flagged
+      item('x1', '2024-01-01T10:00:00.500Z'), // near m1 only
+      item('m2', '2024-01-01T10:01:00.000Z'), // match, flagged
+      item('x2', '2024-01-01T10:01:00.500Z'), // near m2
+    ];
+    const matches = [true, false, true, false];
+    const out = expandWithDeltaContext(items, matches, keyOf, new Set(['m2']), 0, 1000, false);
+    expect(out.items.map(keyOf)).toEqual(['m1', 'm2', 'x2']);
+    expect(out.contextKeys).toEqual(new Set(['x2']));
+
+    const unflagged = expandWithDeltaContext(items, matches, keyOf, new Set(), 0, 1000, false);
+    expect(unflagged.items.map(keyOf)).toEqual(['m1', 'm2']);
+    expect(unflagged.contextKeys).toEqual(new Set());
+  });
 });
