@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Send, Radio, X, Plus, AlertTriangle, CheckCircle2, Timer, RotateCcw } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
+import type { Telegram } from '../hooks/useWebSocket';
+import { useLastSeenValues } from '../hooks/useLastSeenValues';
 import {
   formatDpt,
   parseDptMain,
@@ -21,6 +23,8 @@ interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
   targets: FilterOption[];
   onClose: () => void;
+  /** Newest telegram from the live feed; keeps each row's last value current (#439). */
+  latestTelegram?: Telegram | null;
 }
 
 interface Row {
@@ -32,6 +36,13 @@ interface Row {
   every: string;
   busy: boolean;
   feedback: { ok: boolean; msg: string } | null;
+  /**
+   * Set by Read: the timestamp of the value shown when the request went out
+   * ('' when there was none). The row is "waiting for a response" for as long
+   * as the shown value is still that one. Compared by identity, not by clock,
+   * so browser/server time differences cannot matter.
+   */
+  readBaseline: string | null;
 }
 
 const GA_RE = /^\d{1,2}\/\d{1,2}\/\d{1,3}$|^\d{1,2}\/\d{1,4}$|^\d{1,5}$/;
@@ -48,6 +59,7 @@ const COMMON_DPTS = [
 let rowSeq = 0;
 const newRow = (): Row => ({
   id: `row-${rowSeq++}`, address: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
+  readBaseline: null,
 });
 
 // ── Row persistence (#254) ───────────────────────────────────────────────────
@@ -105,7 +117,7 @@ function saveRows(rows: Row[]): void {
  *
  * Rows persist to localStorage so toggling the panel keeps its state (#254).
  */
-export function WriteToBusPanel({ targets, onClose }: Props) {
+export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
   const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
   const [job, setJob] = useState<ScheduledSendStatus | null>(null);
@@ -129,6 +141,15 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
       return am - bm || as - bs;
     });
   }, [targets]);
+
+  // Last value per row (#439): fetched once per entered GA, then kept current
+  // from the live feed — which keeps flowing while the telegram list is paused,
+  // so a read's response shows up here without hunting for it in the list.
+  const rowAddresses = useMemo(
+    () => rows.map(r => r.address.trim()).filter(a => GA_RE.test(a)),
+    [rows],
+  );
+  const lastValues = useLastSeenValues(rowAddresses, latestTelegram, { ignoreReads: true });
 
   const jobActive = job != null && (job.state === 'waiting' || job.state === 'running');
 
@@ -164,6 +185,7 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
     updateRow(id, {
       address: next,
       feedback: null,
+      readBaseline: null,
       dpt: match && match.main != null ? formatDpt(match.main, match.sub) : '',
     });
   };
@@ -202,7 +224,10 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
     updateRow(row.id, { busy: true, feedback: null });
     try {
       await readTelegram(row.address.trim());
-      updateRow(row.id, { feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` } });
+      updateRow(row.id, {
+        feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` },
+        readBaseline: lastValues[row.address.trim()]?.timestamp ?? '',
+      });
       setRecentGas(pushRecentGa(row.address.trim()));
     } catch (err) {
       updateRow(row.id, { feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' } });
@@ -260,6 +285,12 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
                   >
                     — {known.name}
                   </span>
+                )}
+                {addressValid && (
+                  <LastValue
+                    telegram={lastValues[row.address.trim()]}
+                    awaiting={row.readBaseline != null && (lastValues[row.address.trim()]?.timestamp ?? '') === row.readBaseline}
+                  />
                 )}
               </div>
 
@@ -326,7 +357,7 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
                   onClick={() => void read(row)}
                   disabled={row.busy || !addressValid}
                   style={secondaryBtn(row.busy || !addressValid)}
-                  title="Send a GroupValueRead; the response updates the last value"
+                  title="Send a GroupValueRead; the response shows up as this row's last value"
                 >
                   <Radio size={14} /> Read
                 </button>
@@ -425,6 +456,60 @@ export function WriteToBusPanel({ targets, onClose }: Props) {
       pollRef.current = null;
     }
   }
+}
+
+/**
+ * The row's group address as last seen on the bus (#439): value, what kind of
+ * telegram carried it, and when. Flashes briefly whenever it changes, so the
+ * answer to a read is hard to miss.
+ */
+function LastValue({ telegram, awaiting }: { telegram: Telegram | undefined; awaiting: boolean }) {
+  const hasValue = telegram != null && telegram.simplified_type !== 'Read';
+  const at = telegram ? new Date(telegram.timestamp) : null;
+  const sameDay = at != null && at.toDateString() === new Date().toDateString();
+  const when = at == null
+    ? ''
+    : at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+      + (sameDay ? '' : ` · ${at.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' })}`);
+  return (
+    <span
+      // Remounting on a new telegram restarts the highlight animation.
+      key={telegram?.timestamp ?? 'none'}
+      className={hasValue ? 'wtb-last-value wtb-last-value-flash' : 'wtb-last-value'}
+      title={telegram
+        ? `Last telegram on this group address: ${telegram.simplified_type ?? telegram.telegram_type} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${at!.toLocaleString()}`
+        : 'No telegram recorded for this group address yet'}
+    >
+      <span style={{ color: 'var(--text-dim)' }}>Last:</span>
+      {hasValue ? (
+        <>
+          <strong style={{ color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace" }}>
+            {telegram.value_formatted ?? telegram.value_numeric ?? telegram.raw_hex ?? '—'}
+            {telegram.unit ? ` ${telegram.unit}` : ''}
+          </strong>
+          <span style={{ color: 'var(--text-dim)' }}>
+            {telegram.simplified_type ?? telegram.telegram_type} · {when}
+          </span>
+        </>
+      ) : (
+        <span style={{ color: 'var(--text-dim)' }}>
+          {telegram ? `no value yet (read request ${when})` : 'no value yet'}
+        </span>
+      )}
+      {awaiting && <span style={{ color: 'var(--warning-text)' }}>· waiting for response…</span>}
+      <style>{`
+        .wtb-last-value {
+          display: inline-flex; align-items: baseline; gap: 0.35rem;
+          font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 4px; white-space: nowrap;
+        }
+        .wtb-last-value-flash { animation: wtb-last-value-flash 1.6s ease-out; }
+        @keyframes wtb-last-value-flash {
+          from { background: rgba(99, 102, 241, 0.35); }
+          to { background: transparent; }
+        }
+      `}</style>
+    </span>
+  );
 }
 
 function describeJob(job: ScheduledSendStatus): string {

@@ -1187,6 +1187,7 @@ function App() {
                   <WriteToBusPanel
                     targets={filterOptions.targets}
                     onClose={() => setIsSendOpen(false)}
+                    latestTelegram={latestTelegram}
                   />
                 )}
                 {isVisualizerOpen ? (

@@ -160,3 +160,80 @@ test('DPT-1 target renders On/Off and records the GA in recents', async () => {
   await waitFor(() => expect(screen.getByText(/Sent on to 12\/0\/0/)).toBeInTheDocument());
   expect(JSON.parse(localStorage.getItem('spectrumknx-recent-send-gas')!)).toEqual(['12/0/0']);
 });
+
+// ── Last value per row (#439) ────────────────────────────────────────────────
+
+const telegramOn = (address: string, over: Record<string, unknown> = {}) => ({
+  timestamp: '2026-01-01T10:00:00.000000+00:00',
+  source_address: '1.1.5', source_name: 'Sensor', target_address: address, target_name: null,
+  direction: 'Incoming', telegram_type: 'GroupValueWrite', simplified_type: 'Write',
+  dpt: '9.001', dpt_main: 9, dpt_sub: 1, dpt_name: 'Temperature', unit: '°C',
+  value_numeric: 21.5, value_json: null, value_formatted: '21.5', raw_data: '0c1a', raw_hex: '0x0c1a',
+  ...over,
+});
+
+const lastValueOf = () => screen.getByText('Last:').parentElement!;
+
+test('shows the last value of the entered group address (#439)', async () => {
+  const fetchMock = mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  // Nothing to show until a complete group address is entered.
+  expect(screen.queryByText('Last:')).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  await waitFor(() => expect(lastValueOf()).toHaveTextContent('21.5 °C'));
+  expect(lastValueOf()).toHaveTextContent('Write');
+  expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/telegrams/last?target_address=1%2F2%2F3'))).toBe(true);
+});
+
+test('says so when the group address has no recorded value', async () => {
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/telegrams/last': { telegrams: [] },
+  }));
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  await waitFor(() => expect(lastValueOf()).toHaveTextContent('no value yet'));
+});
+
+test('a read waits for the response, ignoring the read request itself (#439)', async () => {
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
+    '/api/knx/read': { status: 'sent' },
+  }));
+  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  await waitFor(() => expect(lastValueOf()).toHaveTextContent('21.5 °C'));
+
+  fireEvent.click(screen.getByRole('button', { name: /Read/ }));
+  await waitFor(() => expect(lastValueOf()).toHaveTextContent('waiting for response'));
+
+  // Our own read request comes back on the live feed: it has no value and must
+  // neither replace the shown one nor end the wait.
+  const readRequest = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T10:05:00.000000+00:00', telegram_type: 'GroupValueRead', simplified_type: 'Read',
+    value_numeric: null, value_formatted: null, raw_data: null, raw_hex: null,
+  });
+  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readRequest} />);
+  expect(lastValueOf()).toHaveTextContent('21.5 °C');
+  expect(lastValueOf()).toHaveTextContent('waiting for response');
+
+  // A telegram for another address changes nothing.
+  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={telegramOn('9/9/9', { value_formatted: '99' })} />);
+  expect(lastValueOf()).toHaveTextContent('21.5 °C');
+
+  const response = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T10:05:00.120000+00:00', telegram_type: 'GroupValueResponse', simplified_type: 'Response',
+    value_numeric: 22.3, value_formatted: '22.3',
+  });
+  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={response} />);
+  await waitFor(() => expect(lastValueOf()).toHaveTextContent('22.3 °C'));
+  expect(lastValueOf()).toHaveTextContent('Response');
+  expect(lastValueOf()).not.toHaveTextContent('waiting for response');
+});
