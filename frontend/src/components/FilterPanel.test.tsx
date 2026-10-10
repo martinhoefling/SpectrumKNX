@@ -219,3 +219,35 @@ test('history mode shows count bubbles when counts are supplied (#446)', () => {
   expect(screen.queryByText('41')).not.toBeInTheDocument();
   expect(screen.queryByText('0')).not.toBeInTheDocument();
 });
+
+// ── Switching single active filters off and on (#437) ────────────────────────
+
+test('in the Active view the checkbox switches an entry off, and only the × removes it (#437)', () => {
+  const onFiltersChange = vi.fn();
+  const { rerender } = render(
+    <FilterPanel options={GA_OPTIONS} activeFilters={ACTIVE} onFiltersChange={onFiltersChange} projectLoaded={true} />
+  );
+  const header = screen.getByText('Filter').parentElement!;
+  fireEvent.click(screen.getByRole('button', { name: 'Active filters' }));
+
+  // Ticking the row keeps the selection and marks it switched off.
+  fireEvent.click(screen.getByText('0/1/2'));
+  expect(onFiltersChange).toHaveBeenLastCalledWith({ ...ACTIVE, disabled: ['targets:0/1/2'] });
+
+  // Shown as still listed, dimmed, and the badge says how many apply.
+  const off = { ...ACTIVE, disabled: ['targets:0/1/2'] };
+  rerender(<FilterPanel options={GA_OPTIONS} activeFilters={off} onFiltersChange={onFiltersChange} projectLoaded={true} />);
+  expect(screen.getByText('0/1/2')).toBeInTheDocument();
+  expect(screen.getByText('0/1/2').closest('label')!.style.opacity).toBe('0.5');
+  expect(screen.getByText('1.2.3').closest('label')!.style.opacity).toBe('1');
+  expect(within(header).getByText('1/2')).toBeInTheDocument();
+
+  // Ticking again switches it back on.
+  fireEvent.click(screen.getByText('0/1/2'));
+  expect(onFiltersChange).toHaveBeenLastCalledWith({ ...ACTIVE, disabled: [] });
+
+  // The × removes the entry from the set.
+  const row = screen.getByText('0/1/2').closest('label')!.parentElement!;
+  fireEvent.click(within(row).getByTitle('Remove filter'));
+  expect(onFiltersChange).toHaveBeenLastCalledWith(expect.objectContaining({ sources: ['1.2.3'], targets: [] }));
+});

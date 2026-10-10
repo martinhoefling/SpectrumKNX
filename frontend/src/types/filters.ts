@@ -45,7 +45,58 @@ export interface ActiveFilters {
    * later as multiple filter instances (#370). Do not read this for matching.
    */
   sourceTargetRelation: 'AND' | 'OR';
+  /**
+   * Selections that are kept in the set but switched off (#437), as
+   * `filterKey()` strings. A switched-off entry stays listed under "Active
+   * filters" and can be switched back on, but does not filter anything —
+   * consumers apply `enabledFilters()` rather than reading the lists directly.
+   */
+  disabled: string[];
 }
+
+/** The filter lists a single entry can be switched off in. */
+export type FilterCategory = 'sources' | 'targets' | 'types' | 'directions' | 'dpts';
+const FILTER_CATEGORIES: FilterCategory[] = ['sources', 'targets', 'types', 'directions', 'dpts'];
+
+/** Identity of one selected entry inside `ActiveFilters.disabled`. */
+export const filterKey = (category: FilterCategory, value: string): string => `${category}:${value}`;
+
+export const isFilterDisabled = (f: ActiveFilters, category: FilterCategory, value: string): boolean =>
+  f.disabled.includes(filterKey(category, value));
+
+/** Switches one selected entry off, or back on. */
+export function toggleFilterDisabled(f: ActiveFilters, category: FilterCategory, value: string): ActiveFilters {
+  const key = filterKey(category, value);
+  return { ...f, disabled: f.disabled.includes(key) ? f.disabled.filter(k => k !== key) : [...f.disabled, key] };
+}
+
+/**
+ * Drops switched-off markers whose entry is no longer selected. Without this a
+ * removed entry would come back switched off the next time it is selected.
+ * Returns the same object when there is nothing to drop.
+ */
+export function pruneDisabled(f: ActiveFilters): ActiveFilters {
+  if (f.disabled.length === 0) return f;
+  const selected = new Set(FILTER_CATEGORIES.flatMap(c => f[c].map(v => filterKey(c, v))));
+  const kept = f.disabled.filter(k => selected.has(k));
+  return kept.length === f.disabled.length ? f : { ...f, disabled: kept };
+}
+
+/**
+ * The filters actually in effect: every selection that is not switched off.
+ * This is what matching, history loads and the "N filters" badges work on.
+ * Returns the same object when nothing is switched off.
+ */
+export function enabledFilters(f: ActiveFilters): ActiveFilters {
+  if (f.disabled.length === 0) return f;
+  const off = new Set(f.disabled);
+  const on = (c: FilterCategory) => f[c].filter(v => !off.has(filterKey(c, v)));
+  return { ...f, sources: on('sources'), targets: on('targets'), types: on('types'), directions: on('directions'), dpts: on('dpts'), disabled: [] };
+}
+
+/** Number of selected entries, switched off or not. */
+export const countSelections = (f: ActiveFilters): number =>
+  FILTER_CATEGORIES.reduce((n, c) => n + f[c].length, 0);
 
 /** The two telegram direction values, as set by the backend daemon. */
 export const DIRECTIONS = ['Incoming', 'Outgoing'];
@@ -60,6 +111,7 @@ export const DEFAULT_FILTERS: ActiveFilters = {
   deltaAfterMs: 0,
   deltaContextEnabled: true,
   sourceTargetRelation: 'AND',
+  disabled: [],
 };
 
 /** The before/after window actually in effect — zeroed while the toggle is off,
@@ -125,7 +177,7 @@ export function hasActiveFilters(f: ActiveFilters): boolean {
 
 /** The same filter settings with every selection cleared (master switch off). */
 export function withoutSelections(f: ActiveFilters): ActiveFilters {
-  return { ...f, sources: [], targets: [], types: [], directions: [], dpts: [] };
+  return { ...f, sources: [], targets: [], types: [], directions: [], dpts: [], disabled: [] };
 }
 
 export interface FilterCounts {

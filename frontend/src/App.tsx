@@ -55,6 +55,9 @@ import {
   countFilterOptions,
   effectiveDeltaContext,
   hasActiveFilters,
+  enabledFilters,
+  pruneDisabled,
+  countSelections,
   matchesTelegram,
   type ActiveFilters,
   type FilterOptions,
@@ -343,8 +346,12 @@ function App() {
   // The Visualization is independent of the main filter (#361): editing the
   // filter changes only the telegram list, never the plotted target selection.
   const handleFiltersChange = useCallback((newFilters: ActiveFilters | ((prev: ActiveFilters) => ActiveFilters)) => {
-    setActiveFilters(newFilters);
+    // Every change passes through here, so a removed entry also loses its
+    // switched-off marker (#437) and cannot come back switched off later.
+    setActiveFilters(prev => pruneDisabled(typeof newFilters === 'function' ? newFilters(prev) : newFilters));
   }, []);
+  // The filters in effect: selections minus the ones switched off (#437).
+  const appliedFilters = useMemo(() => enabledFilters(activeFilters), [activeFilters]);
 
   const refreshServerConfig = useCallback(() => {
     fetch(apiUrl('/api/server/config'))
@@ -706,7 +713,7 @@ function App() {
 
   // ── In-memory filtering (live view) ────────────────────────────────────────
   const deltaExpandedLive = useMemo(() => {
-    const f = activeFilters;
+    const f = appliedFilters;
     // Master toggle off (#370): show everything, keep the filter set intact.
     const noFilter =
       !filtersEnabled ||
@@ -726,7 +733,7 @@ function App() {
     const flags = f.deltaContextEnabled ? new Set(flaggedTelegramKeys) : EMPTY_KEY_SET;
 
     return expandWithDeltaContext(sortedLiveTelegrams, matches, anchorKey, flags, deltaBeforeMs, deltaAfterMs);
-  }, [sortedLiveTelegrams, activeFilters, filtersEnabled, flaggedTelegramKeys]);
+  }, [sortedLiveTelegrams, appliedFilters, filtersEnabled, flaggedTelegramKeys]);
   const filteredLiveTelegrams = deltaExpandedLive.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedLive.contextKeys;
@@ -734,9 +741,7 @@ function App() {
   // ── Count bubbles ───────────────────────────────────────────────
   const filterCounts = useMemo(() => countFilterOptions(sortedLiveTelegrams), [sortedLiveTelegrams]);
 
-  const activeFilterCount = hasActiveFilters(activeFilters)
-    ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.directions.length + activeFilters.dpts.length
-    : 0;
+  const activeFilterCount = countSelections(appliedFilters);
 
   // The filter pane and its toggle are tied to the Telegram List (#374): only
   // that panel consumes the main filter, so the pane shows only when it is active.
@@ -1271,7 +1276,7 @@ function App() {
                         title="Toggle filter panel"
                         style={{
                           position: 'relative',
-                          color: isFilterOpen || (hasActiveFilters(activeFilters) && filtersEnabled) ? 'var(--accent-primary)' : 'var(--text-dim)',
+                          color: isFilterOpen || (hasActiveFilters(appliedFilters) && filtersEnabled) ? 'var(--accent-primary)' : 'var(--text-dim)',
                         }}
                       >
                         <SlidersHorizontal size={18} />

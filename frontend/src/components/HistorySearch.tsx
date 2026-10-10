@@ -13,6 +13,8 @@ import { loadHistoryTelegrams, type LoadedRange } from '../utils/historyLoad';
 import { buildViewUrl, type VizViewState } from '../utils/viewUrl';
 import {
   countFilterOptions,
+  countSelections,
+  enabledFilters,
   effectiveDeltaContext,
   withoutSelections,
   hasActiveFilters,
@@ -134,11 +136,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
 
   // Master switch off (#436): behave as if no filter were set — for the rows
   // shown and for what the next load asks the server for — but keep the set.
-  const filtering = filtersEnabled && hasActiveFilters(activeFilters);
+  // Entries switched off one by one (#437) are left out as well.
   const effectiveFilters = useMemo(
-    () => (filtersEnabled ? activeFilters : withoutSelections(activeFilters)),
+    () => (filtersEnabled ? enabledFilters(activeFilters) : withoutSelections(activeFilters)),
     [filtersEnabled, activeFilters]
   );
+  const filtering = hasActiveFilters(effectiveFilters);
 
   const handleLoad = (loaded: Telegram[], meta?: { total_count: number; limit_reached: boolean }, range?: LoadedRange) => {
     setTelegrams(prev => {
@@ -165,11 +168,11 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   // per-message flags are set after the historical load already happened.
   const deltaExpandedHistory = useMemo(() => {
     const noFilter = !filtering;
-    const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, activeFilters));
+    const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, effectiveFilters));
     const { before, after } = effectiveDeltaContext(activeFilters);
     const flags = activeFilters.deltaContextEnabled ? new Set(flaggedKeys) : EMPTY_FLAG_SET;
     return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after);
-  }, [sortedTelegrams, activeFilters, filtering, flaggedKeys]);
+  }, [sortedTelegrams, activeFilters, effectiveFilters, filtering, flaggedKeys]);
   const filteredSortedTelegrams = deltaExpandedHistory.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedHistory.contextKeys;
@@ -199,9 +202,7 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
     [telegrams]
   );
 
-  const activeFilterCount = hasActiveFilters(activeFilters)
-    ? activeFilters.sources.length + activeFilters.targets.length + activeFilters.types.length + activeFilters.dpts.length
-    : 0;
+  const activeFilterCount = countSelections(enabledFilters(activeFilters));
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -328,7 +329,8 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               onClose={() => setIsVisualizerOpen(false)}
               getShareLink={loadedRange ? () => buildViewUrl({
                 plot: selectedVisualizationTargets,
-                filters: activeFilters,
+                // A shared link carries what is applied, not what is parked.
+                filters: enabledFilters(activeFilters),
                 range: loadedRange,
                 limit: loadLimit,
               }) : undefined}

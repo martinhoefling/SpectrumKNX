@@ -1,4 +1,4 @@
-import { DEFAULT_FILTERS, DIRECTIONS, type ActiveFilters } from '../types/filters';
+import { DEFAULT_FILTERS, DIRECTIONS, pruneDisabled, type ActiveFilters } from '../types/filters';
 import { getBasePath } from './basePath';
 
 /**
@@ -92,7 +92,7 @@ function sanitize(p: Partial<WorkspaceState>): WorkspaceState {
   const strings = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
   const f = (p.filters ?? {}) as Partial<ActiveFilters>;
-  return {
+  return withPrunedFilters({
     tab: TABS.includes(p.tab as WorkspaceTab) ? (p.tab as WorkspaceTab) : 'live',
     view: VIEWS.includes(p.view as WorkspaceView) ? (p.view as WorkspaceView) : 'none',
     filterOpen: typeof p.filterOpen === 'boolean' ? p.filterOpen : true,
@@ -107,12 +107,16 @@ function sanitize(p: Partial<WorkspaceState>): WorkspaceState {
       deltaAfterMs: Math.max(0, Number(f.deltaAfterMs) || 0),
       deltaContextEnabled: typeof f.deltaContextEnabled === 'boolean' ? f.deltaContextEnabled : true,
       sourceTargetRelation: f.sourceTargetRelation === 'OR' ? 'OR' : 'AND',
+      disabled: strings(f.disabled),
     },
     plot: strings(p.plot),
     lastSeenAddresses: strings(p.lastSeenAddresses),
     lastSeenMode: p.lastSeenMode === 'pa' ? 'pa' : 'ga',
-  };
+  });
 }
+
+/** A hand-edited URL may switch off entries that are not selected; drop those. */
+const withPrunedFilters = (ws: WorkspaceState): WorkspaceState => ({ ...ws, filters: pruneDisabled(ws.filters) });
 
 // ── URL (regular mode) ───────────────────────────────────────────────────────
 // Filter params reuse the share-link vocabulary from viewUrl.ts (#150) so the
@@ -130,6 +134,8 @@ export function buildMonitorSearch(state: WorkspaceState): string {
   if (f.types.length > 0) p.set('type', f.types.join(','));
   if (f.directions.length > 0) p.set('dir', f.directions.join(','));
   if (f.dpts.length > 0) p.set('dpt', f.dpts.join(','));
+  // Selections that are kept but switched off (#437), as `category:value`.
+  if (f.disabled.length > 0) p.set('off', f.disabled.join(','));
   if (f.deltaBeforeMs > 0) p.set('before', String(f.deltaBeforeMs));
   if (f.deltaAfterMs > 0) p.set('after', String(f.deltaAfterMs));
   if (!f.deltaContextEnabled) p.set('delta_off', '1');
@@ -164,6 +170,7 @@ export function parseMonitorSearch(search: string): WorkspaceState | null {
       deltaAfterMs: Number(p.get('after')) || 0,
       deltaContextEnabled: p.get('delta_off') !== '1',
       sourceTargetRelation: p.get('rel_st') === 'OR' ? 'OR' : 'AND',
+      disabled: list(p.get('off')),
     },
     plot: list(p.get('plot')),
     lastSeenAddresses: list(p.get('ls')),
