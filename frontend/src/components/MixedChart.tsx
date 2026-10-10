@@ -8,6 +8,7 @@ import { useThemeTick } from '../hooks/useTheme';
 import { seriesColor } from '../utils/seriesColors';
 import { isSeriesHidden, setSeriesHidden } from '../utils/legendVisibility';
 import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
+import { metricGutterWidth } from '../utils/chartGutter';
 
 interface MixedChartProps {
   bucket: ChartBucket;
@@ -29,36 +30,17 @@ interface MixedChartProps {
   /** Click (not drag-select) on the chart: navigate to the telegram list around
    * this timestamp (#308). */
   onTimeClick?: (ms: number) => void;
+  /** Left gutter shared with the other charts on screen, so all time axes
+   * start at the same column. Defaults to what this chart needs on its own. */
+  leftGutter?: number;
 }
 
 // Ensure we have a shared sync cursor across all charts
 const syncCursor = uPlot.sync('knx-time-axis');
-const MIN_GUTTER = 60;
-const MAX_GUTTER = 220;
-
-// Reused scratch canvas for text measurement (created lazily, once).
-let measureCanvas: HTMLCanvasElement | null = null;
-
-// Widens the y-axis gutter to fit the largest expected tick label instead of a
-// fixed guess, so e.g. "30000 lx" isn't clipped at the left edge (#349).
-const measureGutterWidth = (series: ChartBucket['series'], unit: string): number => {
-  let maxAbs = 0;
-  for (const s of series) {
-    for (const v of s.data) {
-      if (v != null && Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
-    }
-  }
-  const sample = `${Math.ceil(maxAbs).toLocaleString()} ${unit}`;
-  measureCanvas ??= document.createElement('canvas');
-  const ctx = measureCanvas.getContext('2d');
-  if (!ctx) return MIN_GUTTER + 90;
-  ctx.font = '11px sans-serif'; // approximates uPlot's default axis label font
-  return Math.min(MAX_GUTTER, Math.max(MIN_GUTTER, Math.ceil(ctx.measureText(sample).width) + 30));
-};
 
 export const MixedChart: React.FC<MixedChartProps> = ({
   bucket, minTime, maxTime, stepped, showDots, autoFollow = false, onZoomRangeChange,
-  groupLabel, locked, onToggleLock, onTimeClick,
+  groupLabel, locked, onToggleLock, onTimeClick, leftGutter: sharedGutter,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
@@ -81,7 +63,10 @@ export const MixedChart: React.FC<MixedChartProps> = ({
   }, []);
 
   const { unit, isBinary, timestamps, series } = bucket;
-  const leftGutter = useMemo(() => measureGutterWidth(series, unit), [series, unit]);
+  const leftGutter = useMemo(
+    () => sharedGutter ?? metricGutterWidth(series, unit),
+    [sharedGutter, series, unit],
+  );
 
   // Show a date alongside times once the visible range crosses midnight (#281).
   const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
