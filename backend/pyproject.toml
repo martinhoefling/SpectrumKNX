@@ -20,7 +20,7 @@ dependencies = [
     "pydantic",
     "python-dotenv",
     "python-multipart",
-    "SQLAlchemy",
+    "SQLAlchemy[asyncio]",
     "uvicorn",
     "websockets",
     "xknx>=3.18.0",
