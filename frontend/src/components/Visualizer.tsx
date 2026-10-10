@@ -194,7 +194,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
         ) : (
           <MixedChart
             key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]}
-            leftGutter={leftGutter}
+            leftGutter={leftGutter} heightKey={g.key}
             stepped={stepped} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange}
             groupLabel={g.groupCount > 1 ? `${g.groupIndex}/${g.groupCount}` : undefined}
             // Only the unit's currently-open chart is lockable; earlier ones are permanently closed (#349).
