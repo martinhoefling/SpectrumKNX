@@ -7,6 +7,10 @@ import {
   saveWorkspace,
   parseMonitorSearch,
   applyWorkspaceUrl,
+  buildMonitorSearch,
+  sameWorkspaceApartFromLayout,
+  workspaceFromSearch,
+  DEFAULT_WORKSPACE,
   type WorkspaceState,
   type WorkspaceView,
 } from './utils/workspaceState';
@@ -468,6 +472,11 @@ function App() {
   }, [loadLimit, visibleColumns, rateMode, restoreOnStartup]);
 
   // ── Persist workspace (#211) ────────────────────────────────────────────────
+  // What the address bar currently says, in normalised form, and how the next
+  // write goes: the first one after load only tidies the URL the app was
+  // opened with, so it must not add a history entry.
+  const syncedSearchRef = useRef(buildMonitorSearch(initialWorkspace ?? DEFAULT_WORKSPACE));
+  const urlWriteModeRef = useRef<'push' | 'replace'>('replace');
   const workspaceView: WorkspaceView = isDatabaseOpen
     ? 'database'
     : activePanel === 'list'
@@ -487,11 +496,51 @@ function App() {
       lastSeenMode,
     };
     const handle = setTimeout(() => {
-      if (isEmbedded()) saveWorkspace(workspace);
-      else applyWorkspaceUrl(workspace);
+      if (isEmbedded()) {
+        saveWorkspace(workspace);
+        return;
+      }
+      // Each settled change becomes one browser-history entry, so Back and
+      // Forward step through filters, panels and tabs. The debounce
+      // folds a multi-part change (e.g. "visualize this GA": targets + panel)
+      // into a single step.
+      const search = buildMonitorSearch(workspace);
+      const first = urlWriteModeRef.current === 'replace';
+      urlWriteModeRef.current = 'push';
+      if (search === syncedSearchRef.current) return;
+      // Showing or hiding the filter pane is layout, not a place to go back to.
+      const layoutOnly = sameWorkspaceApartFromLayout(search, syncedSearchRef.current);
+      syncedSearchRef.current = search;
+      applyWorkspaceUrl(workspace, first || layoutOnly ? 'replace' : 'push');
     }, 500);
     return () => clearTimeout(handle);
   }, [initialView, activeTab, workspaceView, isFilterOpen, activeFilters, selectedVisualizationTargets, lastSeenAddresses, lastSeenMode]);
+
+  // ── Browser Back / Forward ───────────────────────────────────────────
+  // The address bar is the source of truth for the entry navigated to: parse
+  // it and put the app into that workspace. Recording it as already synced
+  // keeps the effect above from pushing it again, which would cut off the
+  // forward history.
+  useEffect(() => {
+    if (initialView || isEmbedded()) return;
+    const onPopState = () => {
+      const ws = workspaceFromSearch(window.location.search);
+      syncedSearchRef.current = buildMonitorSearch(ws);
+      setActiveTab(ws.tab);
+      setIsDatabaseOpen(ws.view === 'database');
+      setActivePanel(ws.view === 'none' || ws.view === 'database' ? 'list' : ws.view);
+      if (ws.view !== 'building') setStatusDevice(null);
+      setIsFilterOpen(ws.filterOpen);
+      setActiveFilters(ws.filters);
+      setSelectedVisualizationTargets(ws.plot);
+      setLastSeenAddresses(ws.lastSeenAddresses);
+      setLastSeenMode(ws.lastSeenMode);
+      // An overlay left open would hide the workspace just navigated to.
+      setIsSettingsOpen(false);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [initialView]);
 
   // ── Persist UI Session State (#341) ──────────────────────────────────────────
   useEffect(() => {

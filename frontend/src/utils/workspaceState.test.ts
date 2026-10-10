@@ -7,6 +7,8 @@ import {
   buildMonitorSearch,
   parseMonitorSearch,
   applyWorkspaceUrl,
+  workspaceFromSearch,
+  sameWorkspaceApartFromLayout,
   type WorkspaceState,
 } from './workspaceState';
 import { DEFAULT_FILTERS } from '../types/filters';
@@ -138,5 +140,44 @@ describe('applyWorkspaceUrl', () => {
     applyWorkspaceUrl({ ...DEFAULT_WORKSPACE, tab: 'history' });
     applyWorkspaceUrl(DEFAULT_WORKSPACE);
     expect(window.location.search).toBe('');
+  });
+});
+
+describe('browser history', () => {
+  it('replace (the default) rewrites the current entry', () => {
+    const before = window.history.length;
+    applyWorkspaceUrl({ ...DEFAULT_WORKSPACE, tab: 'history' });
+    applyWorkspaceUrl({ ...DEFAULT_WORKSPACE, view: 'statistics' }, 'replace');
+    expect(window.history.length).toBe(before);
+    expect(window.location.search).toContain('panel=statistics');
+  });
+
+  it('push adds an entry per workspace', () => {
+    const before = window.history.length;
+    applyWorkspaceUrl({ ...DEFAULT_WORKSPACE, tab: 'history' }, 'push');
+    applyWorkspaceUrl({ ...DEFAULT_WORKSPACE, view: 'statistics' }, 'push');
+    expect(window.history.length).toBe(before + 2);
+    expect(window.location.search).toContain('panel=statistics');
+  });
+
+  it('reads a workspace back from the address bar, defaulting for a bare URL', () => {
+    const ws = sampleWorkspace();
+    expect(workspaceFromSearch('?' + buildMonitorSearch(ws))).toEqual(ws);
+    expect(workspaceFromSearch('')).toEqual(DEFAULT_WORKSPACE);
+    // Another view's query (a shared link) is not a monitor workspace.
+    expect(workspaceFromSearch('?view=viz&plot=1/2/3')).toEqual(DEFAULT_WORKSPACE);
+  });
+
+  it('treats a filter-pane toggle as layout, not as a place to go back to', () => {
+    const open = sampleWorkspace();
+    const closed = { ...open, filterOpen: !open.filterOpen };
+    expect(sameWorkspaceApartFromLayout(buildMonitorSearch(open), buildMonitorSearch(closed))).toBe(true);
+    // …including when everything else is default and one side is the bare URL.
+    expect(sameWorkspaceApartFromLayout(buildMonitorSearch({ ...DEFAULT_WORKSPACE, filterOpen: false }), '')).toBe(true);
+
+    const otherPanel = { ...open, view: 'statistics' as const };
+    expect(sameWorkspaceApartFromLayout(buildMonitorSearch(open), buildMonitorSearch(otherPanel))).toBe(false);
+    const otherFilter = { ...open, filters: { ...open.filters, targets: ['9/9/9'] } };
+    expect(sameWorkspaceApartFromLayout(buildMonitorSearch(open), buildMonitorSearch(otherFilter))).toBe(false);
   });
 });
