@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.0.0-beta.10
+
+### Added
+
+- **HTTP API for automations**: `POST /api/v1/knx/write` and `/api/v1/knx/read` let scripts,
+  Node-RED or any other system write to and read from the bus. Versioned and kept stable, with its
+  own token (Settings → *API token*, or `AUTH_API_TOKEN`) that opens these two endpoints and
+  nothing else. See section 12 of `DEPLOYMENT.md` (#156).
+- **Browser Back / Forward** steps through filters, panels and tabs.
+- **Switch single active filters off and on** without removing them: each entry in the *Active
+  filters* list has a checkbox, and the badge shows how many are applied (#437).
+- **Reorder the telegram list's columns** by dragging their headers; the order is remembered.
+- **Last value in the Write-to-Bus panel**: every row shows what was last seen on its group
+  address, updated live (#439).
+- **Jump to the previous / next marked row** from the marks pill (#442).
+- **Max. message rate** in the info bar: the busiest second of the current view (#441).
+- **Telegram counts in History Search's filter tree**, as in the Group Monitor (#446).
+- **Resizable side panes**: drag the edge of the filter and targets panes (#447).
+
+### Changed
+
+- **Time-Delta-Context can be limited to single messages**: the Δt toggle now has an explicit
+  "all" state (the default, as before). Switched to "none", only the rows you flag pull in their
+  neighbours (#319).
+- **All visualization charts share one left gutter**, so their time axes line up.
+- **The filter on/off switch in History Search** works like the one in the Group Monitor (#436).
+- **The selected row stays in place** while the list reloads or the Time-Delta-Context is toggled
+  (#435).
+- **Light theme**: readable contrast for the header bar, status texts, telegram types and
+  direction labels, warnings and errors, and the date picker (#438).
+- **Docs**: Unraid container template in the deployment guide (#466).
+
+### Fixed
+
+- **The health check and other small queries got slower as the database grew**; the store now picks
+  the requested rows before resolving their names (knx-telegram-store 0.14.1, #480).
+- **Companion add-on**: warns when Home Assistant's telegram database still uses the pre-UTC
+  timestamp format, instead of showing shifted times (#462).
+- **Visualization**: the Targets pane no longer shows a close button that did nothing.
+
 ## 2.0.0-beta.8
 
 ### Added
