@@ -8,7 +8,7 @@ const telegrams = [
   makeTelegram({ target_address: '1/2/4', target_name: 'Blind' }),
 ];
 
-test('the header X clears all selected targets rather than closing the panel (#347)', () => {
+test('the header button clears all selected targets and shows how many (#347)', () => {
   const onTargetsChange = vi.fn();
   render(
     <VisualizerSidebar
@@ -19,12 +19,12 @@ test('the header X clears all selected targets rather than closing the panel (#3
   );
 
   const clearBtn = screen.getByTitle('Clear all selected targets');
-  expect(clearBtn).not.toBeDisabled();
+  expect(clearBtn).toHaveTextContent('2');
   fireEvent.click(clearBtn);
   expect(onTargetsChange).toHaveBeenCalledWith([]);
 });
 
-test('the clear button is disabled when no targets are selected (#347)', () => {
+test('no clear button — and nothing resembling a close button — when no targets are selected', () => {
   render(
     <VisualizerSidebar
       telegrams={telegrams}
@@ -33,5 +33,5 @@ test('the clear button is disabled when no targets are selected (#347)', () => {
     />,
   );
 
-  expect(screen.getByTitle('Clear all selected targets')).toBeDisabled();
+  expect(screen.queryByTitle('Clear all selected targets')).not.toBeInTheDocument();
 });
