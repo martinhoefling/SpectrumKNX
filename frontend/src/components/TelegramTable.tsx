@@ -14,6 +14,7 @@ import { anchorKey } from '../utils/anchorKey';
 import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
 import { moveColumn, readColumnOrderPref, writeColumnOrderPref } from '../utils/columnOrder';
+import { rowDeltas } from '../utils/rowDeltas';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -96,7 +97,7 @@ interface ColumnDef {
 // Ordered column definitions — drives both header and body so they cannot drift.
 const COLUMNS: ColumnDef[] = [
   { id: 'time', label: 'TIME', sortKey: 'timestamp', defaultWidth: 120, minWidth: 90 },
-  { id: 'delta', label: 'Δt', defaultWidth: 100, minWidth: 60, visibleKey: 'delta' },
+  { id: 'delta', label: 'Δt', defaultWidth: 140, minWidth: 60, visibleKey: 'delta' },
   { id: 'source', label: 'SOURCE', sortKey: 'source_address', defaultWidth: 190, minWidth: 90 },
   { id: 'target', label: 'TARGET', sortKey: 'target_address', defaultWidth: 230, minWidth: 90 },
   { id: 'type', label: 'TYPE', sortKey: 'simplified_type', defaultWidth: 95, minWidth: 70, visibleKey: 'type' },
@@ -134,14 +135,23 @@ const getDPTLabel = (dpt_main: number | null) => {
   return 'Unknown DPT';
 };
 
-type TelegramRow = Telegram & { deltaStr: string | null; deltaMs: number | null };
+// deltaStr / deltaNextStr: the gaps to the rows displayed above and below.
+// deltaMs is the unsigned gap to the row above — what the Δt sort and the
+// Min/Max Δt chips work on.
+type TelegramRow = Telegram & { deltaStr: string | null; deltaNextStr: string | null; deltaMs: number | null };
 
-const formatDeltaMs = (diffMs: number): string => {
+const formatDeltaMs = (diffMs: number, sign: '+' | '-' = '+'): string => {
   const mm = String(Math.floor(diffMs / 60000)).padStart(2, '0');
   const ss = String(Math.floor((diffMs % 60000) / 1000)).padStart(2, '0');
   const ms = String(diffMs % 1000).padStart(3, '0');
-  return `+ ${mm}:${ss}.${ms}`;
+  return `${sign} ${mm}:${ss}.${ms}`;
 };
+
+// Tooltip spelling out one Δt line: which neighbour, and which came first.
+const deltaTitle = (text: string, neighbour: 'above' | 'below'): string =>
+  text.startsWith('+')
+    ? `${text.slice(2)} after the telegram ${neighbour}`
+    : `${text.slice(2)} before the telegram ${neighbour}`;
 
 const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
@@ -437,19 +447,23 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // Time deltas between consecutive rows, by visual (sorted) order — always
   // computed regardless of sort column, respecting whatever hierarchy is
   // active (#311).
+  //
+  // Each row carries the gap to both neighbours, signed by which of the two is
+  // older (see rowDeltas), so it reads the same in either sort direction.
+  const timeSortDirection = sortConfig[0]?.key === 'timestamp' ? sortConfig[0].direction : null;
   const naturalTelegramRows = useMemo<TelegramRow[]>(() => {
+    const times = quickFiltered.map(t => new Date(t.timestamp).getTime());
+    const deltas = rowDeltas(times, timeSortDirection);
     return quickFiltered.map((t, idx) => {
-      let deltaStr: string | null = null;
-      let deltaMs: number | null = null;
-      if (idx > 0) {
-        const curr = new Date(t.timestamp).getTime();
-        const prev = new Date(quickFiltered[idx - 1].timestamp).getTime();
-        deltaMs = Math.abs(curr - prev);
-        deltaStr = formatDeltaMs(deltaMs);
-      }
-      return { ...t, deltaStr, deltaMs };
+      const { above, below } = deltas[idx];
+      return {
+        ...t,
+        deltaStr: above ? formatDeltaMs(above.ms, above.sign) : null,
+        deltaNextStr: below ? formatDeltaMs(below.ms, below.sign) : null,
+        deltaMs: idx > 0 ? Math.abs(times[idx] - times[idx - 1]) : null,
+      };
     });
-  }, [quickFiltered]);
+  }, [quickFiltered, timeSortDirection]);
 
   // ── Delta-sort exclusive mode (#311) ────────────────────────────────────────
   // Sorting by the Δt column is a self-referential operation (deltas are
@@ -1125,11 +1139,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
             >
               {flagged ? <CircleDot size={12} /> : <Circle size={12} />}
             </button>
-            {t.deltaStr && (
-              <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
-                {t.deltaStr}
-              </div>
-            )}
+            {/* Both neighbours: the gap to the row above, then to the row below.
+                Each keeps its line even when empty, so the two stay in place. */}
+            <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.35, whiteSpace: 'nowrap' }}>
+              {/* Under the exclusive Δt sort the rows are reordered but keep the
+                  gaps of their original neighbours, so "above/below" would lie. */}
+              <div title={t.deltaStr && !deltaSortActive ? deltaTitle(t.deltaStr, 'above') : undefined}>{t.deltaStr ?? '\u00a0'}</div>
+              <div title={t.deltaNextStr && !deltaSortActive ? deltaTitle(t.deltaNextStr, 'below') : undefined}>{t.deltaNextStr ?? '\u00a0'}</div>
+            </div>
           </div>
         );
       }
@@ -1312,7 +1329,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 style={infoChipBtnStyle} title="Jump to the smallest time gap in the current view"
                 onClick={() => gotoIndex(infoMetrics.minDeltaIdx)}
               >
-                Min Δt: {telegramRows[infoMetrics.minDeltaIdx].deltaStr}
+                Min Δt: {formatDeltaMs(telegramRows[infoMetrics.minDeltaIdx].deltaMs!)}
               </button>
             )}
             {infoMetrics.maxDeltaIdx !== -1 && (
@@ -1320,7 +1337,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 style={infoChipBtnStyle} title="Jump to the largest time gap in the current view"
                 onClick={() => gotoIndex(infoMetrics.maxDeltaIdx)}
               >
-                Max Δt: {telegramRows[infoMetrics.maxDeltaIdx].deltaStr}
+                Max Δt: {formatDeltaMs(telegramRows[infoMetrics.maxDeltaIdx].deltaMs!)}
               </button>
             )}
             {infoMetrics.peak && (

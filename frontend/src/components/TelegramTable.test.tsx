@@ -408,3 +408,30 @@ test('dragging a column header onto another reorders header and rows, and is rem
     .toEqual(['Δt', 'TARGET', 'SOURCE', 'TYPE', 'DPT', 'VALUE', 'TIME']);
   localStorage.removeItem('spectrum-knx.columnOrder');
 });
+
+test('Δt shows the gap to both neighbouring rows, signed by which one is older', () => {
+  const at = (ts: string) => makeTelegram({ timestamp: ts, raw_hex: ts });
+  const telegrams = [
+    at('2024-01-01T10:00:09.000Z'),
+    at('2024-01-01T10:00:05.900Z'),
+    at('2024-01-01T10:00:05.000Z'),
+  ];
+  const props = {
+    visibleColumns, onSort: vi.fn(), activeFilters: DEFAULT_FILTERS, onQuickFilter: vi.fn(), onQuickVisualize: vi.fn(),
+  };
+  const { container, rerender } = render(<TelegramTable telegrams={telegrams} sortConfig={sortConfig} {...props} />);
+  const text = () => Array.from(container.querySelectorAll('.log-row')).map(r => r.textContent ?? '');
+
+  // Newest first: the row above is younger (-), the row below older (+).
+  expect(text()[0]).toContain('+ 00:03.100');
+  expect(text()[0]).not.toContain('- 00:');
+  expect(text()[1]).toContain('- 00:03.100');
+  expect(text()[1]).toContain('+ 00:00.900');
+  expect(text()[2]).toContain('- 00:00.900');
+  expect(text()[2]).not.toContain('+ 00:');
+
+  // Oldest first: the same gaps, mirrored.
+  rerender(<TelegramTable telegrams={[...telegrams].reverse()} sortConfig={[{ key: 'timestamp', direction: 'asc' }]} {...props} />);
+  expect(text()[1]).toContain('+ 00:00.900');
+  expect(text()[1]).toContain('- 00:03.100');
+});
