@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { LineChart, X, Search, Filter, Clock } from 'lucide-react';
+import { LineChart, ListX, Search, Filter, Clock } from 'lucide-react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { OptionRow } from './FilterPanel';
 import { SendToGaPopover } from './SendToGaPopover';
@@ -85,17 +85,20 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
         <span style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <LineChart size={16} style={{ color: 'var(--accent-primary)' }} /> Targets
         </span>
-        {/* Clears the checkmarks, like the filter panel's clear-all (#347). The
-            panel itself is closed with the X in the chart-area header. */}
-        <button
-          onClick={() => onTargetsChange([])}
-          disabled={selectedTargets.length === 0}
-          className="icon-button"
-          title="Clear all selected targets"
-          style={{ padding: '0.2rem', opacity: selectedTargets.length === 0 ? 0.4 : 1 }}
-        >
-          <X size={14} />
-        </button>
+        {/* Clears the checkmarks (#347). Shown only while there is something to
+            clear, and not drawn as an X: this pane cannot be closed, and a
+            permanent greyed-out X read as a close button that did nothing. The
+            Visualization panel itself closes with the X in the chart header. */}
+        {selectedTargets.length > 0 && (
+          <button
+            onClick={() => onTargetsChange([])}
+            className="icon-button"
+            title="Clear all selected targets"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.2rem 0.35rem', fontSize: '0.7rem', color: 'var(--text-dim)' }}
+          >
+            <ListX size={14} /> {selectedTargets.length}
+          </button>
+        )}
       </div>
 
       <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
