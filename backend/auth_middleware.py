@@ -39,6 +39,9 @@ _OPEN_PREFIXES = (
 # are served freely — they only render a login screen.
 _GUARDED_PREFIXES = ("/api/", "/ws/")
 
+# Versioned endpoints meant for other systems (#156).
+_EXTERNAL_API_PREFIX = "/api/v1/"
+
 
 def _is_open(path: str) -> bool:
     """Exact match or a path segment beneath it.
@@ -91,6 +94,18 @@ class AuthMiddleware:
                 return
             await self.app(scope, receive, send)
             return
+
+        # The external API accepts its own bearer token in place of a session.
+        # Once a token exists it is the way in: with UI login off there is no
+        # session to fall back on, so the token is then required. With UI
+        # login on, a logged-in user or an ingress peer passes as well.
+        if path.startswith(_EXTERNAL_API_PREFIX):
+            if auth.verify_api_token(_bearer(scope)):
+                await self.app(scope, receive, send)
+                return
+            if auth.api_token_required() and not auth.ui_auth_enabled():
+                await self._reject(scope, send, 401, "API token required")
+                return
 
         # Auth off: everything is open, including first-run setup via
         # /api/auth/enable. Once it is on, that endpoint is treated like any

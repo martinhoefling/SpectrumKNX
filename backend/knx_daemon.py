@@ -8,7 +8,7 @@ from typing import Any
 
 from knx_telegram_store import StoredTelegram
 from xknx import XKNX
-from xknx.core import XknxConnectionState
+from xknx.core import ValueReader, XknxConnectionState
 from xknx.dpt import DPTArray, DPTBase, DPTBinary
 from xknx.io import ConnectionConfig, ConnectionType, SecureConfig
 from xknx.telegram import Telegram as XknxTelegram
@@ -494,6 +494,38 @@ def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
     if isinstance(payload, int):
         return DPTBinary(payload)
     return DPTArray(payload)
+
+
+def project_dpt(address: str) -> str | None:
+    """The DPT the loaded ETS project assigns to a group address, e.g. "9.001"."""
+    if not global_knx_project:
+        return None
+    dpt = (global_knx_project.get("group_addresses", {}).get(address) or {}).get("dpt")
+    if not dpt or dpt.get("main") is None:
+        return None
+    sub = dpt.get("sub")
+    return f"{dpt['main']}.{sub:03d}" if sub is not None else str(dpt["main"])
+
+
+async def read_group_value_response(address: str, dpt: str | None = None) -> tuple[bool, Any]:
+    """Send a GroupValueRead and wait for the answer: (responded, value).
+
+    The value is decoded with the DPT when one is given, otherwise it is the
+    raw payload."""
+    if xknx_instance is None:
+        raise RuntimeError("Not connected to the KNX bus")
+    transcoder = None
+    if dpt is not None:
+        transcoder = DPTBase.parse_transcoder(dpt)
+        if transcoder is None:
+            raise ValueError(f"Unknown DPT type: {dpt}")
+    response = await ValueReader(xknx_instance, GroupAddress(address)).read()
+    if response is None:
+        return False, None
+    value = response.payload.value  # type: ignore[union-attr]
+    if transcoder is not None:
+        return True, transcoder.from_knx(value)
+    return True, value.value
 
 
 async def send_group_value(address: str, payload: Any, dpt: str | None = None, response: bool = False) -> None:

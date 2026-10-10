@@ -863,7 +863,7 @@ AUTH_UI_ENABLED=false
 ```
 
 Only as a last resort, delete `auth.json` from the state directory (next to the ETS project — see
-below). That resets accounts **and** the MCP token.
+below). That resets accounts **and** the MCP and API tokens.
 
 Passwords are stored as scrypt hashes and cannot be read back or edited by hand; there is
 deliberately no way to write a plaintext password into the file.
@@ -890,6 +890,10 @@ Alternatively set `AUTH_MCP_TOKEN` in the environment, which takes precedence an
 writable state directory — useful with Kubernetes secrets. While it is set, the token cannot be
 managed from the UI.
 
+The **API token** for the [HTTP API for automations](#12-http-api-for-automations) works the same
+way: Settings → *API token* → **Generate**, or `AUTH_API_TOKEN` in the environment. The two tokens
+are separate on purpose — neither one opens the other endpoint, and neither opens the UI.
+
 ### 11.6 Where state is kept
 
 `auth.json`, owner-readable only, in the same directory as the ETS project: `/project` for Docker
@@ -906,6 +910,7 @@ in again.
 | --- | --- | --- |
 | `AUTH_UI_ENABLED` | Force UI login on or off, overriding the stored setting. Unset means "use the stored setting". | unset |
 | `AUTH_MCP_TOKEN` | Supply the MCP token directly; takes precedence over the stored one. | unset |
+| `AUTH_API_TOKEN` | Supply the token for the [HTTP API](#12-http-api-for-automations) directly; takes precedence over the stored one. | unset |
 | `AUTH_COOKIE_SECURE` | Mark the session cookie `Secure`. Only for HTTPS deployments — on plain HTTP the cookie would never be sent. | `false` |
 | `AUTH_INGRESS_PEER` | Address Home Assistant ingress is expected to arrive from. | `172.30.32.2` |
 | `AUTH_STATE_DIR` | Override where `auth.json` is kept. | next to the ETS project |
@@ -930,3 +935,81 @@ with credentials lets any website read authenticated responses.
 Set `CORS_ORIGINS` to an explicit, comma-separated list of origins if you genuinely need
 credentialed cross-origin access; credentials are then offered to those origins only. The bundled
 UI does not need this — it is served from the same origin, and dev mode goes through Vite's proxy.
+
+---
+
+## 12. HTTP API for Automations
+
+Two endpoints let other systems — a script, Node-RED, a logic engine, anything that can make an
+HTTP request — write to and read from the KNX bus. They live under `/api/v1/` and their request
+and response format is kept stable. The other `/api/...` endpoints belong to the web UI and may
+change with it; do not build on them.
+
+Both need a live bus connection and `KNX_ALLOW_WRITE=true` (see [KNX Settings](#knx-settings)).
+They are not available in the Home Assistant companion add-on, which has no bus connection of
+its own — use Home Assistant's `knx.send` there.
+
+### 12.1 Access
+
+| Setup | `/api/v1/` accepts |
+| --- | --- |
+| No login, no API token | any request — as open as the rest of the installation |
+| API token set | requests with `Authorization: Bearer <token>` |
+| UI login on, no API token | logged-in browser sessions only |
+| UI login on and API token set | the token, or a logged-in session |
+
+Create the token under Settings → *API token* → **Generate** (shown once), or set
+`AUTH_API_TOKEN` — see [11.5](#115-mcp-token). The token opens these endpoints and nothing else.
+
+Setting an API token does not by itself protect the web UI or the UI's own endpoints. If the
+port is reachable by anything you do not trust, turn on [UI login](#111-turning-ui-login-on) too.
+
+### 12.2 Write a value
+
+```bash
+curl -X POST http://<host>:8765/api/v1/knx/write \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"address": "1/2/3", "value": 21.5, "dpt": "9.001"}'
+```
+
+```json
+{ "status": "sent", "address": "1/2/3", "dpt": "9.001" }
+```
+
+| Field | |
+| --- | --- |
+| `address` | Group address, e.g. `"1/2/3"`. |
+| `value` | The decoded value for the DPT: `true`, `50`, `21.5`, `"12:30:00"` (DPT 10), `"2026-01-31"` (DPT 11). |
+| `dpt` | Optional. Without it the DPT the loaded ETS project assigns to the address is used. If the project does not know the address either, the value is sent raw: an integer as a 6-bit payload, a list of integers as bytes. |
+
+The response's `dpt` tells you which DPT was used (`null` for a raw send). `sent` means the
+telegram was handed to the bus connection; KNX group communication has no end-to-end
+acknowledgement.
+
+### 12.3 Read a value
+
+```bash
+curl -X POST http://<host>:8765/api/v1/knx/read \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"address": "1/2/3"}'
+```
+
+```json
+{ "status": "ok", "address": "1/2/3", "dpt": "9.001", "value": 21.5 }
+```
+
+This sends a GroupValueRead and waits for a device to answer. `dpt` is optional and resolved as
+for writing; without any DPT the raw payload is returned. Pass `"wait": false` to only trigger
+the read and return immediately.
+
+### 12.4 Errors
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Invalid address, unknown DPT, or a value that does not fit the DPT. `detail` says which. |
+| `401` | Missing or wrong token. |
+| `403` | Sending to the bus is disabled (`KNX_ALLOW_WRITE=false`). |
+| `409` | Not connected to the KNX bus. |
+| `504` | Read only: no device answered. |

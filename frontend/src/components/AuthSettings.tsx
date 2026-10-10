@@ -27,7 +27,8 @@ export function AuthSettings({ status, onChanged }: AuthSettingsProps) {
   const [newUser, setNewUser] = useState({ username: '', password: '' });
   const [setup, setSetup] = useState({ username: '', password: '' });
   const [newPassword, setNewPassword] = useState('');
-  const [mcpToken, setMcpToken] = useState<string | null>(null);
+  // Freshly generated tokens, by endpoint — each is displayed exactly once.
+  const [newTokens, setNewTokens] = useState<Record<string, string | null>>({});
 
   const call = useCallback(async (path: string, init?: RequestInit) => {
     // State is only touched after the request resolves: clearing the error up
@@ -62,6 +63,55 @@ export function AuthSettings({ status, onChanged }: AuthSettingsProps) {
   }, [status.ui_auth_enabled, status.authenticated, usersNonce]);
 
   const label = (text: string) => <span style={{ color: 'var(--text-dim)' }}>{text}</span>;
+
+  const tokenSection = (title: string, path: string, envName: string, required: boolean, fromEnv: boolean) => {
+    const fresh = newTokens[path];
+    const setFresh = (token: string | null) => setNewTokens(prev => ({ ...prev, [path]: token }));
+    return (
+      <div style={{ marginTop: '0.6rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
+        <div style={row}>
+          {label(title)}
+          <span style={{ fontSize: '0.75rem', color: required ? 'var(--success)' : 'var(--text-dim)' }}>
+            {fromEnv ? `● From ${envName}` : required ? '● Required' : '○ Off'}
+          </span>
+        </div>
+        {!fromEnv && (
+          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+            <button
+              style={button}
+              onClick={async () => {
+                const body = await call(path, { method: 'POST' });
+                if (body) { setFresh(body.token); onChanged(); }
+              }}
+            >
+              {required ? 'Regenerate' : 'Generate'}
+            </button>
+            {required && (
+              <button
+                style={{ ...button, borderColor: 'var(--border-color)', color: 'var(--text-dim)', background: 'transparent' }}
+                onClick={async () => {
+                  if (await call(path, { method: 'DELETE' })) { setFresh(null); onChanged(); }
+                }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        )}
+        {fresh && (
+          <div style={{
+            marginTop: '0.45rem', padding: '0.45rem 0.55rem', borderRadius: 6, fontSize: '0.72rem',
+            background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning, #f59e0b)',
+          }}>
+            <div style={{ color: 'var(--warning-text)', fontWeight: 600, marginBottom: '0.3rem' }}>
+              Copy this now — it is not shown again.
+            </div>
+            <code style={{ wordBreak: 'break-all', color: 'var(--text-main)' }}>{fresh}</code>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
@@ -208,49 +258,9 @@ export function AuthSettings({ status, onChanged }: AuthSettingsProps) {
             </button>
           </div>
 
-          {/* MCP token — shown once, stored hashed. */}
-          <div style={{ marginTop: '0.6rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
-            <div style={row}>
-              {label('MCP token:')}
-              <span style={{ fontSize: '0.75rem', color: status.mcp_token_required ? 'var(--success)' : 'var(--text-dim)' }}>
-                {status.mcp_token_env ? '● From AUTH_MCP_TOKEN' : status.mcp_token_required ? '● Required' : '○ Off'}
-              </span>
-            </div>
-            {!status.mcp_token_env && (
-              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
-                <button
-                  style={button}
-                  onClick={async () => {
-                    const body = await call('/api/auth/mcp-token', { method: 'POST' });
-                    if (body) { setMcpToken(body.token); onChanged(); }
-                  }}
-                >
-                  {status.mcp_token_required ? 'Regenerate' : 'Generate'}
-                </button>
-                {status.mcp_token_required && (
-                  <button
-                    style={{ ...button, borderColor: 'var(--border-color)', color: 'var(--text-dim)', background: 'transparent' }}
-                    onClick={async () => {
-                      if (await call('/api/auth/mcp-token', { method: 'DELETE' })) { setMcpToken(null); onChanged(); }
-                    }}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            )}
-            {mcpToken && (
-              <div style={{
-                marginTop: '0.45rem', padding: '0.45rem 0.55rem', borderRadius: 6, fontSize: '0.72rem',
-                background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning, #f59e0b)',
-              }}>
-                <div style={{ color: 'var(--warning-text)', fontWeight: 600, marginBottom: '0.3rem' }}>
-                  Copy this now — it is not shown again.
-                </div>
-                <code style={{ wordBreak: 'break-all', color: 'var(--text-main)' }}>{mcpToken}</code>
-              </div>
-            )}
-          </div>
+          {/* Bearer tokens — shown once, stored hashed. */}
+          {tokenSection('MCP token:', '/api/auth/mcp-token', 'AUTH_MCP_TOKEN', status.mcp_token_required, status.mcp_token_env)}
+          {tokenSection('API token:', '/api/auth/api-token', 'AUTH_API_TOKEN', status.api_token_required, status.api_token_env)}
 
           <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.7rem' }}>
             <button
