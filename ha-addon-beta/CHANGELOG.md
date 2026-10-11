@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.0-beta.11
+
+### Added
+
+- **Resizable charts**: drag the bottom edge of a metric chart in the visualization to change its
+  height; double-click resets it. The height is remembered per chart (#185).
+
+### Changed
+
+- **Play / pause sits with the buffer actions** in the header, next to clear and load history, so
+  it can be reached from every panel (#374).
+- **Last Seen Values is live or frozen**: live shows each matching telegram as it arrives, without
+  the former 10-second refresh; frozen keeps the list and shows how many newer telegrams are
+  waiting (#374).
+
+### Fixed
+
+- **Password-protected ETS project could not be uploaded** in the Windows and Debian packages
+  ("Incorrect password or invalid file"): the stored password is now read when `KNX_PROJECT_PATH`
+  is set (#502).
+- **Debian package**: the service failed to start because `greenlet` was missing; 2.0.0-beta.10
+  shipped without a `.deb` for that reason (#498).
+- **Home Assistant**: the "more information" link under the add-on description now works (#499).
+
 ## 2.0.0-beta.10
 
 ### Added
