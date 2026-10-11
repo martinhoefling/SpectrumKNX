@@ -252,6 +252,7 @@ async def test_connection_state_cb_broadcasts(mock_broadcast_event):
     import knx_daemon
 
     instance = MagicMock()
+    knx_daemon._connection_log.reset()
     knx_daemon._register_connection_state_cb(instance)
     state_cb = instance.connection_manager.register_connection_state_changed_cb.call_args[0][0]
 
@@ -564,3 +565,106 @@ async def test_load_project_reads_password_next_to_custom_path(monkeypatch, tmp_
         assert await knx_daemon._load_project_data() is True
 
     mock_proj.assert_called_once_with(str(proj_file), password=expected)
+
+
+# ── Connection log during an outage (#504) ───────────────────────────────────
+
+
+def _records(caplog):
+    return [(r.levelname, r.getMessage()) for r in caplog.records if r.name == "knx_daemon"]
+
+
+def test_an_outage_is_logged_once_not_per_retry(caplog):
+    import logging
+
+    import knx_daemon
+
+    log = knx_daemon._ConnectionLog()
+    C, D, K = XknxConnectionState.CONNECTING, XknxConnectionState.DISCONNECTED, XknxConnectionState.CONNECTED
+    caplog.set_level(logging.INFO, logger="knx_daemon")
+
+    assert log.handle(C, 0) == "connecting"
+    assert log.handle(K, 1) == "connected"
+    caplog.clear()
+
+    # The tunnel drops; xknx retries every 3 seconds for five minutes.
+    broadcasts = [log.handle(D, 10)]
+    for attempt in range(100):
+        broadcasts.append(log.handle(C, 13 + attempt * 3))
+        broadcasts.append(log.handle(D, 14 + attempt * 3))
+
+    assert _records(caplog) == [("WARNING", "KNX connection lost - reconnecting")]
+    # Clients are told once and keep showing "disconnected".
+    assert [b for b in broadcasts if b] == ["disconnected"]
+
+    caplog.clear()
+    assert log.handle(C, 320) is None
+    assert log.handle(K, 321) == "connected"
+    assert _records(caplog) == [("INFO", "KNX connection restored after 5m 11s (100 failed attempts)")]
+
+
+def test_a_long_outage_is_mentioned_at_a_slow_interval(caplog):
+    import logging
+
+    import knx_daemon
+
+    log = knx_daemon._ConnectionLog()
+    C, D, K = XknxConnectionState.CONNECTING, XknxConnectionState.DISCONNECTED, XknxConnectionState.CONNECTED
+    log.handle(K, 0)
+    log.handle(D, 0)
+    caplog.set_level(logging.INFO, logger="knx_daemon")
+    caplog.clear()
+
+    for second in range(3, 3600, 3):  # one hour of retries
+        log.handle(C, second)
+        log.handle(D, second + 1)
+
+    messages = _records(caplog)
+    assert len(messages) == 5  # every ten minutes, not 2400 lines
+    assert all(level == "WARNING" and msg.startswith("KNX bus still unreachable after") for level, msg in messages)
+    assert messages[0][1] == "KNX bus still unreachable after 10m 1s (200 failed attempts)"
+
+
+def test_initial_connect_failures_count_as_one_outage(caplog):
+    import logging
+
+    import knx_daemon
+
+    log = knx_daemon._ConnectionLog()
+    C, D, K = XknxConnectionState.CONNECTING, XknxConnectionState.DISCONNECTED, XknxConnectionState.CONNECTED
+    caplog.set_level(logging.INFO, logger="knx_daemon")
+
+    broadcasts = [log.handle(C, 0), log.handle(D, 1)]
+    for attempt in range(1, 6):
+        broadcasts += [log.handle(C, attempt * 30), log.handle(D, attempt * 30 + 1)]
+    broadcasts.append(log.handle(K, 200))
+
+    assert [b for b in broadcasts if b] == ["connecting", "disconnected", "connected"]
+    assert _records(caplog) == [
+        ("INFO", "KNX connection state changed: CONNECTING"),
+        ("INFO", "KNX connection state changed: DISCONNECTED"),
+        ("INFO", "KNX connection restored after 3m 19s (6 failed attempts)"),
+    ]
+
+
+def test_a_deliberate_stop_is_not_reported_as_an_outage(caplog):
+    import logging
+
+    import knx_daemon
+
+    log = knx_daemon._ConnectionLog()
+    log.handle(XknxConnectionState.CONNECTED, 0)
+    caplog.set_level(logging.INFO, logger="knx_daemon")
+    caplog.clear()
+
+    log.reset()
+    assert log.handle(XknxConnectionState.DISCONNECTED, 1) == "disconnected"
+    assert _records(caplog) == [("INFO", "KNX connection state changed: DISCONNECTED")]
+
+
+def test_format_duration():
+    import knx_daemon
+
+    assert knx_daemon._format_duration(42.9) == "42s"
+    assert knx_daemon._format_duration(311) == "5m 11s"
+    assert knx_daemon._format_duration(7500) == "2h 5m"

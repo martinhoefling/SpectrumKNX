@@ -3,6 +3,7 @@ import contextlib
 import json
 import logging
 import os
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -104,19 +105,110 @@ async def _load_project_data() -> bool:
         return False
 
 
+# How often a still-ongoing outage is mentioned in the log.
+_OUTAGE_REMINDER_SECONDS = 600.0
+
+
+class _ConnectionLog:
+    """Logs and broadcasts what happened to the bus connection, not every state flip.
+
+    While the gateway is away xknx retries every few seconds, and each attempt
+    passes through CONNECTING and back to DISCONNECTED. Logging and
+    broadcasting every one of those filled the log with tens of thousands of
+    identical lines a day (#504). An outage is reported when it starts, at a
+    slow interval while it lasts, and when it ends.
+    """
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.connected = False
+        self.outage_since: float | None = None
+        self.attempts = 0
+        self.last_reminder = 0.0
+        self.last_broadcast: str | None = None
+
+    def handle(self, state: XknxConnectionState, now: float) -> str | None:
+        """Log the state change; returns the state name to broadcast, or None."""
+        if state == XknxConnectionState.CONNECTED:
+            if self.outage_since is not None and self.attempts > 0:
+                logger.info(
+                    "KNX connection restored after %s (%d failed attempt%s)",
+                    _format_duration(now - self.outage_since),
+                    self.attempts,
+                    "" if self.attempts == 1 else "s",
+                )
+            else:
+                logger.info("KNX connection state changed: CONNECTED")
+            self.connected = True
+            self.outage_since = None
+            self.attempts = 0
+        elif state == XknxConnectionState.DISCONNECTED:
+            if self.connected:
+                logger.warning("KNX connection lost - reconnecting")
+                self.connected = False
+                self.outage_since = self.last_reminder = now
+                self.attempts = 0
+            elif self.outage_since is None:
+                # First failed attempt of an initial connect.
+                logger.info("KNX connection state changed: DISCONNECTED")
+                self.outage_since = self.last_reminder = now
+                self.attempts = 1
+            else:
+                self.attempts += 1
+                if now - self.last_reminder >= _OUTAGE_REMINDER_SECONDS:
+                    self.last_reminder = now
+                    logger.warning(
+                        "KNX bus still unreachable after %s (%d failed attempts)",
+                        _format_duration(now - self.outage_since),
+                        self.attempts,
+                    )
+                else:
+                    logger.debug("KNX connection state changed: DISCONNECTED")
+        elif self.outage_since is not None:
+            # A retry during an outage: clients keep showing "disconnected".
+            logger.debug("KNX connection state changed: %s", state.name)
+            return None
+        else:
+            logger.info("KNX connection state changed: %s", state.name)
+
+        name = state.name.lower()
+        if name == self.last_broadcast:
+            return None
+        self.last_broadcast = name
+        return name
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    return f"{seconds // 3600}h {seconds % 3600 // 60}m"
+
+
+# Module-level, not per XKNX instance: the initial connect replaces the
+# instance on every failed attempt, and those belong to one outage.
+_connection_log = _ConnectionLog()
+
+
 def _register_connection_state_cb(instance: XKNX) -> None:
     """Log connection state changes and push them to websocket clients."""
 
     def _on_state_change(state: XknxConnectionState) -> None:
         if xknx_instance is not instance:
             return  # event from a replaced instance
-        logger.info(f"KNX connection state changed: {state.name}")
+        name = _connection_log.handle(state, time.monotonic())
+        if name is None:
+            return
         asyncio.get_running_loop().create_task(
             manager.broadcast_event(
                 {
                     "type": "connection_state",
                     "connected": state == XknxConnectionState.CONNECTED,
-                    "state": state.name.lower(),
+                    "state": name,
                     "timestamp": datetime.now(UTC),
                 }
             )
@@ -125,16 +217,20 @@ def _register_connection_state_cb(instance: XKNX) -> None:
     instance.connection_manager.register_connection_state_changed_cb(_on_state_change)
 
 
-def _create_xknx_instance() -> XKNX:
-    """Create a configured XKNX instance with telegram and state callbacks registered."""
+def _create_xknx_instance(quiet: bool = False) -> XKNX:
+    """Create a configured XKNX instance with telegram and state callbacks registered.
+
+    `quiet` logs the connection parameters at debug level only — for the
+    repeated attempts of an ongoing outage (#504)."""
     connection_config = _build_connection_config()
-    logger.info(
+    logger.log(
+        logging.DEBUG if quiet else logging.INFO,
         f"Connecting to KNX bus: type={connection_config.connection_type.name}, "
         f"gateway={connection_config.gateway_ip if connection_config.gateway_ip else 'AUTO'}, "
         f"port={connection_config.gateway_port}, "
         f"local_ip={connection_config.local_ip if connection_config.local_ip else 'default'}, "
         f"route_back={connection_config.route_back}, "
-        f"secure={'yes' if connection_config.secure_config else 'no'}"
+        f"secure={'yes' if connection_config.secure_config else 'no'}",
     )
     instance = XKNX(connection_config=connection_config)
 
@@ -158,21 +254,35 @@ async def _start_with_retry():
     """
     global xknx_instance
     backoff = 1.0
+    xknx_log = logging.getLogger("xknx.log")
     while True:
+        # Once the backoff has settled, the attempts repeat every 30 seconds
+        # for as long as the gateway is away: keep them out of the log, the
+        # outage reminder covers them (#504).
+        settled = backoff >= 30.0
+        previous_level = xknx_log.level
+        if settled:
+            xknx_log.setLevel(logging.WARNING)  # its "starting connection" line
         try:
             await xknx_instance.start()
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning(f"Could not connect to KNX bus: {e} - retrying in {backoff:.0f}s")
+            level = logging.DEBUG if settled else logging.WARNING
+            logger.log(level, f"Could not connect to KNX bus: {e} - retrying in {backoff:.0f}s")
             with contextlib.suppress(Exception):
                 await xknx_instance.stop()
-            xknx_instance = _create_xknx_instance()
+            # Replace the instance before sleeping: a shutdown during the wait
+            # must find a fresh instance to stop, not the one stopped above.
+            next_backoff = min(backoff * 2, 30.0)
+            xknx_instance = _create_xknx_instance(quiet=next_backoff >= 30.0)
             await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30.0)
+            backoff = next_backoff
         else:
             logger.info("KNX Daemon connected to bus and listening.")
             return
+        finally:
+            xknx_log.setLevel(previous_level)
 
 
 async def _reconnect_knx():
@@ -184,6 +294,7 @@ async def _reconnect_knx():
             await _connect_task
     if xknx_instance:
         logger.info("Reconnecting to KNX bus with updated configuration...")
+        _connection_log.reset()  # a deliberate stop is not an outage
         try:
             await xknx_instance.stop()
         except Exception as e:
@@ -740,6 +851,7 @@ async def knx_shutdown():
     _watch_task = None
     if xknx_instance:
         logger.info("Stopping KNX Daemon...")
+        _connection_log.reset()  # a deliberate stop is not an outage
         await xknx_instance.stop()
     if STORE_MODE == "postgres-readonly":
         await store.close()
