@@ -49,6 +49,14 @@ async def _load_project_data() -> bool:
             ets_project_file = default_file
             with open(default_pwd, encoding="utf-8") as f:
                 ets_password = f.read().strip()
+    elif ets_project_file and not ets_password:
+        # Uploads store the password next to a custom project path (see
+        # api._project_upload_path); without this a protected project uploaded
+        # on the Windows or Debian package could never be opened.
+        pwd_file = os.path.splitext(ets_project_file)[0] + "_password"
+        if os.path.exists(pwd_file):
+            with open(pwd_file, encoding="utf-8") as f:
+                ets_password = f.read().strip() or None
 
     if not ets_project_file or not os.path.exists(ets_project_file):
         logger.warning(f"Project file not found: {ets_project_file}")

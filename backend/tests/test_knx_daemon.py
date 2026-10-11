@@ -529,3 +529,38 @@ def test_get_server_config_postgres_readonly_reports_bus_and_store(feed_connecte
     assert config["status"]["telegram_store"] == "shared-postgres-readonly"
     assert config["status"]["live_source"] == "postgres-listen-notify"
     assert config["status"]["live_connected"] is feed_connected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sidecar,env_password,expected",
+    [
+        ("secret\n", None, "secret"),  # uploaded password is picked up
+        ("secret", "from_env", "from_env"),  # KNX_PASSWORD still wins
+        ("", None, None),  # unprotected project uploaded with an empty password
+        (None, None, None),  # project file dropped in place by hand
+    ],
+)
+async def test_load_project_reads_password_next_to_custom_path(monkeypatch, tmp_path, sidecar, env_password, expected):
+    """With KNX_PROJECT_PATH set (the Windows and Debian default) the upload
+    stores the password beside the project; the loader has to read it back."""
+    import knx_daemon
+
+    proj_file = tmp_path / "knx_project.knxproj"
+    proj_file.write_bytes(b"dummy")
+    if sidecar is not None:
+        (tmp_path / "knx_project_password").write_text(sidecar, encoding="utf-8")
+    monkeypatch.setenv("KNX_PROJECT_PATH", str(proj_file))
+    if env_password:
+        monkeypatch.setenv("KNX_PASSWORD", env_password)
+    else:
+        monkeypatch.delenv("KNX_PASSWORD", raising=False)
+    monkeypatch.setattr(knx_daemon, "global_knx_project", None)
+    monkeypatch.setattr(knx_daemon, "project_name_map", {"ga": {}, "ia": {}})
+    monkeypatch.setattr(knx_daemon, "xknx_instance", None)
+
+    with patch("xknxproject.XKNXProj") as mock_proj:
+        mock_proj.return_value.parse.return_value = {"group_addresses": {}, "devices": {}}
+        assert await knx_daemon._load_project_data() is True
+
+    mock_proj.assert_called_once_with(str(proj_file), password=expected)
