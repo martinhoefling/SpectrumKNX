@@ -3,9 +3,11 @@ import { format } from 'date-fns';
 import {
   X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock, Activity, Sparkles,
   LineChart,
+  ListChecks, ListX,
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
 import { useExpanded } from '../utils/buildingExpansion';
+import { clearDeviceSelection, setOnlySelected, useBuildingSelection, useDeviceSelected } from '../utils/buildingSelection';
 import { GaNameWidthContext } from '../utils/gaNameWidth';
 import { useLastSeenValues } from '../hooks/useLastSeenValues';
 import { SendToGaPopover } from './SendToGaPopover';
@@ -176,6 +178,10 @@ const collectMaxGaNameLength = (data: BuildingData): number => {
   data.unassigned_devices.forEach(walkDevice);
   return maxLen;
 };
+
+/** Whether a ticked device sits anywhere below this space (#505). */
+const spaceHasSelected = (s: SpaceNode, selected: ReadonlySet<string>): boolean =>
+  s.devices.some(d => selected.has(d.address)) || s.spaces.some(sub => spaceHasSelected(sub, selected));
 
 const spaceMatches = (s: SpaceNode, q: string): boolean =>
   s.name.toLowerCase().includes(q) ||
@@ -440,6 +446,7 @@ const DeviceRow: React.FC<{
   const hasChildren = koCount > 0;
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => deviceGAs(device), [device]);
+  const [ticked, toggleTicked] = useDeviceSelected(device.address);
 
   return (
     <div>
@@ -450,6 +457,16 @@ const DeviceRow: React.FC<{
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
         <Caret open={effectiveOpen} hasChildren={hasChildren} />
+        {/* Tick devices to look at them together; the header can then hide the rest (#505). */}
+        <input
+          type="checkbox"
+          checked={ticked}
+          onChange={toggleTicked}
+          onClick={e => e.stopPropagation()}
+          aria-label={`Select device ${device.address}`}
+          title="Tick to keep this device when hiding the others"
+          style={{ margin: 0, flexShrink: 0, cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+        />
         <Cpu size={13} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
         <span style={{
           fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', fontWeight: 600,
@@ -715,11 +732,19 @@ const SpaceRow: React.FC<{
   latestTelegram?: Telegram | null;
 }> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
+  const { selected, hideOthers } = useBuildingSelection();
   if (query && !spaceMatches(space, query)) return null;
-  const effectiveOpen = open || !!query;
+  // Only ticked devices (#505): spaces without one disappear, the rest open
+  // up so the devices end up directly under each other.
+  if (hideOthers && !spaceHasSelected(space, selected)) return null;
+  const effectiveOpen = open || !!query || hideOthers;
   const hasChildren = space.spaces.length > 0 || space.devices.length > 0 || !!(space.functions && space.functions.length > 0);
-  const visibleDevices = query ? space.devices.filter(d => deviceMatches(d, query)) : space.devices;
-  const visibleFunctions = space.functions ? (query ? space.functions.filter(f => functionMatches(f, query)) : space.functions) : [];
+  const visibleDevices = space.devices
+    .filter(d => !query || deviceMatches(d, query))
+    .filter(d => !hideOthers || selected.has(d.address));
+  const visibleFunctions = !space.functions || hideOthers
+    ? []
+    : (query ? space.functions.filter(f => functionMatches(f, query)) : space.functions);
 
   return (
     <div>
@@ -801,10 +826,13 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
 
   const query = searchQuery.trim().toLowerCase();
 
+  const { selected, hideOthers, onlySelected } = useBuildingSelection();
   const visibleUnassigned = useMemo(() => {
     if (!data) return [];
-    return query ? data.unassigned_devices.filter(d => deviceMatches(d, query)) : data.unassigned_devices;
-  }, [data, query]);
+    return data.unassigned_devices
+      .filter(d => !query || deviceMatches(d, query))
+      .filter(d => !hideOthers || selected.has(d.address));
+  }, [data, query, hideOthers, selected]);
 
   const isEmpty = data && data.tree.length === 0 && data.unassigned_devices.length === 0;
 
@@ -826,6 +854,33 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
         <Building2 size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
         <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>Building Structure</span>
         <div style={{ flex: 1 }} />
+        {/* Ticked devices (#505): hide everything else, or untick them all. */}
+        {selected.size > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <button
+              onClick={() => setOnlySelected(!onlySelected)}
+              aria-pressed={hideOthers}
+              title={hideOthers ? 'Show the whole building again' : 'Hide every device that is not ticked'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer',
+                padding: '0.25rem 0.55rem', borderRadius: 6, fontSize: '0.75rem',
+                border: `1px solid ${hideOthers ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                background: hideOthers ? 'rgba(99,102,241,0.15)' : 'var(--bg-subtle)',
+                color: hideOthers ? 'var(--accent-primary)' : 'var(--text-dim)',
+              }}
+            >
+              <ListChecks size={13} />
+              Only ticked ({selected.size})
+            </button>
+            <button
+              onClick={clearDeviceSelection}
+              title="Untick all devices"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: '0.2rem', display: 'flex' }}
+            >
+              <ListX size={14} />
+            </button>
+          </div>
+        )}
         <input
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
