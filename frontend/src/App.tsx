@@ -854,6 +854,16 @@ function App() {
                     >
                       <Download size={15} />
                     </button>
+                    {/* Pausing holds back the buffer for every panel, not just
+                        the list, so it sits with the other buffer actions (#374). */}
+                    <button
+                      className="icon-button"
+                      onClick={togglePause}
+                      title={isPaused ? 'Resume' : 'Pause'}
+                      style={{ color: isPaused ? 'var(--accent-primary)' : 'var(--text-dim)', padding: '0.15rem' }}
+                    >
+                      {isPaused ? <Play size={15} fill="currentColor" /> : <Pause size={15} fill="currentColor" />}
+                    </button>
                     <span style={{ color: 'var(--text-main)', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                       {activeFilterCount
                         ? <>{filteredLiveTelegrams.length}{bufferLimitWarning}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}> / {liveTelegrams.length}</span></>
@@ -1292,14 +1302,6 @@ function App() {
                             color: 'white', borderRadius: '999px',
                           }}>{activeFilterCount}</span>
                         )}
-                      </button>
-                      <button
-                        className="icon-button"
-                        onClick={togglePause}
-                        title={isPaused ? 'Resume' : 'Pause'}
-                        style={{ color: isPaused ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                      >
-                        {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
                       </button>
                     </div>
                     <TelegramTable

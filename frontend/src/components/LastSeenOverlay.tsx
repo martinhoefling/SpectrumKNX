@@ -125,7 +125,8 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   const [writeValue, setWriteValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Matching telegrams that arrived while frozen and are not shown yet (#374).
+  const [pendingCount, setPendingCount] = useState(0);
 
   const addressList = mode === 'ga' ? filterOptions.targets : filterOptions.sources;
   const multi = selectedAddresses.length > 1;
@@ -142,6 +143,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
       );
       const json = await res.json();
       setTelegrams(json.telegrams ?? []);
+      setPendingCount(0);
       setLastFetchedAt(new Date());
     } catch {
       // network errors are non-fatal
@@ -155,12 +157,14 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     fetchData();
   }, [fetchData]);
 
+  // Live or frozen (#374). Live shows every matching telegram the moment it
+  // arrives over the websocket — including what was just written from here —
+  // so there is no refresh timer. Frozen keeps the list as it is and only
+  // counts what came in; going live again catches up.
+  const wasLiveRef = useRef(autoRefresh);
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (autoRefresh) {
-      intervalRef.current = setInterval(fetchData, 10_000);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    if (autoRefresh && !wasLiveRef.current) fetchData();
+    wasLiveRef.current = autoRefresh;
   }, [autoRefresh, fetchData]);
 
   useEffect(() => {
@@ -168,8 +172,12 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     const match = mode === 'ga'
       ? selectedAddresses.includes(latestTelegram.target_address)
       : selectedAddresses.includes(latestTelegram.source_address);
-    if (match) {
+    if (match && !autoRefresh) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPendingCount(n => n + 1);
+      return;
+    }
+    if (match) {
       setTelegrams(prev => {
         const exists = prev.some(
           t => {
@@ -185,12 +193,15 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
       });
       setLastFetchedAt(new Date());
     }
+  // autoRefresh is read, not a trigger: toggling it must not replay the last telegram.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestTelegram, selectedAddresses, mode, limit]);
 
-  // After sending, the response/echo lands as a telegram shortly after; refresh to reflect it.
+  // After sending, the response/echo lands as a telegram shortly after; refresh
+  // to reflect it. While frozen the list stays put — the echo is counted instead.
   const refreshSoon = useCallback(() => {
-    setTimeout(fetchData, 700);
-  }, [fetchData]);
+    if (autoRefresh) setTimeout(fetchData, 700);
+  }, [fetchData, autoRefresh]);
 
   const handleRead = async () => {
     setBusy(true);
@@ -448,10 +459,14 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               ))}
             </div>
 
-            {/* Auto-refresh toggle */}
+            {/* Live / frozen toggle */}
             <button
               onClick={() => setAutoRefresh(r => !r)}
-              title={autoRefresh ? 'Disable auto-refresh (10s)' : 'Enable auto-refresh (10s)'}
+              title={autoRefresh
+                ? 'Live: telegrams appear as they arrive — click to freeze the list'
+                : pendingCount > 0
+                  ? `Frozen: ${pendingCount} newer telegram${pendingCount === 1 ? '' : 's'} not shown — click to go live`
+                  : 'Frozen — click to go live'}
               style={{
                 display: 'flex', alignItems: 'center', gap: '0.25rem',
                 padding: '0.2rem 0.45rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.72rem',
@@ -462,6 +477,14 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
             >
               {autoRefresh ? <ToggleRight size={13} /> : <ToggleLeft size={13} />}
               Live
+              {!autoRefresh && pendingCount > 0 && (
+                <span style={{
+                  marginLeft: '0.15rem', padding: '0 0.3rem', borderRadius: 999, fontSize: '0.65rem', fontWeight: 700,
+                  background: 'var(--accent-primary)', color: 'white',
+                }}>
+                  {pendingCount > 99 ? '99+' : pendingCount} new
+                </span>
+              )}
             </button>
 
             {/* Read from bus (GroupValueRead) */}

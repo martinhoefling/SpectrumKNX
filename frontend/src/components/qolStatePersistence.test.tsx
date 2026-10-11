@@ -289,7 +289,7 @@ test('LastSeenOverlay selectors and selection survive remount', () => {
   fireEvent.change(searchInput!, { target: { value: 'search-term' } });
 
   // Toggle autoRefresh
-  const liveButton = screen.getByTitle('Enable auto-refresh (10s)');
+  const liveButton = screen.getByTitle('Frozen — click to go live');
   fireEvent.click(liveButton);
 
   // Unmount
@@ -301,5 +301,5 @@ test('LastSeenOverlay selectors and selection survive remount', () => {
   const remountedSidebar = screen.getByText('Group Addresses').closest('div')?.parentElement;
   const remountedSearchInput = remountedSidebar?.querySelector('input[placeholder="Filter…"]');
   expect(remountedSearchInput).toHaveValue('search-term');
-  expect(screen.getByTitle('Disable auto-refresh (10s)')).toBeInTheDocument();
+  expect(screen.getByTitle(/^Live: telegrams appear as they arrive/)).toBeInTheDocument();
 });

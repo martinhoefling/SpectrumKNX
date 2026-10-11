@@ -156,3 +156,68 @@ test('sidebar address list is ordered numerically by main/middle/sub, not as tex
     ).toBeTruthy();
   }
 });
+
+// ── Live / frozen (#374) ─────────────────────────────────────────────────────
+
+const telegram = (second: number, value: string) => ({
+  timestamp: `2026-01-01T10:00:${String(second).padStart(2, '0')}.000Z`,
+  source_address: '1.1.5',
+  target_address: '1/1/97',
+  telegram_type: 'GroupValueWrite',
+  simplified_type: 'Write',
+  direction: 'Incoming',
+  dpt_main: 9,
+  dpt_sub: 4,
+  value_formatted: value,
+  value_numeric: null,
+  raw_hex: '0x00',
+} as never);
+
+const renderLastSeen = (props: Partial<React.ComponentProps<typeof LastSeenOverlay>>) => {
+  const base = { filterOptions: FILTER_OPTIONS, initialAddresses: ['1/1/97'], initialMode: 'ga' as const, onClose: () => {} };
+  const view = render(<LastSeenOverlay {...base} {...props} />);
+  return { ...view, update: (next: Partial<React.ComponentProps<typeof LastSeenOverlay>>) => view.rerender(<LastSeenOverlay {...base} {...next} />) };
+};
+
+test('live shows a matching telegram the moment it arrives, without a refresh timer (#374)', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const fetchMock = mockFetch({ '/api/telegrams': { telegrams: [] } });
+    vi.stubGlobal('fetch', fetchMock);
+    const { update } = renderLastSeen({ autoRefresh: true });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    update({ autoRefresh: true, latestTelegram: telegram(1, '111 lx') });
+    expect(await screen.findByText('111 lx')).toBeInTheDocument();
+
+    // No periodic re-fetch while live.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('frozen holds new telegrams back, counts them, and catches up when going live (#374)', async () => {
+  const fetchMock = mockFetch({ '/api/telegrams': { telegrams: [] } });
+  vi.stubGlobal('fetch', fetchMock);
+  const { update } = renderLastSeen({ autoRefresh: false });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+  update({ autoRefresh: false, latestTelegram: telegram(1, '111 lx') });
+  update({ autoRefresh: false, latestTelegram: telegram(2, '222 lx') });
+  expect(screen.queryByText('111 lx')).not.toBeInTheDocument();
+  expect(screen.getByText('2 new')).toBeInTheDocument();
+  expect(screen.getByTitle(/^Frozen: 2 newer telegrams not shown/)).toBeInTheDocument();
+
+  // A telegram for another address is not counted.
+  update({ autoRefresh: false, latestTelegram: { ...(telegram(3, '333 lx') as object), target_address: '9/9/9' } as never });
+  expect(screen.getByText('2 new')).toBeInTheDocument();
+
+  // Going live re-reads the list and clears the hint.
+  fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ telegrams: [telegram(2, '222 lx'), telegram(1, '111 lx')] }) }) as Response);
+  update({ autoRefresh: true, latestTelegram: { ...(telegram(3, '333 lx') as object), target_address: '9/9/9' } as never });
+  expect(await screen.findByText('222 lx')).toBeInTheDocument();
+  expect(screen.queryByText('2 new')).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
