@@ -17,6 +17,7 @@ import { KnxAddressTree } from './KnxAddressTree';
 import { DptTypeTree } from './DptTypeTree';
 import { dptWidthLabel, bareDptLabel } from '../utils/dpt';
 import { SendToGaPopover } from './SendToGaPopover';
+import { nextTargetColor, setTargetColor, useTargetColors } from '../utils/targetColors';
 
 const rowActionBtnStyle: React.CSSProperties = {
   background: 'transparent', border: 'none', cursor: 'pointer',
@@ -102,9 +103,11 @@ interface OptionRowProps {
   actions?: React.ReactNode;
   /** Renders the row dimmed: selected, but currently switched off (#437). */
   muted?: boolean;
+  /** Colour swatch of the entry (#509); a click moves on to the next colour. */
+  swatch?: { color: string | null; onClick: () => void };
 }
 
-export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove, actions, muted }) => {
+export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, count, onToggle, onRemove, actions, muted, swatch }) => {
   const [hovered, setHovered] = useState(false);
   return (
   <div style={{
@@ -171,6 +174,22 @@ export const OptionRow: React.FC<OptionRowProps> = ({ label, sublabel, checked, 
       )}
     </label>
 
+    {swatch && (
+      <button
+        onClick={swatch.onClick}
+        aria-label={`Colour of ${label}`}
+        title={swatch.color
+          ? 'Telegrams to this address are marked in this colour - click for the next colour'
+          : 'Mark telegrams to this address with a colour'}
+        style={{
+          width: 14, height: 14, flexShrink: 0, padding: 0, borderRadius: '50%', cursor: 'pointer',
+          background: swatch.color ?? 'transparent',
+          border: swatch.color ? `1.5px solid ${swatch.color}` : '1.5px dashed var(--text-dim)',
+          opacity: swatch.color || hovered ? 1 : 0.45, transition: 'opacity 0.15s',
+        }}
+      />
+    )}
+
     {actions && (
       <div
         onClick={e => e.stopPropagation()}
@@ -214,6 +233,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   filtersEnabled = true,
   onFiltersEnabledChange,
 }) => {
+  const targetColors = useTargetColors();
   const [search, setSearch] = useState('');
   // The pane shows one of two views (#370): Edit filters (category controls) or
   // Active filters (the current set). No auto-inserted active block, so editing
@@ -407,6 +427,10 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                 onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'targets', t))}
                 onRemove={() => update({ targets: activeFilters.targets.filter(v => v !== t) })}
                 muted={isFilterDisabled(activeFilters, 'targets', t)}
+                swatch={{
+                  color: targetColors[t] ?? null,
+                  onClick: () => setTargetColor(t, nextTargetColor(targetColors, t, activeFilters.targets)),
+                }}
                 actions={(writeEnabled || onQuickLastSeen) && (
                   <>
                     {writeEnabled && (

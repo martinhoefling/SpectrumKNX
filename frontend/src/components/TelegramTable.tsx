@@ -10,6 +10,7 @@ import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
 import { makeAddressPatternMatcher } from '../utils/addressPattern';
 import { makeValueMatcher } from '../utils/valuePattern';
+import { useTargetColors } from '../utils/targetColors';
 import { anchorKey } from '../utils/anchorKey';
 import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
@@ -419,6 +420,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     onFlaggedKeysChange?.(val);
   }, [onFlaggedKeysChange]);
   const flaggedSet = useMemo(() => new Set(flaggedKeysList), [flaggedKeysList]);
+
+  // Colours given to target filters (#509) apply while the address is in the
+  // filter, switched off or not; a colour of a removed filter is kept for when
+  // it comes back, but marks nothing meanwhile.
+  const targetColors = useTargetColors();
+  const activeTargetColors = useMemo(() => {
+    const active: Record<string, string> = {};
+    for (const address of activeFilters.targets) {
+      if (targetColors[address]) active[address] = targetColors[address];
+    }
+    return active;
+  }, [targetColors, activeFilters.targets]);
   const [internalContextForAll, setInternalContextForAll] = useState(true);
   const contextForAll = contextForAllMatches ?? internalContextForAll;
   const setContextForAll = useCallback((val: boolean) => {
@@ -1695,6 +1708,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               // Present only as unfiltered Time-Delta-Context, not a real filter
               // match (#343) — a distinct wash, but marks still take priority.
               const isContext = !marked && !!contextKeys?.has(key);
+              const targetColor = activeTargetColors[t.target_address];
               return (
                 <div
                   key={virtualRow.key}
@@ -1723,8 +1737,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                         ? 'color-mix(in srgb, var(--accent-primary) 16%, transparent)'
                         : isContext
                           ? 'color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent)'
-                          : (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
-                    boxShadow: latest ? 'inset 3px 0 0 0 var(--accent-primary)' : undefined,
+                          : targetColor
+                            ? `color-mix(in srgb, ${targetColor} 9%, transparent)`
+                            : (virtualRow.index + stripeOffset) % 2 === 0 ? 'var(--bg-subtle)' : 'transparent',
+                    // A colour given to the row's target in the filter panel (#509):
+                    // a bar on the left, and a wash where nothing else tints the row.
+                    boxShadow: latest
+                      ? 'inset 3px 0 0 0 var(--accent-primary)'
+                      : targetColor ? `inset 4px 0 0 0 ${targetColor}` : undefined,
                     alignItems: 'start',
                     minHeight: '60px' // Ensure a minimum touch/visual target
                   }}
