@@ -91,6 +91,9 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT
 - **Database:** PostgreSQL (with optional TimescaleDB acceleration), or SQLite (via `aiosqlite`)
 - **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
 
+## 🔗 Works Well With
+- **[KNXBench](https://github.com/KNXBench-Labs/KNXBench)** — an independent, open-source KNX engineering tool: import or create projects, edit topology, group addresses, devices and parameters. It covers planning and setup, where Spectrum KNX covers operation and troubleshooting — KNXBench knows how the installation is meant to work, Spectrum KNX records what it actually does. The two projects are developed separately and neither needs the other.
+
 ## 🤝 Contributing
 Interested in building out new visualization blocks or analytical filters? See our [CONTRIBUTING.md](CONTRIBUTING.md) guide!
 
