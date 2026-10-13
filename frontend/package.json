@@ -1,6 +1,7 @@
 {
   "name": "frontend",
   "private": true,
+  "license": "GPL-3.0-only",
   "version": "0.0.0",
   "type": "module",
   "engines": {
