@@ -668,3 +668,63 @@ def test_format_duration():
     assert knx_daemon._format_duration(42.9) == "42s"
     assert knx_daemon._format_duration(311) == "5m 11s"
     assert knx_daemon._format_duration(7500) == "2h 5m"
+
+
+def test_build_secure_config_warns_when_keyring_has_no_password(tmp_path, caplog):
+    import knx_daemon
+
+    keys = tmp_path / "keys.knxkeys"
+    keys.write_text("<Keyring/>")
+    with patch.object(knx_daemon, "_resolve_knxkeys_path", return_value=(str(keys), None)):
+        with caplog.at_level("WARNING"):
+            config = knx_daemon._build_secure_config()
+
+    assert config is not None
+    assert "no password was found" in caplog.text
+
+
+def test_build_secure_config_warns_when_keyring_file_missing(tmp_path, caplog):
+    import knx_daemon
+
+    missing = str(tmp_path / "missing.knxkeys")
+    with patch.object(knx_daemon, "_resolve_knxkeys_path", return_value=(missing, "pw")):
+        with caplog.at_level("WARNING"):
+            knx_daemon._build_secure_config()
+
+    assert "does not exist" in caplog.text
+
+
+def test_build_secure_config_warns_for_manual_tunnel_credentials(caplog, monkeypatch):
+    import knx_daemon
+
+    monkeypatch.setenv("KNX_SECURE_USER_ID", "2")
+    monkeypatch.setenv("KNX_SECURE_USER_PASSWORD", "x")
+    with patch.object(knx_daemon, "_resolve_knxkeys_path", return_value=(None, None)):
+        with caplog.at_level("WARNING"):
+            knx_daemon._build_secure_config()
+
+    assert "Data Secure" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_upload_knxkeys_without_password_removes_stale_password_file(tmp_path, monkeypatch):
+    import io
+
+    from fastapi import UploadFile
+
+    import api
+    import knx_daemon
+
+    monkeypatch.delenv("KNX_KNXKEYS_FILE", raising=False)
+    keys = tmp_path / "knx_keys.knxkeys"
+    pw = tmp_path / "knx_keys_password"
+    pw.write_text("old")
+    monkeypatch.setattr(knx_daemon, "DEFAULT_KNXKEYS_FILE", str(keys))
+    monkeypatch.setattr(knx_daemon, "DEFAULT_KNXKEYS_PASSWORD_FILE", str(pw))
+
+    upload = UploadFile(filename="new.knxkeys", file=io.BytesIO(b"<Keyring/>"))
+    with patch.object(knx_daemon, "_reconnect_knx", new=AsyncMock()):
+        await api.upload_knxkeys(file=upload, password="")
+
+    assert keys.exists()
+    assert not pw.exists()

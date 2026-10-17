@@ -463,6 +463,16 @@ def _build_secure_config() -> SecureConfig | None:
     if knxkeys_file:
         if any([user_id, user_password, device_password, backbone_key, latency_ms]):
             logger.warning("KNX_KNXKEYS_FILE is provided. Ignoring other manual KNX Secure variables.")
+        if not os.path.exists(knxkeys_file):
+            logger.warning(
+                f"knxkeys file {knxkeys_file} does not exist. KNX Data Secure telegrams cannot be decrypted."
+            )
+        elif not knxkeys_password:
+            logger.warning(
+                f"knxkeys file {knxkeys_file} is configured but no password was found. xknx will not load the "
+                "keyring, so KNX Data Secure telegrams will be dropped. Set KNX_KNXKEYS_PASSWORD or re-upload "
+                "the keyring with its password."
+            )
         return SecureConfig(
             knxkeys_file_path=knxkeys_file,
             knxkeys_password=knxkeys_password,
@@ -479,6 +489,10 @@ def _build_secure_config() -> SecureConfig | None:
 
     # Priority 3: Manual Tunneling Credentials
     if user_id:
+        logger.warning(
+            "Secure tunnel uses manual credentials and no knxkeys file: the tunnel is encrypted, but "
+            "KNX Data Secure group telegrams will be dropped. Provide a knxkeys file to decrypt them."
+        )
         return SecureConfig(
             user_id=int(user_id),
             user_password=user_password,

@@ -1264,6 +1264,9 @@ async def upload_knxkeys(file: UploadFile = File(...), password: str = Form(""))
         if password:
             with open(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE, "w", encoding="utf-8") as f:
                 f.write(password)
+        elif os.path.exists(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE):
+            # Drop a stale password from an earlier upload; it would not match the new keyring.
+            os.remove(knx_daemon.DEFAULT_KNXKEYS_PASSWORD_FILE)
 
     try:
         await asyncio.to_thread(save_knxkeys_files)
