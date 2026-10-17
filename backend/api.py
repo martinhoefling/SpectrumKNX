@@ -1253,7 +1253,7 @@ async def upload_knxkeys(file: UploadFile = File(...), password: str = Form(""))
     if not file.filename or not file.filename.endswith(".knxkeys"):
         raise HTTPException(status_code=400, detail="File must be a .knxkeys file")
 
-    default_dir = "/project"
+    default_dir = os.path.dirname(knx_daemon.DEFAULT_KNXKEYS_FILE)
     content = await file.read()
 
     def save_knxkeys_files():
