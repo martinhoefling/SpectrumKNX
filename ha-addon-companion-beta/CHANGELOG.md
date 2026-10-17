@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.0.0-beta.12
+
+### Added
+
+- **Colour per target filter**: every group address in the *Active filters* list has a colour
+  swatch. Telegrams to a coloured address get a bar in that colour on the left of the row, in the
+  Group Monitor and in History Search. Colours are remembered in the browser (#509).
+- **Building Structure: tick devices and hide the rest**: tick devices, then *Only ticked* shows
+  just those devices with their rooms opened, so a sender and a receiver sit directly under each
+  other. *Untick all* brings the whole building back (#505).
+- **Warning when KNX Data Secure keys are missing**: with a secure tunnel but no loaded keyring
+  (file or password missing), Data Secure group telegrams are dropped silently by the bus library.
+  The log now says so when connecting; a stale keyring password is removed when a keyring is uploaded
+  without one (#513).
+
+### Changed
+
+- **Bus outages are reported once**: while the gateway is unreachable, the log no longer gets two
+  lines per reconnect attempt (about 57,000 a day). An outage is logged when it starts, as a
+  reminder every 10 minutes, and when the connection is restored, with its duration (#504).
+- **Storage library `knx-telegram-store` 0.15.1**: reads Home Assistant's telegram database both
+  before and after Home Assistant converts it to the new, smaller format (shipped with a coming
+  Home Assistant release). Until Home Assistant has converted it, the add-on logs at start that
+  the database needs a migration only its owner may run; reading works regardless.
+
+### Fixed
+
+- **Licence in the package metadata**: declared as GPL-3.0, like the repository; it said MIT.
+
 ## 2.0.0-beta.11
 
 ### Added
