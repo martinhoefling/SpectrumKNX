@@ -27,12 +27,16 @@ import auth
 # It is instead admitted only while UI auth is off (below), which is the state in
 # which the whole API is open anyway, or to an already-trusted caller — an
 # ingress peer, or a valid session.
+#
+# /api/backup is called by the add-on's backup hooks from inside the container,
+# which hold no session. The endpoints themselves accept loopback peers only.
 _OPEN_PREFIXES = (
     "/health",
     "/api/health",
     "/api/version",
     "/api/auth/status",
     "/api/auth/login",
+    "/api/backup",
 )
 
 # Paths the API owns. Anything else is the single-page app and its assets, which

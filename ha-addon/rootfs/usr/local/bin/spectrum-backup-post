@@ -1,0 +1,15 @@
+#!/bin/bash
+# Run by the Supervisor inside this container after a hot backup
+# (config.yaml: backup_post). Releases the write lock taken by
+# spectrum-backup-pre; the backend also releases it on its own after
+# BACKUP_MAX_HOLD_SECONDS should this never run.
+set -u
+
+out=$(curl -sS --fail --max-time 120 -X POST http://127.0.0.1:8765/api/backup/end 2>&1)
+rc=$?
+case $rc in
+    0) echo "Telegram store writes resumed: $out" ;;
+    7) echo "Spectrum KNX backend is not running - nothing to release" ;;
+    *) echo "Could not resume telegram store writes (curl exit $rc): $out" >&2 ;;
+esac
+exit 0

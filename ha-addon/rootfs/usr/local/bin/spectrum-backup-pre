@@ -1,0 +1,16 @@
+#!/bin/bash
+# Run by the Supervisor inside this container before a hot backup copies
+# /data (config.yaml: backup_pre). The backend checkpoints the SQLite
+# telegram database and holds off writes until spectrum-backup-post runs, so
+# the copied file is consistent. Never fails the backup: without the lock the
+# copy is what it always was, which beats leaving the add-on out of the backup.
+set -u
+
+out=$(curl -sS --fail --max-time 120 -X POST http://127.0.0.1:8765/api/backup/begin 2>&1)
+rc=$?
+case $rc in
+    0) echo "Telegram store prepared for backup: $out" ;;
+    7) echo "Spectrum KNX backend is not running - nothing to prepare" ;;
+    *) echo "Could not prepare the telegram store for backup (curl exit $rc): $out" >&2 ;;
+esac
+exit 0

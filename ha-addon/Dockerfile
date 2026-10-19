@@ -82,7 +82,7 @@ COPY --from=frontend-builder /app/dist /app/backend/static
 
 # Copy s6-overlay service definitions
 COPY ha-addon/rootfs /
-RUN chmod +x /etc/services.d/*/run
+RUN chmod +x /etc/services.d/*/run /usr/local/bin/spectrum-backup-*
 
 # Set the environment variable for Postgres connection
 ENV DATABASE_URL="postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/spectrum_knx"

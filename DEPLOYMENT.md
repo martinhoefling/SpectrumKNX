@@ -179,6 +179,11 @@ All data is stored in the Add-on's persistent `/data` directory, which is manage
 
 > **Important:** Uninstalling the Add-on will delete all data. If you want to keep your telegram history, export it before uninstalling.
 
+> **Backups:** Home Assistant backups copy `/data` while the add-on runs. Before the copy, the
+> Supervisor runs the add-on's `backup_pre` hook, which has the backend checkpoint the SQLite
+> database and hold off writes until the `backup_post` hook runs after the copy. Telegrams received
+> meanwhile are kept in memory and written afterwards, so the database in the backup is consistent.
+
 ### 2.7 Database Access
 This section applies only when `DB_BACKEND=POSTGRES`.
 

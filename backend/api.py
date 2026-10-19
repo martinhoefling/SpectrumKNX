@@ -22,7 +22,8 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from knx_telegram_store import TelegramQuery
+from knx_telegram_store import KnxTelegramStoreException, TelegramQuery
+from knx_telegram_store.backends.sqlite import SqliteStore
 from knx_telegram_store.formats import COMMUNICATION_LOG_FOOTER, COMMUNICATION_LOG_HEADER, format_telegram_element
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -699,6 +700,87 @@ async def optimize_database():
     await store.optimize()
     size_after = (await store.get_stats()).size_bytes
     return {"size_bytes_before": size_before, "size_bytes_after": size_after}
+
+
+# How long a backup may hold the store's write lock before it is released on
+# its own. The Supervisor runs backup_post after every hot backup, so this only
+# matters when that never happens (it restarted mid-backup, say). Past it the
+# copy is no safer than it was without the hooks, and writes resume.
+BACKUP_MAX_HOLD_SECONDS = 15 * 60
+
+_backup_lock = asyncio.Lock()
+_backup_timer: asyncio.TimerHandle | None = None
+
+
+def _require_loopback(request: Request) -> None:
+    """Only the backup hooks in this container may hold off writes.
+
+    Decided by the TCP peer address, like the ingress check in auth_middleware:
+    a remote caller cannot become loopback, and the hooks send no forwarding
+    headers.
+    """
+    if auth_middleware.peer_of(request.scope) not in ("127.0.0.1", "::1"):
+        raise HTTPException(status_code=403, detail="Backup hooks are accepted from this host only")
+
+
+def _backup_copies_store_files() -> bool:
+    """Whether a backup copies the store's own files: a SQLite store we write."""
+    return isinstance(store, SqliteStore) and not store.capabilities.read_only
+
+
+async def _release_backup(*, timed_out: bool) -> None:
+    """Resume writes; harmless when no backup is in progress. Call under _backup_lock."""
+    global _backup_timer
+    if _backup_timer is None:
+        return
+    _backup_timer.cancel()
+    _backup_timer = None
+    if timed_out:
+        logger.warning(
+            "No end of backup was reported within %d s - resuming telegram store writes", BACKUP_MAX_HOLD_SECONDS
+        )
+    await store.end_backup()
+
+
+async def _backup_timed_out() -> None:
+    async with _backup_lock:
+        await _release_backup(timed_out=True)
+
+
+@router.post("/api/backup/begin")
+async def backup_begin(request: Request):
+    """Makes the SQLite database safe to copy until /api/backup/end is called.
+
+    The add-on's backup_pre hook calls this before the Supervisor copies /data.
+    The store checkpoints its WAL into the main file and holds a write lock;
+    telegrams received meanwhile stay in the write buffer and are written once
+    the backup has ended. A no-op for PostgreSQL and read-only stores, whose
+    files a backup of this container does not copy.
+    """
+    _require_loopback(request)
+    if not _backup_copies_store_files():
+        return {"locked": False}
+    global _backup_timer
+    async with _backup_lock:
+        if _backup_timer is None:
+            try:
+                await store.begin_backup()
+            except KnxTelegramStoreException as err:
+                raise HTTPException(status_code=503, detail=f"Could not prepare the store for a backup: {err}") from err
+        else:
+            _backup_timer.cancel()  # a repeated begin only extends the hold
+        loop = asyncio.get_running_loop()
+        _backup_timer = loop.call_later(BACKUP_MAX_HOLD_SECONDS, lambda: loop.create_task(_backup_timed_out()))
+    return {"locked": True}
+
+
+@router.post("/api/backup/end")
+async def backup_end(request: Request):
+    """Resumes writes after /api/backup/begin; harmless when no backup is in progress."""
+    _require_loopback(request)
+    async with _backup_lock:
+        await _release_backup(timed_out=False)
+    return {"locked": False}
 
 
 @router.get("/api/project")

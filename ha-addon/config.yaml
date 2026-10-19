@@ -6,6 +6,11 @@ slug: "spectrum_knx"
 image: "ghcr.io/martinhoefling/spectrum-knx-addon-{arch}"
 host_network: true
 init: false
+# Home Assistant backs up /data while the add-on runs. The hooks have the
+# backend checkpoint the SQLite telegram database and hold off writes for the
+# copy (see backend/api.py, /api/backup).
+backup_pre: /usr/local/bin/spectrum-backup-pre
+backup_post: /usr/local/bin/spectrum-backup-post
 arch:
   - aarch64
   - amd64
