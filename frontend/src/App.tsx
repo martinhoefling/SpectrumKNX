@@ -22,6 +22,7 @@ import {
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
 import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
 import { expandWithDeltaContext } from './utils/deltaContextExpansion';
+import { activeQuickFilter } from './utils/quickFilter';
 import { anchorKey } from './utils/anchorKey';
 import { readSortConfigPref, writeSortConfigPref, toggleSortLevel, sortTelegrams } from './utils/sortConfig';
 import { LayoutDashboard, History, Settings, Play, Pause, Download, Trash2, SlidersHorizontal, LineChart, BarChart2, Building2, Database, ChevronDown, AlertTriangle, Sun, Moon, Monitor, FolderInput, Send, Sparkles, Clock, List } from 'lucide-react';
@@ -726,8 +727,10 @@ function App() {
       f.directions.length === 0 &&
       f.dpts.length === 0);
 
+    // Quick-filter matches anchor the context like main-filter matches (#520).
+    const quick = activeQuickFilter(quickFilterOpen, quickFilterEnabled, quickPatterns);
     const matches = sortedLiveTelegrams.map(t =>
-      noFilter ? true : matchesTelegram(t, f)
+      (noFilter || matchesTelegram(t, f)) && (!quick || quick(t))
     );
 
     const { before: deltaBeforeMs, after: deltaAfterMs } = effectiveDeltaContext(f);
@@ -736,7 +739,7 @@ function App() {
     const flags = f.deltaContextEnabled ? new Set(flaggedTelegramKeys) : EMPTY_KEY_SET;
 
     return expandWithDeltaContext(sortedLiveTelegrams, matches, anchorKey, flags, deltaBeforeMs, deltaAfterMs, contextForAllMatches);
-  }, [sortedLiveTelegrams, appliedFilters, filtersEnabled, flaggedTelegramKeys, contextForAllMatches]);
+  }, [sortedLiveTelegrams, appliedFilters, filtersEnabled, flaggedTelegramKeys, contextForAllMatches, quickFilterOpen, quickFilterEnabled, quickPatterns]);
   const filteredLiveTelegrams = deltaExpandedLive.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedLive.contextKeys;

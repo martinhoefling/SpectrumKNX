@@ -1,10 +1,12 @@
+import type { QuickPatterns } from './quickFilter';
+
 export interface UiSessionState {
   quickFilter: {
     open: boolean;
     enabled: boolean;
     /** Each column's two quick-filter rows (#309) — e.g. an address pattern
      * and a name regex, or a from/to range. */
-    patterns: Record<string, { top: string; bottom: string }>;
+    patterns: QuickPatterns;
   };
   listFollow: boolean;
   listAnchorKey: string | null;
