@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { LABEL_GUTTER, gutterWidthFor, metricGutterWidth, sharedLeftGutter } from './chartGutter';
+import { LABEL_GUTTER, MAX_LABEL_GUTTER, gutterWidthFor, labelGutterWidth, metricGutterWidth, sharedLeftGutter } from './chartGutter';
 import type { ChartBucket } from '../hooks/useChartData';
 
 // 7px per character stands in for the canvas measurement.
@@ -46,4 +46,20 @@ test('all charts on screen share the widest gutter any of them needs', () => {
   const huge = bucket({ unit: 'x'.repeat(40) }, [1]);
   expect(sharedLeftGutter([huge, bucket({ isEvents: true })], measure)).toBe(220);
   expect(sharedLeftGutter([], measure)).toBe(0);
+});
+
+test('the label gutter grows with the longest GA name, within limits (#521)', () => {
+  const named = (...names: string[]) =>
+    names.map(name => ({ address: '1/2/3', name, data: [1] }) as ChartBucket['series'][number]);
+  // short names: the minimum
+  expect(labelGutterWidth(named('Licht'), measure)).toBe(LABEL_GUTTER);
+  // "Wohnzimmer Deckenlicht Status" → 29 chars → 203 + 24 = 227
+  expect(labelGutterWidth(named('Licht', 'Wohnzimmer Deckenlicht Status'), measure)).toBe(227);
+  // very long names: the maximum, the rest is cut with an ellipsis
+  expect(labelGutterWidth(named('x'.repeat(80)), measure)).toBe(MAX_LABEL_GUTTER);
+  // without a canvas: the fixed minimum
+  expect(labelGutterWidth(named('Wohnzimmer Deckenlicht Status'), () => null)).toBe(LABEL_GUTTER);
+  // the shared gutter follows a wide timeline label
+  const timeline = bucket({ isBinary: true, series: named('Wohnzimmer Deckenlicht Status') });
+  expect(sharedLeftGutter([bucket({}, [23.4]), timeline], measure)).toBe(227);
 });

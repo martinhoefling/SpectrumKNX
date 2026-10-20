@@ -12,21 +12,40 @@ import type { ChartBucket } from '../hooks/useChartData';
 const MIN_GUTTER = 60;
 const MAX_GUTTER = 220;
 
-/** Gutter of the binary timeline and events charts: room for their GA labels. */
+/** Minimum gutter of the binary timeline and events charts: room for their GA labels. */
 export const LABEL_GUTTER = 150;
+/** Widest label gutter; longer GA names are cut with an ellipsis (#521). */
+export const MAX_LABEL_GUTTER = 280;
 
 type Measure = (text: string) => number | null;
 
 // Reused scratch canvas for text measurement (created lazily, once).
 let measureCanvas: HTMLCanvasElement | null = null;
 
-const measureTickLabel: Measure = text => {
+const measureWithFont = (font: string): Measure => text => {
   measureCanvas ??= document.createElement('canvas');
   const ctx = measureCanvas.getContext('2d');
   if (!ctx) return null;
-  ctx.font = '11px sans-serif'; // approximates uPlot's default axis label font
+  ctx.font = font;
   return ctx.measureText(text).width;
 };
+
+const measureTickLabel = measureWithFont('11px sans-serif'); // approximates uPlot's default axis label font
+const measureGaLabel = measureWithFont('600 12px sans-serif'); // the legend's 0.75rem semibold GA name
+
+/**
+ * Gutter a binary timeline or events chart needs: wide enough for its longest
+ * GA name, within limits, instead of cutting names at a fixed width (#521).
+ */
+export function labelGutterWidth(series: ChartBucket['series'], measure: Measure = measureGaLabel): number {
+  let widest = 0;
+  for (const s of series) {
+    const width = measure(s.name);
+    if (width == null) return LABEL_GUTTER;
+    widest = Math.max(widest, width);
+  }
+  return Math.min(MAX_LABEL_GUTTER, Math.max(LABEL_GUTTER, Math.ceil(widest) + 24));
+}
 
 /**
  * Gutter a metric chart needs on its own: wide enough for its largest y-axis
@@ -45,15 +64,17 @@ export function metricGutterWidth(series: ChartBucket['series'], unit: string, m
 }
 
 /** Gutter one chart needs on its own. */
-export function gutterWidthFor(bucket: ChartBucket, measure: Measure = measureTickLabel): number {
-  return bucket.isBinary || bucket.isEvents ? LABEL_GUTTER : metricGutterWidth(bucket.series, bucket.unit, measure);
+export function gutterWidthFor(bucket: ChartBucket, measure?: Measure): number {
+  return bucket.isBinary || bucket.isEvents
+    ? labelGutterWidth(bucket.series, measure)
+    : metricGutterWidth(bucket.series, bucket.unit, measure);
 }
 
 /**
  * The one gutter all charts currently on screen share: the widest any of them
  * needs. `measure` is injectable so this is testable without a canvas.
  */
-export function sharedLeftGutter(buckets: ChartBucket[], measure: Measure = measureTickLabel): number {
+export function sharedLeftGutter(buckets: ChartBucket[], measure?: Measure): number {
   let widest = 0;
   for (const bucket of buckets) widest = Math.max(widest, gutterWidthFor(bucket, measure));
   return widest;

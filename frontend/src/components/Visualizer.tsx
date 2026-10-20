@@ -30,12 +30,14 @@ interface VisualizerProps {
   /** Per-target row actions in the sidebar (#341): write/filter/last-seen. */
   writeEnabled?: boolean;
   onFilterGAs?: (addresses: string[]) => void;
+  /** Show a GA's telegrams in the telegram list (legend click, #521). */
+  onShowGaTelegrams?: (address: string) => void;
   onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
 }
 
 export const Visualizer: React.FC<VisualizerProps> = ({
   telegrams, selectedTargets, onTargetsChange, onClose, getShareLink, embed = false,
-  zoomRange, onZoomRangeChange, onTimeClick, writeEnabled, onFilterGAs, onLastSeen,
+  zoomRange, onZoomRangeChange, onTimeClick, writeEnabled, onFilterGAs, onShowGaTelegrams, onLastSeen,
 }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
@@ -188,9 +190,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({
     <div ref={chartWrapperRef} style={{ flex: 1, overflowY: 'auto', padding: embed ? '0.75rem' : '1.5rem' }}>
       {displayBuckets.map(g => (
         g.bucket.isBinary ? (
-          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} leftGutter={leftGutter} />
+          <TimelineChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} showDots={showDots} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} leftGutter={leftGutter} onGaClick={onShowGaTelegrams} />
         ) : g.bucket.isEvents ? (
-          <EventDotsChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} leftGutter={leftGutter} />
+          <EventDotsChart key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]} autoFollow={autoFollow} onZoomRangeChange={setZoomRange} onTimeClick={onTimeClick} leftGutter={leftGutter} onGaClick={onShowGaTelegrams} />
         ) : (
           <MixedChart
             key={g.key} bucket={g.bucket} minTime={activeRange[0]} maxTime={activeRange[1]}
