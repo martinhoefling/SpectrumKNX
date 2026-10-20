@@ -698,6 +698,15 @@ function App() {
     setIsFilterOpen(true);
   }, [handleFiltersChange]);
 
+  // Click a GA name in a chart legend: add it to the target filter, make sure
+  // filtering is on and show the newest telegrams in the list (#521).
+  const handleShowGaTelegrams = useCallback((address: string) => {
+    handleFilterGAs([address]);
+    setFiltersEnabled(true);
+    setListFollow(true);
+    setActivePanel('list');
+  }, [handleFilterGAs]);
+
   // Time-Delta-Context window, now edited from the telegram list's DELTA TIME
   // quick-filter cell rather than the filter pane (#309, #371).
   const handleDeltaContextChange = useCallback((deltaBeforeMs: number, deltaAfterMs: number) => {
@@ -1221,6 +1230,7 @@ function App() {
                     onTimeClick={handleChartTimeClick}
                     writeEnabled={serverConfig?.status?.write_enabled}
                     onFilterGAs={handleFilterGAs}
+                    onShowGaTelegrams={handleShowGaTelegrams}
                     onLastSeen={handleQuickLastSeen}
                   />
                 ) : isLastSeenOpen ? (

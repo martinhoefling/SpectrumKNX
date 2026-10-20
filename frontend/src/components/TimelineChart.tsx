@@ -5,7 +5,7 @@ import 'uplot/dist/uPlot.min.css';
 import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
 import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
-import { LABEL_GUTTER } from '../utils/chartGutter';
+import { labelGutterWidth } from '../utils/chartGutter';
 
 interface TimelineChartProps {
   bucket: ChartBucket;
@@ -24,11 +24,13 @@ interface TimelineChartProps {
   /** Left gutter shared with the other charts on screen, so all time axes
    * start at the same column. Defaults to this chart's own label gutter. */
   leftGutter?: number;
+  /** Click on a GA name in the legend: show that GA's telegrams in the list (#521). */
+  onGaClick?: (address: string) => void;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
 
-export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange, onTimeClick, leftGutter }) => {
+export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, maxTime, showDots, autoFollow = false, onZoomRangeChange, onTimeClick, leftGutter, onGaClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -65,7 +67,7 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
   // Show a date alongside times once the visible range crosses midnight (#281).
   const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
   // Shared with the other charts on screen so all time axes line up.
-  const LEFT_GUTTER = leftGutter ?? LABEL_GUTTER;
+  const LEFT_GUTTER = leftGutter ?? labelGutterWidth(bucket.series);
 
   const rowHeight = 40;
   const rowGap = 4;
@@ -122,12 +124,16 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
               ctx.fillStyle = isOn ? '#22c55e' : '#ef4444';
               ctx.fillRect(xStart, yTop, xEnd - xStart, rowHeight);
 
-              if (xEnd - xStart > 40) {
+              // Centre the label on the visible part of the bar, so a bar that
+              // starts before or ends after the plot isn't labelled off-screen (#521).
+              const visStart = Math.max(xStart, left);
+              const visEnd = Math.min(xEnd, left + width);
+              if (visEnd - visStart > 40) {
                 ctx.fillStyle = 'white';
                 ctx.font = 'bold 11px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(isOn ? 'On' : 'Off', xStart + (xEnd - xStart) / 2, yTop + rowHeight / 2);
+                ctx.fillText(isOn ? 'On' : 'Off', visStart + (visEnd - visStart) / 2, yTop + rowHeight / 2);
               }
             }
 
@@ -285,13 +291,21 @@ export const TimelineChart: React.FC<TimelineChartProps> = ({ bucket, minTime, m
                   lineHeight: '1.2',
                 }}
               >
-                <div style={{
-                  fontWeight: 600,
-                  color: 'var(--text-main)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }} title={s.name}>
+                {/* The overlay ignores the mouse so the plot stays hoverable;
+                    the name opts back in for its tooltip and click (#521). */}
+                <div
+                  style={{
+                    fontWeight: 600,
+                    color: 'var(--text-main)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'auto',
+                    cursor: onGaClick ? 'pointer' : undefined,
+                  }}
+                  title={onGaClick ? `${s.name} (${s.address}) – show telegrams` : `${s.name} (${s.address})`}
+                  onClick={onGaClick ? () => onGaClick(s.address) : undefined}
+                >
                   {s.name}
                 </div>
                 <div

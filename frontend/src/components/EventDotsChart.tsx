@@ -6,7 +6,7 @@ import type { ChartBucket } from '../hooks/useChartData';
 import { useThemeTick } from '../hooks/useTheme';
 import { seriesColor } from '../utils/seriesColors';
 import { spansMultipleDays, formatAxisTime, formatFullTime } from '../utils/timeFormat';
-import { LABEL_GUTTER } from '../utils/chartGutter';
+import { labelGutterWidth } from '../utils/chartGutter';
 
 interface EventDotsChartProps {
   bucket: ChartBucket;
@@ -20,6 +20,8 @@ interface EventDotsChartProps {
   /** Left gutter shared with the other charts on screen, so all time axes
    * start at the same column. Defaults to this chart's own label gutter. */
   leftGutter?: number;
+  /** Click on a GA name in the legend: show that GA's telegrams in the list (#521). */
+  onGaClick?: (address: string) => void;
 }
 
 const syncCursor = uPlot.sync('knx-time-axis');
@@ -31,7 +33,7 @@ const syncCursor = uPlot.sync('knx-time-axis');
  * (no forward-fill/held state); its tooltip/legend shows the telegram's
  * formatted value.
  */
-export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime, maxTime, autoFollow = false, onZoomRangeChange, onTimeClick, leftGutter }) => {
+export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime, maxTime, autoFollow = false, onZoomRangeChange, onTimeClick, leftGutter, onGaClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const themeTick = useThemeTick();
@@ -66,7 +68,7 @@ export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime,
 
   const multiDay = minTime != null && maxTime != null && spansMultipleDays(minTime, maxTime);
   // Shared with the other charts on screen so all time axes line up.
-  const LEFT_GUTTER = leftGutter ?? LABEL_GUTTER;
+  const LEFT_GUTTER = leftGutter ?? labelGutterWidth(bucket.series);
 
   const rowHeight = 32;
   const rowGap = 4;
@@ -271,13 +273,21 @@ export const EventDotsChart: React.FC<EventDotsChartProps> = ({ bucket, minTime,
                   lineHeight: '1.2',
                 }}
               >
-                <div style={{
-                  fontWeight: 600,
-                  color: 'var(--text-main)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }} title={s.name}>
+                {/* The overlay ignores the mouse so the plot stays hoverable;
+                    the name opts back in for its tooltip and click (#521). */}
+                <div
+                  style={{
+                    fontWeight: 600,
+                    color: 'var(--text-main)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'auto',
+                    cursor: onGaClick ? 'pointer' : undefined,
+                  }}
+                  title={onGaClick ? `${s.name} (${s.address}) – show telegrams` : `${s.name} (${s.address})`}
+                  onClick={onGaClick ? () => onGaClick(s.address) : undefined}
+                >
                   {s.name}
                 </div>
                 <div
