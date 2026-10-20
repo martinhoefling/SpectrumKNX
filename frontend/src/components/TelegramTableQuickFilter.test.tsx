@@ -5,6 +5,7 @@ import { TelegramTable, type SortConfig } from './TelegramTable';
 import { makeTelegram } from '../test/telegramFactory';
 import type { Telegram } from '../hooks/useWebSocket';
 import { DEFAULT_FILTERS } from '../types/filters';
+import { anchorKey } from '../utils/anchorKey';
 
 // The <input type="datetime-local"> quick-filter rows are interpreted as
 // local time (matching the datetime-local semantics used elsewhere in the
@@ -257,4 +258,18 @@ test("ctrl/cmd-click on a row's flag applies its new state to every marked row (
 
   // The two marked rows and the clicked one are now flagged.
   expect(rows.slice(0, 3).every(isFlagged)).toBe(true);
+});
+
+test('context rows passed in by the parent survive the quick filter (#520)', () => {
+  const contextKey = anchorKey(TELEGRAMS[2]);
+  const { container } = renderTable({
+    quickFilterOpen: true,
+    quickFilterEnabled: true,
+    quickPatterns: { target: { top: '', bottom: 'küche' } },
+    contextKeys: new Set([contextKey]),
+  });
+  // 'Licht Küche' matches; 'Jalousie Bad' is a context row and stays; 'Licht Flur' goes.
+  expect(rowCount(container)).toBe(2);
+  expect(screen.getByText('Jalousie Bad')).toBeInTheDocument();
+  expect(screen.queryByText('Licht Flur')).not.toBeInTheDocument();
 });

@@ -8,8 +8,7 @@ import { SendToGaPopover } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
-import { makeAddressPatternMatcher } from '../utils/addressPattern';
-import { makeValueMatcher } from '../utils/valuePattern';
+import { compileQuickFilters, type QuickCellValue, type QuickPatterns } from '../utils/quickFilter';
 import { useTargetColors } from '../utils/targetColors';
 import { anchorKey } from '../utils/anchorKey';
 import { adjacentMark } from '../utils/adjacentMark';
@@ -36,8 +35,8 @@ interface TelegramTableProps {
   onQuickFilterOpenChange?: (open: boolean) => void;
   quickFilterEnabled?: boolean;
   onQuickFilterEnabledChange?: (enabled: boolean) => void;
-  quickPatterns?: Partial<Record<ColId, QuickCellValue>>;
-  onQuickPatternsChange?: (patterns: Partial<Record<ColId, QuickCellValue>>) => void;
+  quickPatterns?: QuickPatterns;
+  onQuickPatternsChange?: (patterns: QuickPatterns) => void;
   /** Edits the Time-Delta-Context window (#309, #371) — moved here from the
    * filter pane; current values come from `activeFilters.deltaBeforeMs/deltaAfterMs`. */
   onDeltaContextChange?: (deltaBeforeMs: number, deltaAfterMs: number) => void;
@@ -78,14 +77,6 @@ interface TelegramTableProps {
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
 
-// A quick-filter cell's two input rows (#309). Most columns use both (address/DPT
-// pattern + name regex on source/target/dpt; from/to on time/value); TYPE only
-// uses `top` (a comma-separated fixed-value list); `delta` isn't matched through
-// this pipeline at all — its two rows edit the Time-Delta-Context window instead.
-interface QuickCellValue {
-  top: string;
-  bottom: string;
-}
 const EMPTY_CELL: QuickCellValue = { top: '', bottom: '' };
 
 interface ColumnDef {
@@ -159,85 +150,6 @@ const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 // comma-separated fixed-value list); DELTA doesn't participate here at all —
 // it edits the Time-Delta-Context window instead (#371).
 
-/** Case-insensitive regex matcher; an invalid pattern degrades to a literal substring match. */
-const makeTextMatcher = (pattern: string): ((s: string) => boolean) => {
-  try {
-    const re = new RegExp(pattern, 'i');
-    return s => re.test(s);
-  } catch {
-    const lower = pattern.toLowerCase();
-    return s => s.toLowerCase().includes(lower);
-  }
-};
-
-/** Builds one combined predicate from all active quick-filter cells, so
- * patterns are compiled once per change rather than per telegram. */
-const compileQuickFilters = (patterns: Partial<Record<ColId, QuickCellValue>>): ((t: Telegram) => boolean) => {
-  const checks: ((t: Telegram) => boolean)[] = [];
-
-  const time = patterns.time;
-  if (time?.top || time?.bottom) {
-    const from = time.top ? new Date(time.top).getTime() : null;
-    const to = time.bottom ? new Date(time.bottom).getTime() : null;
-    checks.push(t => {
-      const ts = new Date(t.timestamp).getTime();
-      if (from != null && !Number.isNaN(from) && ts < from) return false;
-      if (to != null && !Number.isNaN(to) && ts > to) return false;
-      return true;
-    });
-  }
-
-  const source = patterns.source;
-  if (source?.top) {
-    const m = makeAddressPatternMatcher(source.top);
-    checks.push(t => m(t.source_address));
-  }
-  if (source?.bottom) {
-    const m = makeTextMatcher(source.bottom);
-    checks.push(t => m(t.source_name ?? ''));
-  }
-
-  const target = patterns.target;
-  if (target?.top) {
-    const m = makeAddressPatternMatcher(target.top);
-    checks.push(t => m(t.target_address));
-  }
-  if (target?.bottom) {
-    const m = makeTextMatcher(target.bottom);
-    checks.push(t => m(t.target_name ?? ''));
-  }
-
-  const type = patterns.type;
-  if (type?.top) {
-    const values = type.top.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-    if (values.length > 0) {
-      checks.push(t => {
-        const typeVal = (t.simplified_type || t.telegram_type || '').toLowerCase();
-        const dirVal = (t.direction ?? '').toLowerCase();
-        return values.some(v => v === typeVal || v === dirVal);
-      });
-    }
-  }
-
-  const dpt = patterns.dpt;
-  if (dpt?.top) {
-    const m = makeAddressPatternMatcher(dpt.top);
-    checks.push(t => t.dpt_main != null && m(dptKey(t.dpt_main, t.dpt_sub)));
-  }
-  if (dpt?.bottom) {
-    const m = makeTextMatcher(dpt.bottom);
-    checks.push(t => m(t.dpt_name ?? ''));
-  }
-
-  const value = patterns.value;
-  if (value?.top || value?.bottom) {
-    const m = makeValueMatcher(value.top ?? '', value.bottom ?? '');
-    checks.push(m);
-  }
-
-  if (checks.length === 0) return () => true;
-  return t => checks.every(check => check(t));
-};
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
@@ -335,7 +247,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // in the bar switches it without losing the patterns.
   const [internalQuickOpen, setInternalQuickOpen] = useState(false);
   const [internalQuickEnabled, setInternalQuickEnabled] = useState(false);
-  const [internalQuickPatterns, setInternalQuickPatterns] = useState<Partial<Record<ColId, QuickCellValue>>>({});
+  const [internalQuickPatterns, setInternalQuickPatterns] = useState<QuickPatterns>({});
 
   const quickOpen = quickFilterOpen ?? internalQuickOpen;
   const setQuickOpen = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
@@ -352,7 +264,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   }, [quickEnabled, onQuickFilterEnabledChange]);
 
   const currentPatterns = quickPatterns ?? internalQuickPatterns;
-  const setQuickPatterns = useCallback((val: Partial<Record<ColId, QuickCellValue>> | ((prev: Partial<Record<ColId, QuickCellValue>>) => Partial<Record<ColId, QuickCellValue>>)) => {
+  const setQuickPatterns = useCallback((val: QuickPatterns | ((prev: QuickPatterns) => QuickPatterns)) => {
     const next = typeof val === 'function' ? val(currentPatterns) : val;
     setInternalQuickPatterns(next);
     onQuickPatternsChange?.(next);
@@ -465,11 +377,19 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     setFlaggedKeysList(current.filter(k => !targets.has(k)));
   }, [anchorsContext, flaggedKeysList, markedKeysList, setFlaggedKeysList, contextForAll, setContextForAll, telegrams, contextKeys]);
 
+  // Context rows and flagged anchors are already the result of the
+  // Time-Delta-Context expansion, which the parent runs on quick-filter
+  // matches too. Filtering them here again would drop the context (#520).
   const quickFiltered = useMemo(() => {
     if (!quickOpen || !quickEnabled) return telegrams;
     const matches = compileQuickFilters(currentPatterns);
-    return telegrams.filter(matches);
-  }, [telegrams, quickOpen, quickEnabled, currentPatterns]);
+    const flagsActive = activeFilters.deltaContextEnabled;
+    return telegrams.filter(t => {
+      if (matches(t)) return true;
+      const key = anchorKey(t);
+      return !!contextKeys?.has(key) || (flagsActive && flaggedSet.has(key));
+    });
+  }, [telegrams, quickOpen, quickEnabled, currentPatterns, contextKeys, flaggedSet, activeFilters.deltaContextEnabled]);
 
   // Time deltas between consecutive rows, by visual (sorted) order — always
   // computed regardless of sort column, respecting whatever hierarchy is

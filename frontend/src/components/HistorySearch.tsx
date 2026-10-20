@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TelegramTable, type SortConfig, type SortKey } from './TelegramTable';
 import { readSortConfigPref, writeSortConfigPref, toggleSortLevel, sortTelegrams } from '../utils/sortConfig';
 import { expandWithDeltaContext } from '../utils/deltaContextExpansion';
+import { activeQuickFilter, type QuickPatterns } from '../utils/quickFilter';
 import { anchorKey } from '../utils/anchorKey';
 import type { Telegram } from '../hooks/useWebSocket';
 import { History, Download, AlertTriangle, Trash2, SlidersHorizontal, LineChart, RefreshCw } from 'lucide-react';
@@ -62,6 +63,10 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   // Per-message Time-Delta-Context flags (#319) — local to this view, like marks.
   const [flaggedKeys, setFlaggedKeys] = useState<string[]>([]);
   const [contextForAllMatches, setContextForAllMatches] = useState(true);
+  // Quick filter bar state, lifted so its matches anchor the context (#520).
+  const [quickFilterOpen, setQuickFilterOpen] = useState(false);
+  const [quickFilterEnabled, setQuickFilterEnabled] = useState(false);
+  const [quickPatterns, setQuickPatterns] = useState<QuickPatterns>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
 
@@ -169,11 +174,14 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
   // per-message flags are set after the historical load already happened.
   const deltaExpandedHistory = useMemo(() => {
     const noFilter = !filtering;
-    const matches = sortedTelegrams.map(t => noFilter || matchesTelegram(t, effectiveFilters));
+    const quick = activeQuickFilter(quickFilterOpen, quickFilterEnabled, quickPatterns);
+    const matches = sortedTelegrams.map(t =>
+      (noFilter || matchesTelegram(t, effectiveFilters)) && (!quick || quick(t))
+    );
     const { before, after } = effectiveDeltaContext(activeFilters);
     const flags = activeFilters.deltaContextEnabled ? new Set(flaggedKeys) : EMPTY_FLAG_SET;
     return expandWithDeltaContext(sortedTelegrams, matches, anchorKey, flags, before, after, contextForAllMatches);
-  }, [sortedTelegrams, activeFilters, effectiveFilters, filtering, flaggedKeys, contextForAllMatches]);
+  }, [sortedTelegrams, activeFilters, effectiveFilters, filtering, flaggedKeys, contextForAllMatches, quickFilterOpen, quickFilterEnabled, quickPatterns]);
   const filteredSortedTelegrams = deltaExpandedHistory.items;
   // Keys of rows shown only as unfiltered context around a match/flag (#343).
   const contextTelegramKeys = deltaExpandedHistory.contextKeys;
@@ -369,6 +377,12 @@ export const HistorySearch: React.FC<HistorySearchProps> = ({
               activeFilters={activeFilters}
               onQuickFilter={handleQuickFilter}
               onQuickVisualize={handleQuickVisualize}
+              quickFilterOpen={quickFilterOpen}
+              onQuickFilterOpenChange={setQuickFilterOpen}
+              quickFilterEnabled={quickFilterEnabled}
+              onQuickFilterEnabledChange={setQuickFilterEnabled}
+              quickPatterns={quickPatterns}
+              onQuickPatternsChange={setQuickPatterns}
               onDeltaContextChange={handleDeltaContextChange}
               onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
               flaggedKeys={flaggedKeys}
