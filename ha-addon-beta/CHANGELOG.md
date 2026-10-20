@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.0.0-beta.13
+
+### Added
+
+- **CSV export**: the info bar of the telegram list (ⓘ in the column header) has a *CSV* button
+  that downloads exactly the rows of the current view, with all filters, the Quick Filter and the
+  Δt context applied. *Import / Export* can also export the database as CSV next to ETS6 XML,
+  with `;` or `,` as separator (#522).
+- **Binary timeline: click a GA name** in the legend of the binary timeline or events chart to
+  add it to the target filter and jump to its newest telegrams in the list (#521).
+
+### Changed
+
+- **Binary timeline: full GA names**: the label column grows with the longest GA name (up to
+  280 px) instead of cutting names after about 17 characters; hovering a name shows it in full
+  with its address. *On*/*Off* is written in the visible part of a bar (#521).
+- **Storage library `knx-telegram-store` 0.15.2**: the SQLite write-ahead log is truncated after
+  old telegrams are evicted.
+
+### Fixed
+
+- **Δt context with the Quick Filter**: the Quick Filter removed the context rows around its
+  matches again. Quick Filter matches now anchor the Time-Delta-Context like main-filter matches,
+  in the Group Monitor and in History Search (#520).
+- **Consistent Home Assistant backups**: Home Assistant copies the add-on's data while it runs.
+  With `DB_BACKEND: SQLITE`, the add-on now checkpoints its telegram database before the copy and
+  holds off writes until the copy is done; telegrams received meanwhile are written afterwards
+  (#519).
+
 ## 2.0.0-beta.12
 
 ### Added
