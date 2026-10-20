@@ -1,4 +1,4 @@
-"""Export of stored telegrams as ETS6-compatible ``CommunicationLog`` XML.
+"""Export of stored telegrams as ETS6-compatible ``CommunicationLog`` XML or CSV.
 
 ``StoredTelegram.raw_data`` holds only the APDU payload bytes, so full cEMI
 frames are re-encoded via xknx. Addresses, telegram type, APDU and timestamp
@@ -8,6 +8,8 @@ bus ACKs) are not reproduced. See DESIGN_IMPORT_EXPORT.md.
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import UTC
 
 from knx_telegram_store import StoredTelegram
@@ -63,3 +65,54 @@ def stored_to_record(telegram: StoredTelegram) -> RawTelegramRecord | None:
         return None
     timestamp = telegram.timestamp if telegram.timestamp.tzinfo else telegram.timestamp.replace(tzinfo=UTC)
     return RawTelegramRecord(timestamp=timestamp, service="L_Data.ind", raw_data=raw)
+
+
+# ── CSV (#522) ──────────────────────────────────────────────────────────────
+# Columns of the CSV export, keyed by the field of the API telegram dict
+# (``api._build_telegram_response``). Kept in sync with the frontend's
+# ``utils/telegramCsv.ts``, which exports the telegram list's current view.
+CSV_COLUMNS: list[tuple[str, str]] = [
+    ("timestamp", "timestamp"),
+    ("source_address", "source"),
+    ("source_name", "source_name"),
+    ("target_address", "target"),
+    ("target_name", "target_name"),
+    ("simplified_type", "type"),
+    ("direction", "direction"),
+    ("dpt", "dpt"),
+    ("dpt_name", "dpt_name"),
+    ("value_formatted", "value"),
+    ("value_numeric", "value_numeric"),
+    ("unit", "unit"),
+    ("raw_hex", "raw"),
+]
+
+CSV_DELIMITERS = {"comma": ",", "semicolon": ";"}
+
+
+def _csv_cell(row: dict, key: str) -> object:
+    if key == "dpt":
+        main, sub = row.get("dpt_main"), row.get("dpt_sub")
+        if main is None:
+            return ""
+        return f"{main}.{sub:03d}" if sub is not None else str(main)
+    value = row.get(key)
+    if key == "timestamp" and hasattr(value, "isoformat"):
+        return value.astimezone(UTC).isoformat() if value.tzinfo else value.isoformat()
+    return "" if value is None else value
+
+
+def csv_header(delimiter: str = ",") -> str:
+    """The CSV header line, prefixed with a UTF-8 BOM so Excel detects the encoding."""
+    buf = io.StringIO()
+    csv.writer(buf, delimiter=delimiter).writerow(label for _, label in CSV_COLUMNS)
+    return "\ufeff" + buf.getvalue()
+
+
+def csv_rows(rows: list[dict], delimiter: str = ",") -> str:
+    """CSV lines for API telegram dicts, without a header."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=delimiter)
+    for row in rows:
+        writer.writerow(_csv_cell(row, key) for key, _ in CSV_COLUMNS)
+    return buf.getvalue()

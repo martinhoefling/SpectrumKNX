@@ -1412,8 +1412,15 @@ async def export_telegrams(
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     limit: int = 500_000,
+    format: str = "xml",
+    delimiter: str = "comma",
 ):
-    """Streams matching telegrams as an ETS6-compatible CommunicationLog XML file."""
+    """Streams matching telegrams as an ETS6-compatible CommunicationLog XML file or as CSV (#522)."""
+    if format not in ("xml", "csv"):
+        raise HTTPException(status_code=400, detail="format must be 'xml' or 'csv'")
+    if delimiter not in telegram_export.CSV_DELIMITERS:
+        raise HTTPException(status_code=400, detail="delimiter must be 'comma' or 'semicolon'")
+    csv_delimiter = telegram_export.CSV_DELIMITERS[delimiter]
     type_map_reverse = {"Write": "GroupValueWrite", "Read": "GroupValueRead", "Response": "GroupValueResponse"}
     query = TelegramQuery(
         sources=[s.strip() for s in source_address.split(",")] if source_address else [],
@@ -1427,28 +1434,34 @@ async def export_telegrams(
         order_descending=False,
     )
 
+    def render_page(telegrams: list) -> str:
+        if format == "csv":
+            return telegram_export.csv_rows(_build_telegram_response(telegrams), csv_delimiter)
+        return "".join(
+            format_telegram_element(record, connection_name="Spectrum KNX Export")
+            for telegram in telegrams
+            if (record := telegram_export.stored_to_record(telegram)) is not None
+        )
+
     async def generate():
-        yield COMMUNICATION_LOG_HEADER
+        yield telegram_export.csv_header(csv_delimiter) if format == "csv" else COMMUNICATION_LOG_HEADER
         offset = 0
         while offset < limit:
             page = dataclasses.replace(query, limit=min(EXPORT_PAGE_SIZE, limit - offset), offset=offset)
             result = await store.query(page, flush_first=True)
-            chunk = "".join(
-                format_telegram_element(record, connection_name="Spectrum KNX Export")
-                for telegram in result.telegrams
-                if (record := telegram_export.stored_to_record(telegram)) is not None
-            )
+            chunk = render_page(result.telegrams)
             if chunk:
                 yield chunk
             if not result.limit_reached or len(result.telegrams) == 0:
                 break
             offset += len(result.telegrams)
-        yield COMMUNICATION_LOG_FOOTER
+        if format == "xml":
+            yield COMMUNICATION_LOG_FOOTER
 
-    filename = f"spectrum-knx-export-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.xml"
+    filename = f"spectrum-knx-export-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.{format}"
     return StreamingResponse(
         generate(),
-        media_type="application/xml",
+        media_type="text/csv; charset=utf-8" if format == "csv" else "application/xml",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

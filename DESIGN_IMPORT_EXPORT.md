@@ -141,7 +141,7 @@ push can be layered on later without API changes.
 | `POST` | `/api/import` | multipart upload, one `.xml` or `.zip`. Starts the job; `409` if one is running, `403` in `READ_ONLY` (companion) mode. Returns job id. |
 | `GET` | `/api/import/status` | current/last job state (see above); `{"state": "idle"}` if none. |
 | `POST` | `/api/import/cancel` | request cancellation of the running job. |
-| `GET` | `/api/export` | same filter query params as `/api/telegrams` (+`start_time`/`end_time`); streams an ETS6-compatible `CommunicationLog` XML download. |
+| `GET` | `/api/export` | same filter query params as `/api/telegrams` (+`start_time`/`end_time`); streams an ETS6-compatible `CommunicationLog` XML download, or CSV with `format=csv` (`delimiter=comma|semicolon`, UTF-8 with BOM; #522). |
 
 Export re-encodes each `StoredTelegram` into a cEMI `L_Data.ind` frame via xknx
 (`GroupValueWrite/Response` from `raw_data`/`payload` + DPT heuristics, `GroupValueRead`
