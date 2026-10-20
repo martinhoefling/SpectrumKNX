@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
-import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot } from 'lucide-react';
+import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot, Download } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaPopover } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
@@ -11,6 +11,7 @@ import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
 import { compileQuickFilters, type QuickCellValue, type QuickPatterns } from '../utils/quickFilter';
 import { useTargetColors } from '../utils/targetColors';
 import { anchorKey } from '../utils/anchorKey';
+import { downloadTelegramsCsv } from '../utils/telegramCsv';
 import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
 import { moveColumn, readColumnOrderPref, writeColumnOrderPref } from '../utils/columnOrder';
@@ -1303,6 +1304,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 {infoMetrics.contextCount} context
               </span>
             )}
+            <button
+              style={infoChipBtnStyle}
+              title="Download the telegrams in the current view (all filters applied, in list order) as CSV"
+              onClick={() => downloadTelegramsCsv(telegramRows)}
+            >
+              <Download size={11} /> CSV
+            </button>
           </div>
         </div>
       )}

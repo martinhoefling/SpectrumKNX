@@ -4,6 +4,7 @@ import {
   XCircle, Ban, FileArchive,
 } from 'lucide-react';
 import { apiUrl } from '../utils/basePath';
+import { defaultCsvDelimiter } from '../utils/telegramCsv';
 
 // Mirrors ImportJob.to_dict() in backend/telegram_import.py plus the read_only flag.
 interface ImportStatus {
@@ -55,6 +56,8 @@ export function ImportExportView() {
   const [sourceAddress, setSourceAddress] = useState('');
   const [targetAddress, setTargetAddress] = useState('');
   const [telegramType, setTelegramType] = useState('');
+  const [exportFormat, setExportFormat] = useState<'xml' | 'csv'>('xml');
+  const [csvDelimiter, setCsvDelimiter] = useState<'comma' | 'semicolon'>(() => defaultCsvDelimiter() === ';' ? 'semicolon' : 'comma');
 
   const readOnly = status.read_only === true;
   const isRunning = status.state === 'running';
@@ -140,6 +143,10 @@ export function ImportExportView() {
     if (sourceAddress.trim()) params.set('source_address', sourceAddress.trim());
     if (targetAddress.trim()) params.set('target_address', targetAddress.trim());
     if (telegramType.trim()) params.set('telegram_type', telegramType.trim());
+    if (exportFormat === 'csv') {
+      params.set('format', 'csv');
+      params.set('delimiter', csvDelimiter);
+    }
     const qs = params.toString();
     window.location.href = apiUrl(`/api/export${qs ? `?${qs}` : ''}`);
   };
@@ -301,10 +308,11 @@ export function ImportExportView() {
 
           {/* ── Export card ── */}
           <div style={cardStyle}>
-            <div style={labelStyle}><Download size={16} /> Export to ETS6 XML</div>
+            <div style={labelStyle}><Download size={16} /> Export</div>
             <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', margin: 0, lineHeight: 1.5 }}>
-              Download stored telegrams as an ETS6-compatible <code>CommunicationLog</code>.
-              Leave filters blank to export everything.
+              Download stored telegrams as an ETS6-compatible <code>CommunicationLog</code> or as CSV
+              for spreadsheets. Leave filters blank to export everything. To export exactly what the
+              telegram list shows, use <strong>CSV</strong> in its info bar.
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -328,6 +336,22 @@ export function ImportExportView() {
                 <input value={telegramType} onChange={(e) => setTelegramType(e.target.value)}
                   placeholder="Write, Read, Response" className="glass-input" style={{ padding: '0.5rem', width: '100%' }} />
               </Field>
+              <Field label="Format">
+                <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value as 'xml' | 'csv')}
+                  aria-label="Export format" className="glass-input" style={{ padding: '0.5rem', width: '100%' }}>
+                  <option value="xml">ETS6 XML</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </Field>
+              {exportFormat === 'csv' && (
+                <Field label="CSV delimiter">
+                  <select value={csvDelimiter} onChange={(e) => setCsvDelimiter(e.target.value as 'comma' | 'semicolon')}
+                    aria-label="CSV delimiter" className="glass-input" style={{ padding: '0.5rem', width: '100%' }}>
+                    <option value="semicolon">Semicolon ( ; ) — e.g. German Excel</option>
+                    <option value="comma">Comma ( , )</option>
+                  </select>
+                </Field>
+              )}
             </div>
 
             <button
@@ -338,7 +362,7 @@ export function ImportExportView() {
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
               }}
             >
-              <Download size={17} /> Download ETS6 XML
+              <Download size={17} /> {exportFormat === 'csv' ? 'Download CSV' : 'Download ETS6 XML'}
             </button>
           </div>
 

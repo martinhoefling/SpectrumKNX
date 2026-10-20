@@ -135,3 +135,49 @@ def test_export_empty_still_valid_xml(mock_query):
     body = client.get("/api/export").text
     assert body.startswith("<?xml")
     assert "<CommunicationLog" in body and "</CommunicationLog>" in body
+
+
+@patch("database.store.query", new_callable=AsyncMock)
+def test_export_csv(mock_query):
+    mock_query.return_value = TelegramQueryResult(
+        telegrams=[
+            StoredTelegram(
+                timestamp=datetime(2026, 3, 5, 0, 0, 0, tzinfo=UTC),
+                source="1.0.18",
+                destination="2/4/61",
+                telegramtype="GroupValueWrite",
+                direction="Incoming",
+                dpt_main=5,
+                dpt_sub=1,
+                payload=None,
+                value=200.0,
+                raw_data="00c8",
+                source_name="Aktor; Küche",
+                destination_name="Dimmwert",
+            )
+        ],
+        total_count=1,
+        limit_reached=False,
+    )
+
+    response = client.get("/api/export?format=csv&delimiter=semicolon")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert ".csv" in response.headers["content-disposition"]
+    lines = response.content.decode("utf-8-sig").splitlines()
+    assert lines[0] == (
+        "timestamp;source;source_name;target;target_name;type;direction;dpt;dpt_name;value;value_numeric;unit;raw"
+    )
+    row = lines[1].split(";")
+    assert row[0] == "2026-03-05T00:00:00+00:00"
+    assert row[1] == "1.0.18"
+    # a delimiter inside a name is quoted
+    assert '"Aktor; Küche"' in lines[1]
+    assert "2/4/61" in lines[1] and "5.001" in lines[1] and "0x00c8" in lines[1]
+    assert len(lines) == 2
+
+
+@patch("database.store.query", new_callable=AsyncMock)
+def test_export_rejects_unknown_format(mock_query):
+    assert client.get("/api/export?format=json").status_code == 400
+    assert client.get("/api/export?format=csv&delimiter=tab").status_code == 400
