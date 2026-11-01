@@ -53,6 +53,10 @@ def format_value_nicely(value, dpt_main=None, dpt_sub=None):
                 pass
         return "on" if value else "off"
 
+    if dpt_main == 2 and isinstance(value, dict) and "value" in value:
+        # {"control": True, "value": "on"} -> "on (control)"
+        return f"{value['value']} (control)" if value.get("control") else str(value["value"])
+
     if isinstance(value, int | float):
         # Truncate zeroes: 21.60 -> 21.6, 100.00 -> 100
         return f"{value:g}"
@@ -70,8 +74,13 @@ def convert_value_for_db(value):
         return value.as_date().isoformat()
     elif isinstance(value, KNXDateTime):
         return value.as_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    elif hasattr(value, "as_dict") and hasattr(value, "value"):
+        # 1-bit controlled DPT 2.x, e.g. SwitchControl(control=True, value=Switch.ON):
+        # as_dict() is JSON-safe and keeps the control bit (#534)
+        return value.as_dict()
     elif hasattr(value, "value"):
-        return value.value
+        # Enums (1.001 decodes to Switch.ON) and wrappers; their value may wrap again
+        return convert_value_for_db(value.value)
     # Fallback to string representation for safe json serialization
     return str(value)
 
