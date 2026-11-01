@@ -3,6 +3,11 @@ services:
   backend:
     build:
       context: ./backend
+    # Always build the local backend: the base file pulls the release image
+    # (pull_policy: always, #427), whose packages may not match the mounted
+    # source (#535). Its own tag keeps the build from shadowing ":latest".
+    image: spectrumknx-backend:dev
+    pull_policy: build
     volumes:
       - ./project:/project
       - ./backend:/app
