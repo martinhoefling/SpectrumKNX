@@ -326,3 +326,23 @@ def test_format_dpt_name_invalid_inputs():
         name, unit = format_dpt_name(999, None)
         assert name == "999"
         assert unit is None
+
+
+def test_convert_value_for_db_dpt2_control_is_json_safe():
+    # A DPT 2.001 value wraps a Switch enum; storing it raw broke every flush (#534)
+    import json
+
+    from xknx.dpt import DPTBinary
+    from xknx.dpt.dpt_2 import DPTSwitchControl
+
+    value = convert_value_for_db(DPTSwitchControl.from_knx(DPTBinary(3)))
+    assert value == {"control": True, "value": "on"}
+    json.dumps(value)
+    assert format_value_nicely(value, 2, 1) == "on (control)"
+    assert format_value_nicely({"control": False, "value": "off"}, 2, 1) == "off"
+
+
+def test_convert_value_for_db_unwraps_nested_values():
+    from xknx.dpt.dpt_1 import Switch
+
+    assert convert_value_for_db(Switch.ON) is True
