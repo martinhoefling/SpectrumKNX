@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0-beta.14
+
+### Fixed
+
+- **Telegrams of DPT 2.x group addresses stopped all recording**: a 1-bit controlled value
+  (DPT 2.x, e.g. 2.001 switch control) could not be written to the database. The failed write
+  was retried over and over, so no further telegrams were stored, *History failed* appeared and
+  the log filled with database errors. These values are now stored as control and value and
+  shown as e.g. *on (control)* (#534).
+
 ## 2.0.0-beta.13
 
 ### Added

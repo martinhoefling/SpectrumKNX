@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.14
+
+### Fixed
+
+- **DPT 2.x values**: 1-bit controlled values (DPT 2.x, e.g. 2.001 switch control) are shown as
+  e.g. *on (control)* (#534).
+
 ## 2.0.0-beta.13
 
 ### Added
