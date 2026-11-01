@@ -9,7 +9,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Serve with Python
-FROM python:3.14-slim
+FROM python:3.15-slim
 ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 WORKDIR /app
