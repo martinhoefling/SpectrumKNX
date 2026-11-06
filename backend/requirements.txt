@@ -2,7 +2,7 @@
 # Direct dependencies are declared in pyproject.toml — update both together.
 annotated-doc==0.0.5
 annotated-types==0.8.0
-anyio==4.15.1
+anyio==4.16.0
 asyncpg==0.32.0
 cffi==2.1.1
 click==8.5.0
@@ -20,26 +20,26 @@ pycparser==3.12
 pycryptodomex==3.24.1
 # pydantic-core is deliberately unpinned: pydantic requires an exact core
 # version itself, so pinning it here only creates unresolvable Dependabot PRs.
-pydantic==2.14.1
+pydantic==2.14.2
 Pygments==2.21.0
 pytest==9.2.0
 python-dotenv==1.2.4
 PyYAML==6.0.3
 pyzipper==0.4.0
-SQLAlchemy==2.1.6
+SQLAlchemy==2.1.7
 starlette==1.10.0
 striprtf==0.0.35
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvicorn==0.54.0
-websockets==17.3
-xknx==4.0.0
+websockets==17.4
+xknx==4.1.0
 xknxproject==3.10.0
 httpx==0.28.1
 ruff==0.17.3
-pytest-asyncio==1.4.1
+pytest-asyncio==1.4.1.post1
 aiosqlite==0.22.1
-python-multipart==0.0.32
+python-multipart==0.0.33
 pre-commit==4.7.0
 # MCP server (SDK + transitives) for the /mcp endpoint.
 mcp==2.3.0
@@ -48,7 +48,7 @@ attrs==26.1.0
 httpx-sse==0.4.3
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
-pydantic-settings==2.16.1
+pydantic-settings==2.16.2
 referencing==0.37.0
 rpds-py==2026.9.1
 sse-starlette==3.6.0
