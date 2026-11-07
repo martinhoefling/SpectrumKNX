@@ -1,20 +1,21 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Send } from 'lucide-react';
 
 import { coerceValue } from '../utils/knxSend';
+import { discreteDptValues, type BusPayload } from '../utils/dptValues';
 import { boolBtn, primaryBtn } from '../utils/buttonStyles';
 
 interface Props {
-  /** DPT main number of the target GA, when known. DPT 1 renders On/Off buttons. */
+  /** DPT main number of the target GA, when known. DPT 1 without a subtype renders On/Off. */
   dptMain?: number | null;
-  /** Full DPT key (e.g., "5.001") for scoping recent values. */
+  /** Full DPT key (e.g., "1.008"). A ≤4-bit subtype renders its own value names. */
   dptKey?: string | null;
   /** Target group address for scoping recent values. */
   address?: string | null;
   value: string;
   onValueChange: (value: string) => void;
-  /** Fires with the payload to write: `true`/`false` for DPT 1, the coerced free value otherwise. */
-  onWrite: (payload: boolean | number | string) => void;
+  /** Fires with the payload to write: a boolean or named value for ≤4-bit DPTs, the coerced free value otherwise. */
+  onWrite: (payload: BusPayload) => void;
   /** Disables all controls (busy, invalid address, active scheduled job). */
   disabled?: boolean;
 }
@@ -73,20 +74,71 @@ const saveRecentValue = (val: string, address?: string | null, dptKey?: string |
 /**
  * DPT-aware write controls, shared by every place that writes to the bus
  * (send bar, Last Seen Values) so the same GA renders identically everywhere
- * (#213): On/Off buttons for DPT 1, time/date pickers for DPT 10/11/19,
- * and a recent values dropdown otherwise.
+ * (#213): named value buttons for DPTs of at most 4 bits, time/date pickers
+ * for DPT 10/11/19, and a recent values dropdown otherwise.
  */
 export function WriteControls({ dptMain, dptKey, address, value, onValueChange, onWrite, disabled = false }: Props) {
   const [focused, setFocused] = useState(false);
+  const [picked, setPicked] = useState(0);
   const recents = useMemo(() => getRecentValues(address, dptKey, dptMain), [address, dptKey, dptMain]);
+  const choices = useMemo(() => discreteDptValues(dptKey), [dptKey]);
+
+  useEffect(() => { setPicked(0); }, [dptKey]);
+
+  if (choices && choices.length > 4) {
+    const index = picked < choices.length ? picked : 0;
+    return (
+      <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+        <select
+          aria-label="Value"
+          className="glass-input"
+          value={index}
+          onChange={e => setPicked(Number(e.target.value))}
+          disabled={disabled}
+          style={{ width: 170 }}
+        >
+          {choices.map((choice, i) => (
+            <option key={choice.label} value={i}>{choice.label}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => onWrite(choices[index].payload)}
+          disabled={disabled}
+          style={primaryBtn(disabled)}
+        >
+          <Send size={14} /> Write
+        </button>
+      </div>
+    );
+  }
+
+  if (choices && choices.length > 0) {
+    return (
+      <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+        {choices.map(choice => (
+          <button
+            key={choice.label}
+            type="button"
+            disabled={disabled}
+            onClick={() => onWrite(choice.payload)}
+            style={boolBtn(disabled)}
+            title={`Write ${choice.label}`}
+          >
+            <Send size={13} /> {choice.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   if (dptMain === 1) {
     return (
       <div style={{ display: 'flex', gap: '0.3rem' }}>
-        <button disabled={disabled} onClick={() => onWrite(true)} style={boolBtn(disabled)} title="Write ON (1) to the bus">
+        <button type="button" disabled={disabled} onClick={() => onWrite(true)} style={boolBtn(disabled)} title="Write On">
           <Send size={13} /> On
         </button>
-        <button disabled={disabled} onClick={() => onWrite(false)} style={boolBtn(disabled)} title="Write OFF (0) to the bus">
+        <button type="button" disabled={disabled} onClick={() => onWrite(false)} style={boolBtn(disabled)} title="Write Off">
           <Send size={13} /> Off
         </button>
       </div>

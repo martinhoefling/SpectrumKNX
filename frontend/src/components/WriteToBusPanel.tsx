@@ -20,6 +20,7 @@ import { WriteControls } from './WriteControls';
 import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
 import { dptDesignation } from '../utils/dpt';
+import { describeBusPayload, type BusPayload } from '../utils/dptValues';
 
 interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
@@ -300,7 +301,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
     updateRow(id, { dpt: next, feedback: null, ...(mainChanged ? { value: '' } : {}) });
   };
 
-  const write = async (row: Row, payload: boolean | number | string) => {
+  const write = async (row: Row, payload: BusPayload) => {
     const delaySeconds = parseFloat(row.delay) || 0;
     const intervalSeconds = parseFloat(row.every) || 0;
     const scheduled = delaySeconds > 0 || intervalSeconds > 0;
@@ -310,7 +311,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
         await startScheduled(row, payload, delaySeconds, intervalSeconds);
       } else {
         await sendTelegram(row.address.trim(), payload, row.dpt.trim() || undefined);
-        const shown = typeof payload === 'boolean' ? (payload ? 'on' : 'off') : row.value || '(raw)';
+        const shown = describeBusPayload(payload, row.dpt) || row.value || '(raw)';
         updateRow(row.id, { feedback: { ok: true, msg: `Sent ${shown} to ${row.address.trim()}` } });
       }
       setRecentGas(pushRecentGa(row.address.trim()));

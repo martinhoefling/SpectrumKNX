@@ -1,3 +1,5 @@
+import enum
+
 from xknx.dpt import DPTBase
 from xknx.dpt.dpt_10 import KNXTime
 from xknx.dpt.dpt_11 import KNXDate
@@ -29,6 +31,80 @@ def get_simplified_type(tech_type: str) -> str:
     return mapping.get(tech_type, tech_type)
 
 
+# Generic boolean words. A subtype's own name always wins over these, so
+# "up" stays "up", while a bare "on" on DPT 1.008 becomes "down".
+_FALSE_WORDS = {"0", "false", "off", "no"}
+_TRUE_WORDS = {"1", "true", "on", "yes"}
+_transcoder_cache: dict[tuple[int, int], type | None] = {}
+
+
+def _pretty_enum(name: str) -> str:
+    return name.replace("_", " ").lower()
+
+
+def _small_transcoder(main: int, sub: int):
+    key = (main, sub)
+    if key not in _transcoder_cache:
+        try:
+            _transcoder_cache[key] = DPTBase.parse_transcoder(f"{main}.{sub:03d}")
+        except Exception:
+            _transcoder_cache[key] = None
+    return _transcoder_cache[key]
+
+
+def _value_enum(main: int, sub: int | None):
+    """Enum of the named values of a ≤4-bit DPT, or None when it has none."""
+    if sub is None or main not in (1, 2, 3):
+        return None
+    tc = _small_transcoder(main, sub)
+    dt = getattr(tc, "data_type", None)
+    if main == 2:
+        value_type = getattr(dt, "_value_type", None)
+        if isinstance(value_type, type) and issubclass(value_type, enum.Enum):
+            return value_type
+        return None
+    if main == 3:
+        control = getattr(dt, "__annotations__", {}).get("control")
+        if isinstance(control, type) and issubclass(control, enum.Enum):
+            return control
+        return None
+    if isinstance(dt, type) and issubclass(dt, enum.Enum):
+        return dt
+    return None
+
+
+def _name_for_bit(enum_cls, bit: bool) -> str:
+    for member in enum_cls:
+        if bool(member.value) is bit:
+            return _pretty_enum(member.name)
+    return "on" if bit else "off"
+
+
+def _enum_label(enum_cls, value) -> str | None:
+    """Subtype name for a bit, a 0/1, or a boolean word. None if it isn't one."""
+    if enum_cls is None:
+        return None
+    by_name = {_pretty_enum(member.name): _pretty_enum(member.name) for member in enum_cls}
+    raw_names = {member.name.lower(): _pretty_enum(member.name) for member in enum_cls}
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        pretty = raw.replace("_", " ")
+        if raw in raw_names:
+            return raw_names[raw]
+        if pretty in by_name:
+            return by_name[pretty]
+        if raw in _FALSE_WORDS:
+            return _name_for_bit(enum_cls, False)
+        if raw in _TRUE_WORDS:
+            return _name_for_bit(enum_cls, True)
+        return None
+    if isinstance(value, bool):
+        return _name_for_bit(enum_cls, value)
+    if isinstance(value, int | float) and value in (0, 1):
+        return _name_for_bit(enum_cls, bool(value))
+    return None
+
+
 def format_value_nicely(value, dpt_main=None, dpt_sub=None):
     """Formats numeric or boolean values into clean, HA-style strings."""
     if value is None:
@@ -40,22 +116,30 @@ def format_value_nicely(value, dpt_main=None, dpt_sub=None):
         # DPT-1 values arrive as bools, 0/1 numerics, or already-decoded enum
         # names ("off", "down", ...) from Home Assistant. Strings ARE the
         # display value — truth-testing them would render "off" as "on" (#181).
+        # A known subtype uses its own names (1.002 true/false, 1.008 up/down).
         if isinstance(value, str):
-            return value.lower()
-        if dpt_sub is not None:
-            try:
-                tc = DPTBase.parse_transcoder(f"{dpt_main or 1}.{dpt_sub:03d}")
-                data_type = getattr(tc, "data_type", None)
-                if data_type is not None:
-                    # Subtype-specific name, e.g. 1.008: False -> "up"
-                    return data_type(bool(value)).name.lower()
-            except Exception:
-                pass
+            label = _enum_label(_value_enum(dpt_main or 1, dpt_sub), value)
+            return label if label is not None else value.lower()
+        label = _enum_label(_value_enum(dpt_main or 1, dpt_sub), value)
+        if label is not None:
+            return label
         return "on" if value else "off"
 
     if dpt_main == 2 and isinstance(value, dict) and "value" in value:
-        # {"control": True, "value": "on"} -> "on (control)"
-        return f"{value['value']} (control)" if value.get("control") else str(value["value"])
+        # {"control": True, "value": "on"} -> "on (control)", or the subtype's
+        # own word ("true (control)" for 2.002).
+        shown = _enum_label(_value_enum(2, dpt_sub), value["value"])
+        if shown is None:
+            shown = str(value["value"])
+        return f"{shown} (control)" if value.get("control") else shown
+
+    if dpt_main == 3 and isinstance(value, dict) and "control" in value:
+        # 4-bit control: direction name plus the step code (0–7).
+        shown = _enum_label(_value_enum(3, dpt_sub), value["control"])
+        if shown is None:
+            shown = str(value["control"])
+        step = value.get("step_code")
+        return f"{shown} {step}" if step is not None else shown
 
     if isinstance(value, int | float):
         # Truncate zeroes: 21.60 -> 21.6, 100.00 -> 100
