@@ -2,6 +2,7 @@ import { render, fireEvent, screen } from '@testing-library/react';
 import { expect, test, vi, beforeAll } from 'vitest';
 import { TelegramTable, type SortConfig } from './TelegramTable';
 import { makeTelegram } from '../test/telegramFactory';
+import { anchorKey } from '../utils/anchorKey';
 import type { Telegram } from '../hooks/useWebSocket';
 import { DEFAULT_FILTERS } from '../types/filters';
 
@@ -168,4 +169,45 @@ test('clicking a row at the live edge anchors that row, not the top one (#435)',
   fireEvent.click(rows(container)[3]);
   expect(onListFollowChange).toHaveBeenLastCalledWith(false);
   expect(onListAnchorKeyChange).toHaveBeenLastCalledWith(rows(container)[3].getAttribute('data-akey'));
+});
+
+test('a goto request marks the telegram when it is in the list and stops live-following', () => {
+  const onListFollowChange = vi.fn();
+  const onMarkedKeysChange = vi.fn();
+  const onLastMarkedKeyChange = vi.fn();
+  renderTable({
+    listFollow: true,
+    onListFollowChange,
+    onMarkedKeysChange,
+    onLastMarkedKeyChange,
+    gotoRequest: { id: 1, telegram: TELEGRAMS[2] },
+  });
+
+  const key = anchorKey(TELEGRAMS[2]);
+  expect(onMarkedKeysChange).toHaveBeenCalledWith([key]);
+  expect(onLastMarkedKeyChange).toHaveBeenCalledWith(key);
+  // gotoIndex pauses follow; that is the same path that centers the row.
+  expect(onListFollowChange).toHaveBeenCalledWith(false);
+});
+
+test('a goto request does not mark a telegram the current list has filtered out', () => {
+  const onMarkedKeysChange = vi.fn();
+  const onLastMarkedKeyChange = vi.fn();
+  const onListFollowChange = vi.fn();
+  const hidden = makeTelegram({
+    timestamp: '2024-01-01T10:00:03.500Z',
+    target_address: '9/9/9',
+    raw_hex: '0x99',
+  });
+  renderTable({
+    onMarkedKeysChange,
+    onLastMarkedKeyChange,
+    onListFollowChange,
+    gotoRequest: { id: 1, telegram: hidden },
+  });
+
+  expect(onMarkedKeysChange).not.toHaveBeenCalled();
+  expect(onLastMarkedKeyChange).not.toHaveBeenCalled();
+  // The list still moves to that time (nearest visible row) and stops following.
+  expect(onListFollowChange).toHaveBeenCalledWith(false);
 });

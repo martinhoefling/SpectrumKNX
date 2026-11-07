@@ -74,6 +74,16 @@ interface TelegramTableProps {
    * Time-Delta-Context around a match/flag, not because they matched the
    * active filters themselves — marked with a distinct background (#343). */
   contextKeys?: ReadonlySet<string>;
+
+  /** Center this telegram in the visible list. `id` changes on every request
+   * so repeating the same telegram jumps again. The row is marked only when
+   * that exact telegram is still in the filtered list. */
+  gotoRequest?: ListGotoRequest | null;
+}
+
+export interface ListGotoRequest {
+  id: number;
+  telegram: Telegram;
 }
 
 type ColId = 'time' | 'delta' | 'source' | 'target' | 'type' | 'dpt' | 'value';
@@ -162,6 +172,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   flaggedKeys, onFlaggedKeysChange,
   contextForAllMatches, onContextForAllMatchesChange,
   contextKeys,
+  gotoRequest,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -941,6 +952,30 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramRows.length]);
+
+  // Write-to-bus last value: center that telegram. Mark it only when the exact
+  // telegram survived the current filters; otherwise land on the nearest row
+  // at that time and leave the marks alone.
+  const appliedGotoId = useRef<number | null>(null);
+  useEffect(() => {
+    if (!gotoRequest || appliedGotoId.current === gotoRequest.id) return;
+    if (telegramRows.length === 0) return;
+    appliedGotoId.current = gotoRequest.id;
+    const key = anchorKey(gotoRequest.telegram);
+    const idx = telegramRows.findIndex(t => anchorKey(t) === key);
+    if (idx !== -1) {
+      gotoIndex(idx);
+      setMarkedKeysList([key]);
+      setLastMarked(key);
+      markCursorRef.current = key;
+      return;
+    }
+    const ms = new Date(gotoRequest.telegram.timestamp).getTime();
+    if (!Number.isNaN(ms)) gotoTime(ms);
+    // gotoIndex/gotoTime close over the rows of this render; appliedGotoId
+    // keeps a later row update from jumping again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gotoRequest, telegramRows]);
 
   // React to list updates before paint: follow the live edge, or pin the
   // anchored row by correcting scrollTop by its real pixel shift.

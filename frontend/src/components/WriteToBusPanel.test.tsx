@@ -51,10 +51,11 @@ test('adds and removes rows, sending to multiple GAs independently (#215)', asyn
 
   render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
 
-  // One row initially; its remove button is disabled.
+  // One row initially; its delete button is disabled.
   expect(screen.getAllByPlaceholderText(/Group address/)).toHaveLength(1);
+  expect(screen.getByRole('button', { name: /At least one row is required/ })).toBeDisabled();
 
-  fireEvent.click(screen.getByRole('button', { name: /Add row/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const gaInputs = screen.getAllByPlaceholderText(/Group address/);
   expect(gaInputs).toHaveLength(2);
 
@@ -69,6 +70,23 @@ test('adds and removes rows, sending to multiple GAs independently (#215)', asyn
     (fetchMock.mock.calls.find(([u]) => String(u).includes('/api/knx/send') && !String(u).includes('scheduled'))![1] as RequestInit).body as string
   );
   expect(sendBody.address).toBe('4/5/6');
+});
+
+test('plus inserts a row below the clicked one and trash removes that row', () => {
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
+
+  let addresses = screen.getAllByPlaceholderText(/Group address/);
+  fireEvent.change(addresses[1], { target: { value: '4/5/6' } });
+  fireEvent.click(screen.getAllByRole('button', { name: /Add a row below/ })[0]);
+
+  addresses = screen.getAllByPlaceholderText(/Group address/);
+  expect(addresses.map(el => (el as HTMLInputElement).value)).toEqual(['1/2/3', '', '4/5/6']);
+
+  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[1]);
+  addresses = screen.getAllByPlaceholderText(/Group address/);
+  expect(addresses.map(el => (el as HTMLInputElement).value)).toEqual(['1/2/3', '4/5/6']);
 });
 
 test('starts a single scheduled job from a row and shows the cancel control', async () => {
@@ -191,6 +209,30 @@ test('shows the last value of the entered group address (#439)', async () => {
   expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/telegrams/last?target_address=1%2F2%2F3'))).toBe(true);
 });
 
+test('offers a go-to button beside a last value and not when there is none', async () => {
+  const onGotoTelegram = vi.fn();
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
+  }));
+  const { rerender } = render(
+    <WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />,
+  );
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  const button = await screen.findByRole('button', { name: 'Go to telegram' });
+  expect(button).toHaveClass('quick-filter-bar-toggle');
+  expect(lastValueOf().compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  fireEvent.click(button);
+  expect(onGotoTelegram).toHaveBeenCalledWith(expect.objectContaining({
+    target_address: '1/2/3', value_formatted: '21.5',
+  }));
+
+  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />);
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2' } });
+  expect(screen.queryByRole('button', { name: 'Go to telegram' })).not.toBeInTheDocument();
+});
+
 test('says so when the group address has no recorded value', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
@@ -236,4 +278,72 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('22.3 °C'));
   expect(lastValueOf()).toHaveTextContent('Response');
   expect(lastValueOf()).not.toHaveTextContent('waiting for response');
+});
+
+// ── Address and name fields stay paired ──────────────────────────────────────
+
+const NAMED = [
+  { address: '1/1/97', name: 'EGD_BWM55TG2A_Helligkeit', main: 9, sub: 4 },
+  { address: '1/2/3', name: 'Living room light', main: 1, sub: 1 },
+];
+
+test('leaving the address field fills the matching name', () => {
+  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  const address = screen.getByPlaceholderText(/Group address/);
+  const name = screen.getByPlaceholderText('Group name');
+  fireEvent.change(address, { target: { value: '1/1/97' } });
+  expect(name).toHaveValue('');
+  fireEvent.blur(address);
+  expect(name).toHaveValue('EGD_BWM55TG2A_Helligkeit');
+  expect(address).toHaveValue('1/1/97');
+});
+
+test('leaving the name field fills the matching address', () => {
+  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  const address = screen.getByPlaceholderText(/Group address/);
+  const name = screen.getByPlaceholderText('Group name');
+  fireEvent.change(name, { target: { value: 'Living room light' } });
+  expect(address).toHaveValue('');
+  fireEvent.blur(name);
+  expect(address).toHaveValue('1/2/3');
+  expect(name).toHaveValue('Living room light');
+});
+
+test('Enter in the name field selects the highlighted suggestion', () => {
+  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  const name = screen.getByPlaceholderText('Group name');
+  fireEvent.change(name, { target: { value: 'Helligkeit' } });
+  fireEvent.keyDown(name, { key: 'Enter' });
+  expect(screen.getByPlaceholderText(/Group address/)).toHaveValue('1/1/97');
+  expect(name).toHaveValue('EGD_BWM55TG2A_Helligkeit');
+});
+
+test('an incomplete value resolves both fields of that row only', () => {
+  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
+  const addresses = screen.getAllByPlaceholderText(/Group address/);
+  const names = screen.getAllByPlaceholderText('Group name');
+
+  fireEvent.change(addresses[0], { target: { value: '1/1' } });
+  fireEvent.blur(addresses[0]);
+  expect(addresses[0]).toHaveValue('1/1/97');
+  expect(names[0]).toHaveValue('EGD_BWM55TG2A_Helligkeit');
+  expect(addresses[1]).toHaveValue('');
+  expect(names[1]).toHaveValue('');
+
+  fireEvent.change(names[1], { target: { value: 'Living' } });
+  fireEvent.blur(names[1]);
+  expect(addresses[1]).toHaveValue('1/2/3');
+  expect(names[1]).toHaveValue('Living room light');
+  expect(addresses[0]).toHaveValue('1/1/97');
+  expect(names[0]).toHaveValue('EGD_BWM55TG2A_Helligkeit');
+});
+
+test('choosing a name suggestion updates both fields', () => {
+  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  const name = screen.getByPlaceholderText('Group name');
+  fireEvent.change(name, { target: { value: 'Living' } });
+  fireEvent.mouseDown(screen.getByRole('option', { name: /Living room light/ }));
+  expect(screen.getByPlaceholderText(/Group address/)).toHaveValue('1/2/3');
+  expect(name).toHaveValue('Living room light');
 });
