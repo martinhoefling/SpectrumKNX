@@ -61,7 +61,26 @@ def format_value_nicely(value, dpt_main=None, dpt_sub=None):
         # Truncate zeroes: 21.60 -> 21.6, 100.00 -> 100
         return f"{value:g}"
 
+    if isinstance(value, dict):
+        # Composite DPTs: {"red": 1, "green": 2, "blue": 3} -> "red 1, green 2, blue 3"
+        return _format_fields(value)
+
     return str(value)
+
+
+def _format_fields(fields: dict) -> str:
+    parts = []
+    for key, val in fields.items():
+        if val is None:
+            continue
+        if isinstance(val, dict):
+            val = f"({_format_fields(val)})"
+        elif isinstance(val, bool):
+            val = str(val).lower()
+        elif isinstance(val, float):
+            val = f"{val:g}"
+        parts.append(f"{key} {val}")
+    return ", ".join(parts)
 
 
 def convert_value_for_db(value):
@@ -74,9 +93,10 @@ def convert_value_for_db(value):
         return value.as_date().isoformat()
     elif isinstance(value, KNXDateTime):
         return value.as_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    elif hasattr(value, "as_dict") and hasattr(value, "value"):
-        # 1-bit controlled DPT 2.x, e.g. SwitchControl(control=True, value=Switch.ON):
-        # as_dict() is JSON-safe and keeps the control bit (#534)
+    elif hasattr(value, "as_dict"):
+        # Composite DPTs decode to dataclasses, e.g. SwitchControl (2.x, #534),
+        # ControlDimming (3.007) or RGBColor (232.600). as_dict() is JSON-safe;
+        # str() would store the Python repr (#547)
         return value.as_dict()
     elif hasattr(value, "value"):
         # Enums (1.001 decodes to Switch.ON) and wrappers; their value may wrap again

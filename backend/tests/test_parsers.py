@@ -346,3 +346,31 @@ def test_convert_value_for_db_unwraps_nested_values():
     from xknx.dpt.dpt_1 import Switch
 
     assert convert_value_for_db(Switch.ON) is True
+
+
+def test_convert_value_for_db_composite_dpts_are_dicts():
+    # Composite DPTs were stored as their Python repr (#547)
+    import json
+
+    from xknx.dpt import DPTArray, DPTBase, DPTBinary
+
+    cases = [
+        ("3.007", DPTBinary(0b1011), {"control": "increase", "step_code": 3}, "control increase, step_code 3"),
+        ("18.001", DPTArray((0x81,)), {"scene_number": 2, "learn": True}, "scene_number 2, learn true"),
+        ("232.600", DPTArray((1, 2, 3)), {"red": 1, "green": 2, "blue": 3}, "red 1, green 2, blue 3"),
+    ]
+    for dpt, raw, stored, shown in cases:
+        transcoder = DPTBase.parse_transcoder(dpt)
+        value = convert_value_for_db(transcoder.from_knx(raw))
+        assert value == stored
+        json.dumps(value)
+        main, sub = (int(part) for part in dpt.split("."))
+        assert format_value_nicely(value, main, sub) == shown
+
+
+def test_format_value_nicely_skips_missing_fields_and_nests():
+    assert format_value_nicely({"red": None, "green": None, "blue": None, "white": 255}, 251, 600) == "white 255"
+    assert (
+        format_value_nicely({"color": {"x": 0.3, "y": 0.25}, "brightness": 128}, 242, 600)
+        == "color (x 0.3, y 0.25), brightness 128"
+    )
