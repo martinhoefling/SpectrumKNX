@@ -363,7 +363,7 @@ def test_convert_value_for_db_composite_dpts_are_dicts():
     from xknx.dpt import DPTArray, DPTBase, DPTBinary
 
     cases = [
-        ("3.007", DPTBinary(0b1011), {"control": "increase", "step_code": 3}, "control increase, step_code 3"),
+        ("3.007", DPTBinary(0b1011), {"control": "increase", "step_code": 3}, "increase 3"),
         ("18.001", DPTArray((0x81,)), {"scene_number": 2, "learn": True}, "scene_number 2, learn true"),
         ("232.600", DPTArray((1, 2, 3)), {"red": 1, "green": 2, "blue": 3}, "red 1, green 2, blue 3"),
     ]
