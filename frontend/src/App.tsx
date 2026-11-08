@@ -20,7 +20,7 @@ import {
   DEFAULT_UI_STATE,
 } from './utils/uiState';
 import { DeviceStatusOverlay } from './components/DeviceStatusOverlay';
-import { TelegramTable, type SortConfig, type SortKey } from './components/TelegramTable';
+import { TelegramTable, type SortConfig, type SortKey, type ListGotoRequest } from './components/TelegramTable';
 import { expandWithDeltaContext } from './utils/deltaContextExpansion';
 import { activeQuickFilter } from './utils/quickFilter';
 import { anchorKey } from './utils/anchorKey';
@@ -618,6 +618,10 @@ function App() {
   // main-panel navigation. Keyed by the table's anchorKey identity.
   const [markedTelegramKeys, setMarkedTelegramKeys] = useState<string[]>([]);
   const [lastMarkedTelegramKey, setLastMarkedTelegramKey] = useState<string | null>(null);
+  // Write-to-bus "go to": center this telegram in the list. The table marks it
+  // only when the current filters still show that exact telegram.
+  const listGotoSeq = useRef(0);
+  const [listGoto, setListGoto] = useState<ListGotoRequest | null>(null);
 
   // ── Per-message Time-Delta-Context flags (#319) ─────────────────────────────
   // Same lifting rationale as marks; each flagged telegram always anchors a
@@ -682,6 +686,19 @@ function App() {
     setListAnchorKey(key);
     setActivePanel('list');
   }, [liveTelegrams]);
+
+  // Last value in a write row: open the telegram list and center that telegram.
+  // Marking happens in the table, and only if the telegram is not filtered out.
+  const handleGotoTelegram = useCallback((telegram: Telegram) => {
+    setListFollow(false);
+    // Drop a restored anchor so mounting the list does not pin a different row
+    // after this jump. The table captures a new anchor once it has centered.
+    setListAnchorKey(null);
+    setIsDatabaseOpen(false);
+    setActivePanel('list');
+    listGotoSeq.current += 1;
+    setListGoto({ id: listGotoSeq.current, telegram });
+  }, []);
 
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
@@ -914,14 +931,26 @@ function App() {
                 />
 
                 {serverConfig?.status?.write_enabled && (
-                  <button
-                    className="icon-button"
-                    onClick={() => setIsSendOpen(o => !o)}
-                    title="Send / read telegrams"
-                    style={{ color: isSendOpen ? 'var(--accent-primary)' : 'var(--text-dim)' }}
-                  >
-                    <Send size={18} />
-                  </button>
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    padding: '0.2rem', borderRadius: '8px',
+                    background: 'var(--bg-subtle)', border: '1px solid var(--border-color)',
+                  }}>
+                    <button
+                      className="icon-button"
+                      onClick={() => setIsSendOpen(o => !o)}
+                      title="Send / read telegrams"
+                      aria-pressed={isSendOpen}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '0.4rem', borderRadius: '6px',
+                        background: isSendOpen ? 'rgba(99,102,241,0.15)' : 'transparent',
+                        color: isSendOpen ? 'var(--accent-primary)' : 'var(--text-dim)',
+                      }}
+                    >
+                      <Send size={18} />
+                    </button>
+                  </div>
                 )}
               </>
             )}
@@ -1191,6 +1220,17 @@ function App() {
           </div>
         ) : activeTab === 'live' ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Full width of main, above the filter column so the bar is not
+                inset beside the filter pane. */}
+            {isSendOpen && serverConfig?.status?.write_enabled && (
+              <WriteToBusPanel
+                targets={filterOptions.targets}
+                dptCatalog={filterOptions.dpts}
+                onClose={() => setIsSendOpen(false)}
+                latestTelegram={latestTelegram}
+                onGotoTelegram={handleGotoTelegram}
+              />
+            )}
             {/* Content row: filter panel + table */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
 
@@ -1213,13 +1253,6 @@ function App() {
 
               {/* Content body */}
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                {isSendOpen && serverConfig?.status?.write_enabled && (
-                  <WriteToBusPanel
-                    targets={filterOptions.targets}
-                    onClose={() => setIsSendOpen(false)}
-                    latestTelegram={latestTelegram}
-                  />
-                )}
                 {isVisualizerOpen ? (
                   <Visualizer
                     // The main filter applies to the telegram list only; the
@@ -1350,6 +1383,7 @@ function App() {
                     contextKeys={contextTelegramKeys}
                     infoBarOpen={infoBarOpen}
                     onInfoBarOpenChange={setInfoBarOpen}
+                    gotoRequest={listGoto}
                   />
                   </>
                 )}

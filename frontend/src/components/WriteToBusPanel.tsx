@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Radio, X, Plus, AlertTriangle, CheckCircle2, Timer, RotateCcw } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Radio, Plus, Trash2, AlertTriangle, CheckCircle2, Timer, RotateCcw, Clock } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -18,6 +19,7 @@ import { GaCombobox } from './GaCombobox';
 import { WriteControls } from './WriteControls';
 import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
+import { dptDesignation } from '../utils/dpt';
 
 interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
@@ -25,11 +27,17 @@ interface Props {
   onClose: () => void;
   /** Newest telegram from the live feed; keeps each row's last value current (#439). */
   latestTelegram?: Telegram | null;
+  /** Project DPT catalog (`label` is "5.001 - Percent") so hints can name types the project uses. */
+  dptCatalog?: FilterOption[];
+  /** Jump the telegram list to the telegram that carried this row's last value. */
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 interface Row {
   id: string;
   address: string;
+  /** Shown in the name field. Filled from the project when an address resolves. */
+  name: string;
   dpt: string;
   value: string;
   delay: string;
@@ -46,6 +54,19 @@ interface Row {
 }
 
 const GA_RE = /^\d{1,2}\/\d{1,2}\/\d{1,3}$|^\d{1,2}\/\d{1,4}$|^\d{1,5}$/;
+
+/**
+ * Name typed into the name field → one project GA.
+ * `'ambiguous'` means several GAs share that name, so the caller must not guess.
+ */
+function resolveName(text: string, options: FilterOption[]): FilterOption | 'ambiguous' | null {
+  const q = text.trim().toLowerCase();
+  if (!q) return null;
+  const named = options.filter(o => o.address && (o.name ?? '').toLowerCase() === q);
+  if (named.length === 1) return named[0];
+  if (named.length > 1) return 'ambiguous';
+  return options.find(o => (o.address ?? '').toLowerCase() === q) ?? null;
+}
 const POLL_INTERVAL_MS = 1000;
 
 // Common DPTs offered as datalist hints when overriding a GA's type (#342).
@@ -58,7 +79,7 @@ const COMMON_DPTS = [
 
 let rowSeq = 0;
 const newRow = (): Row => ({
-  id: `row-${rowSeq++}`, address: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
+  id: `row-${rowSeq++}`, address: '', name: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
   readBaseline: null,
 });
 
@@ -117,7 +138,7 @@ function saveRows(rows: Row[]): void {
  *
  * Rows persist to localStorage so toggling the panel keeps its state (#254).
  */
-export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
+export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGotoTelegram }: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
   const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
   const [job, setJob] = useState<ScheduledSendStatus | null>(null);
@@ -130,17 +151,43 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
     return m;
   }, [targets]);
 
+  // Persisted rows store the address only. Fill the name field once the project
+  // list is available, without putting a name back after the user clears it.
+  const namesSeeded = useRef(false);
+  useEffect(() => {
+    if (namesSeeded.current || byAddress.size === 0) return;
+    namesSeeded.current = true;
+    setRows(rs => rs.map(r => {
+      const match = byAddress.get(r.address.trim());
+      return match?.name && !r.name ? { ...r, name: match.name } : r;
+    }));
+  }, [byAddress]);
+
   // DPT hints for the editable DPT field (#342): common types plus every DPT
-  // present in the loaded project, sorted numerically by main then sub.
+  // present in the loaded project, each with its designation.
   const dptOptions = useMemo(() => {
-    const set = new Set<string>(COMMON_DPTS);
-    for (const t of targets) if (t.main != null) set.add(formatDpt(t.main, t.sub));
-    return [...set].sort((a, b) => {
-      const [am, as = 0] = a.split('.').map(Number);
-      const [bm, bs = 0] = b.split('.').map(Number);
-      return am - bm || as - bs;
-    });
-  }, [targets]);
+    const byKey = new Map<string, string>();
+    for (const key of COMMON_DPTS) byKey.set(key, dptDesignation(key));
+    for (const t of targets) {
+      if (t.main == null) continue;
+      const key = formatDpt(t.main, t.sub);
+      if (!byKey.has(key)) byKey.set(key, '');
+    }
+    for (const d of dptCatalog) {
+      if (d.main == null) continue;
+      const key = formatDpt(d.main, d.sub);
+      const name = dptDesignation(key, d.label);
+      if (name) byKey.set(key, name);
+      else if (!byKey.has(key)) byKey.set(key, '');
+    }
+    return [...byKey.entries()]
+      .map(([key, name]) => ({ key, name }))
+      .sort((a, b) => {
+        const [am, as = 0] = a.key.split('.').map(Number);
+        const [bm, bs = 0] = b.key.split('.').map(Number);
+        return am - bm || as - bs;
+      });
+  }, [targets, dptCatalog]);
 
   // Last value per row (#439): fetched once per entered GA, then kept current
   // from the live feed — which keeps flowing while the telegram list is paused,
@@ -167,7 +214,14 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
   const updateRow = (id: string, patch: Partial<Row>) =>
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
 
-  const addRow = () => setRows(rs => [...rs, newRow()]);
+  const addRowAfter = (id: string) => {
+    setRows(rs => {
+      const index = rs.findIndex(r => r.id === id);
+      const next = newRow();
+      if (index < 0) return [...rs, next];
+      return [...rs.slice(0, index + 1), next, ...rs.slice(index + 1)];
+    });
+  };
 
   const removeRow = async (id: string) => {
     const row = rows.find(r => r.id === id);
@@ -180,14 +234,61 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
     setRows(rs => (rs.length > 1 ? rs.filter(r => r.id !== id) : rs));
   };
 
+  const applyResolved = (id: string, option: FilterOption) => {
+    updateRow(id, {
+      address: option.address ?? '',
+      name: option.name ?? '',
+      feedback: null,
+      readBaseline: null,
+      dpt: option.main != null ? formatDpt(option.main, option.sub) : '',
+    });
+  };
+
+  // Typing updates only the field being edited. The other field follows when
+  // editing finishes: blur, Enter, or a suggestion pick (the pick passes `option`).
   const onAddressChange = (id: string, next: string, option?: FilterOption) => {
-    const match = option ?? byAddress.get(next.trim());
+    if (option) {
+      applyResolved(id, option);
+      return;
+    }
+    const match = byAddress.get(next.trim());
     updateRow(id, {
       address: next,
       feedback: null,
       readBaseline: null,
       dpt: match && match.main != null ? formatDpt(match.main, match.sub) : '',
     });
+  };
+
+  const onAddressCommit = (id: string, text: string) => {
+    const match = byAddress.get(text.trim());
+    updateRow(id, { name: match?.name ?? '' });
+  };
+
+  const onNameChange = (id: string, next: string, option?: FilterOption) => {
+    if (option) {
+      applyResolved(id, option);
+      return;
+    }
+    updateRow(id, { name: next, feedback: null });
+  };
+
+  const onNameCommit = (id: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      updateRow(id, { name: '' });
+      return;
+    }
+    const match = resolveName(trimmed, targets);
+    if (match === 'ambiguous') {
+      updateRow(id, { name: text });
+      return;
+    }
+    if (match) {
+      applyResolved(id, match);
+      return;
+    }
+    updateRow(id, { name: text, address: '', dpt: '', feedback: null, readBaseline: null });
   };
 
   // Editable DPT (#342): overriding the project default. When the DPT *main*
@@ -239,23 +340,9 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: '0.5rem',
-      padding: '0.6rem 0.85rem', marginBottom: '0.6rem',
-      background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: '8px',
+      padding: '0.6rem 0.85rem', flexShrink: 0, width: '100%',
+      background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-color)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
-          <Send size={15} /> Write to bus
-        </span>
-        <button className="icon-button" onClick={onClose} title="Close write panel" style={{ marginLeft: 'auto', color: 'var(--text-dim)' }}>
-          <X size={16} />
-        </button>
-      </div>
-
-      {/* DPT hints shared by every row's editable DPT field (#342) */}
-      <datalist id="wtb-dpt-options">
-        {dptOptions.map(d => <option key={d} value={d} />)}
-      </datalist>
-
       {rows.map(row => {
         const known = byAddress.get(row.address.trim());
         // The write widget follows the row's *effective* (possibly overridden)
@@ -264,33 +351,56 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
         const projectDpt = known && known.main != null ? formatDpt(known.main, known.sub) : '';
         const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
         const addressValid = GA_RE.test(row.address.trim());
+        const lastTelegram = addressValid ? lastValues[row.address.trim()] : undefined;
+        const lastHasValue = lastTelegram != null && lastTelegram.simplified_type !== 'Read';
         const scheduledDisabled = row.busy || !addressValid;
+        // A GA's telegram length is fixed by its project DPT main, so the hint
+        // lists only that main's subtypes (5.001 may become 5.010, not 9.001).
+        const allowedDpts = known?.main == null
+          ? []
+          : dptOptions.filter(o => Number(o.key.split('.')[0]) === known.main);
         return (
           <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', width: '100%' }}>
-              {/* Left Group: GA input + Resolved Name */}
+              {/* Left Group: address and name, each with the same suggestion list */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 auto', minWidth: '180px' }}>
                 <GaCombobox
                   value={row.address}
                   onChange={(next, option) => onAddressChange(row.id, next, option)}
+                  onCommit={text => onAddressCommit(row.id, text)}
                   options={targets}
                   recentAddresses={recentGas}
                   placeholder="Group address (e.g. 1/2/3)"
                   width={150}
                 />
-                {known?.name && (
-                  <span
-                    style={{ fontSize: '0.72rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}
-                    title={known.name}
-                  >
-                    — {known.name}
-                  </span>
-                )}
+                <div style={{ flex: '1 1 200px', minWidth: 160 }}>
+                  <GaCombobox
+                    display="name"
+                    value={row.name}
+                    onChange={(next, option) => onNameChange(row.id, next, option)}
+                    onCommit={text => onNameCommit(row.id, text)}
+                    options={targets}
+                    recentAddresses={recentGas}
+                    placeholder="Group name"
+                    width="100%"
+                  />
+                </div>
                 {addressValid && (
                   <LastValue
-                    telegram={lastValues[row.address.trim()]}
-                    awaiting={row.readBaseline != null && (lastValues[row.address.trim()]?.timestamp ?? '') === row.readBaseline}
+                    telegram={lastTelegram}
+                    awaiting={row.readBaseline != null && (lastTelegram?.timestamp ?? '') === row.readBaseline}
                   />
+                )}
+                {lastHasValue && lastTelegram && (
+                  <button
+                    type="button"
+                    className="quick-filter-bar-toggle"
+                    title="Go to telegram"
+                    aria-label="Go to telegram"
+                    onClick={() => onGotoTelegram?.(lastTelegram)}
+                  >
+                    <Clock size={13} />
+                  </button>
                 )}
               </div>
 
@@ -308,20 +418,19 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>DPT</span>
-                  <input
-                    className="glass-input"
-                    list="wtb-dpt-options"
+                  <DptField
                     value={row.dpt}
-                    onChange={e => onDptChange(row.id, e.target.value)}
-                    placeholder="—"
-                    title={overridden ? `Overriding project DPT ${projectDpt}` : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'}
-                    style={{
-                      width: 78,
-                      padding: '0.2rem 0.35rem',
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: '0.72rem',
-                      borderColor: overridden ? 'var(--accent-primary)' : undefined,
-                    }}
+                    options={allowedDpts}
+                    disabled={!addressValid}
+                    overridden={overridden}
+                    title={
+                      !addressValid
+                        ? 'Enter a group address first'
+                        : overridden
+                          ? `Overriding project DPT ${projectDpt}`
+                          : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
+                    }
+                    onChange={next => onDptChange(row.id, next)}
                   />
                   {overridden && (
                     <button
@@ -366,10 +475,18 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
                   className="icon-button"
                   onClick={() => void removeRow(row.id)}
                   disabled={rows.length === 1}
-                  title={rows.length === 1 ? 'At least one row is required' : 'Remove this row'}
+                  title={rows.length === 1 ? 'At least one row is required' : 'Delete this row'}
                   style={{ color: 'var(--text-dim)', opacity: rows.length === 1 ? 0.4 : 1 }}
                 >
-                  <X size={15} />
+                  <Trash2 size={15} />
+                </button>
+                <button
+                  className="icon-button"
+                  onClick={() => addRowAfter(row.id)}
+                  title="Add a row below"
+                  style={{ color: 'var(--accent-primary)' }}
+                >
+                  <Plus size={15} />
                 </button>
               </div>
             </div>
@@ -382,12 +499,6 @@ export function WriteToBusPanel({ targets, onClose, latestTelegram }: Props) {
           </div>
         );
       })}
-
-      <div>
-        <button onClick={addRow} style={secondaryBtn(false)} title="Add another send row">
-          <Plus size={14} /> Add row
-        </button>
-      </div>
 
       {jobActive && job && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--accent-primary)' }}>
@@ -509,6 +620,163 @@ function LastValue({ telegram, awaiting }: { telegram: Telegram | undefined; awa
         }
       `}</style>
     </span>
+  );
+}
+
+interface DptChoice {
+  key: string;
+  name: string;
+}
+
+/**
+ * DPT entry for one row. Editable only once that row has a group address.
+ * The suggestion list is portaled and pinned under this input, because the
+ * panel sits in an overflow-hidden column; each row shows the DPT number
+ * with its designation beside it.
+ */
+function DptField({ value, options, disabled, overridden, title, onChange }: {
+  value: string;
+  options: DptChoice[];
+  disabled: boolean;
+  overridden: boolean;
+  title: string;
+  onChange: (next: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  // Close the menu when the field becomes disabled (no valid GA) without an
+  // effect, so re-enabling it does not pop the suggestions back open.
+  const [prevDisabled, setPrevDisabled] = useState(disabled);
+  if (disabled !== prevDisabled) {
+    setPrevDisabled(disabled);
+    if (disabled) setOpen(false);
+  }
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const matches = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    const exact = options.some(o => o.key.toLowerCase() === q);
+    if (!q || exact) return options;
+    return options.filter(o => o.key.toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
+  }, [value, options]);
+
+  const active = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1);
+
+  const place = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.max(r.width, 240);
+    let left = r.left;
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+    setBox({ top: r.bottom + 4, left, width });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, matches.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (inputRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const pick = (choice: DptChoice) => {
+    onChange(choice.key);
+    setOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { setOpen(false); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { setOpen(true); return; }
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      setHighlight(h => {
+        const current = Math.min(h, Math.max(matches.length - 1, 0));
+        return Math.max(0, Math.min(matches.length - 1, current + dir));
+      });
+      return;
+    }
+    if (e.key === 'Enter' && open && matches[active]) {
+      e.preventDefault();
+      pick(matches[active]);
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="glass-input"
+        aria-label="Datapoint type"
+        value={value}
+        disabled={disabled}
+        placeholder="—"
+        title={title}
+        onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(0); }}
+        onFocus={() => { if (!disabled) { setOpen(true); setHighlight(0); } }}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+        style={{
+          width: 78,
+          padding: '0.2rem 0.35rem',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '0.72rem',
+          borderColor: overridden ? 'var(--accent-primary)' : undefined,
+          opacity: disabled ? 0.45 : 1,
+        }}
+      />
+      {open && !disabled && matches.length > 0 && box && createPortal(
+        <div
+          ref={menuRef}
+          role="listbox"
+          aria-label="Datapoint types"
+          style={{
+            position: 'fixed', top: box.top, left: box.left, width: box.width, zIndex: 80,
+            maxHeight: 240, overflowY: 'auto',
+            background: 'var(--bg-panel)', border: '1px solid var(--border-color)',
+            borderRadius: 8, boxShadow: 'var(--shadow-lg)', padding: '0.25rem',
+          }}
+        >
+          {matches.map((o, i) => (
+            <button
+              type="button"
+              key={o.key}
+              role="option"
+              aria-selected={i === active}
+              onMouseDown={e => { e.preventDefault(); pick(o); }}
+              onMouseEnter={() => setHighlight(i)}
+              style={{
+                display: 'flex', alignItems: 'baseline', gap: '0.55rem',
+                width: '100%', textAlign: 'left', border: 'none', borderRadius: 6, cursor: 'pointer',
+                padding: '0.3rem 0.45rem',
+                background: i === active ? 'rgba(99,102,241,0.18)' : 'transparent',
+              }}
+            >
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'var(--text-main)' }}>{o.key}</span>
+              {o.name && <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{o.name}</span>}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 

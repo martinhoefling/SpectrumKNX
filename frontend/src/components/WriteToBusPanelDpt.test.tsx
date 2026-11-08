@@ -23,7 +23,7 @@ function mockSend(routes: Record<string, unknown> = {}) {
   });
 }
 
-const dptInput = (c: HTMLElement) => c.querySelector('input[list="wtb-dpt-options"]') as HTMLInputElement;
+const dptInput = (c: HTMLElement) => c.querySelector('input[aria-label="Datapoint type"]') as HTMLInputElement;
 
 beforeEach(() => {
   localStorage.clear();
@@ -33,6 +33,45 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+test('the DPT field stays closed until the row has a group address', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  expect(dptInput(container)).toBeDisabled();
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  expect(dptInput(container)).toBeEnabled();
+});
+
+test('clearing the group address closes the DPT suggestions and they stay closed', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  const address = screen.getByPlaceholderText(/Group address/);
+  fireEvent.change(address, { target: { value: '1/2/3' } });
+  fireEvent.focus(dptInput(container));
+  expect(screen.getByRole('listbox', { name: 'Datapoint types' })).toBeInTheDocument();
+
+  fireEvent.change(address, { target: { value: '' } });
+  expect(screen.queryByRole('listbox', { name: 'Datapoint types' })).not.toBeInTheDocument();
+
+  fireEvent.change(address, { target: { value: '1/2/3' } });
+  expect(screen.queryByRole('listbox', { name: 'Datapoint types' })).not.toBeInTheDocument();
+});
+
+test('the DPT suggestions sit with the field and name each type', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  const input = dptInput(container);
+  fireEvent.focus(input);
+  const list = screen.getByRole('listbox', { name: 'Datapoint types' });
+  const option = screen.getByRole('option', { name: /5\.001/ });
+  expect(option).toHaveTextContent('Percent (%)');
+  expect(screen.getByRole('option', { name: /5\.010/ })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: /1\.001/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: /9\.001/ })).not.toBeInTheDocument();
+  expect(list).toContainElement(option);
+  const rect = input.getBoundingClientRect();
+  expect(list.style.position).toBe('fixed');
+  expect(list.style.left).toBe(`${rect.left}px`);
+  expect(Number.parseFloat(list.style.top)).toBeCloseTo(rect.bottom + 4, 0);
 });
 
 test('DPT prefills from the project when a GA is chosen', () => {

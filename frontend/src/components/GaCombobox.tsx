@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Clock } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
@@ -6,12 +6,23 @@ import type { FilterOption } from '../types/filters';
 interface Props {
   value: string;
   /** Called on every change. `option` is set only when picked from the list. */
-  onChange: (address: string, option?: FilterOption) => void;
+  onChange: (text: string, option?: FilterOption) => void;
+  /**
+   * Called when editing finishes without a list pick: Enter with the list
+   * closed, or focus leaving the field. A pick reports through `onChange`
+   * instead, so a following blur does not commit the pre-pick text.
+   */
+  onCommit?: (text: string) => void;
   options: FilterOption[];
   /** Recently used addresses, newest first — the only suggestions while the input is empty (#187, #190). */
   recentAddresses?: string[];
   placeholder?: string;
   width?: number | string;
+  /**
+   * Which property the input and the suggestion's first line show.
+   * `name` swaps the two lines (name, then address).
+   */
+  display?: 'address' | 'name';
 }
 
 /**
@@ -19,10 +30,17 @@ interface Props {
  * allows typing an arbitrary address (free entry), unlike a native <datalist>
  * which the browser renders unthemed.
  */
-export function GaCombobox({ value, onChange, options, recentAddresses, placeholder, width = 220 }: Props) {
+export function GaCombobox({ value, onChange, onCommit, options, recentAddresses, placeholder, width = 220, display = 'address' }: Props) {
+  const listId = useId();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // A list pick commits through onChange. Blur follows the click and must not
+  // also commit the text from before the pick.
+  const pickedRef = useRef(false);
+  // Arrow navigation must not be undone by the row currently under the pointer.
+  const keyboardNav = useRef(false);
 
   const { matches, recentCount } = useMemo(() => {
     const q = value.trim().toLowerCase();
@@ -48,6 +66,24 @@ export function GaCombobox({ value, onChange, options, recentAddresses, placehol
     return { matches: recent, recentCount: recent.length };
   }, [value, options, recentAddresses]);
 
+  const activeIndex = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1);
+
+  const isExact = (text: string) => {
+    const q = text.trim().toLowerCase();
+    if (!q) return false;
+    return options.some(o => {
+      const addr = (o.address ?? '').toLowerCase();
+      const name = (o.name ?? '').toLowerCase();
+      if (display === 'name') return name === q || addr === q;
+      return addr === q;
+    });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, activeIndex]);
+
   useEffect(() => {
     if (!open) return;
     const onDocMouseDown = (e: MouseEvent) => {
@@ -58,16 +94,40 @@ export function GaCombobox({ value, onChange, options, recentAddresses, placehol
   }, [open]);
 
   const pick = (o: FilterOption) => {
-    onChange(o.address ?? '', o);
+    pickedRef.current = true;
+    const text = display === 'name' ? (o.name || o.address || '') : (o.address ?? '');
+    onChange(text, o);
     setOpen(false);
+  };
+
+  const commitText = () => {
+    setOpen(false);
+    onCommit?.(value);
+  };
+
+  const moveHighlight = (dir: 1 | -1) => {
+    if (matches.length === 0) return;
+    keyboardNav.current = true;
+    setHighlight(h => {
+      const current = Math.min(h, matches.length - 1);
+      return Math.max(0, Math.min(matches.length - 1, current + dir));
+    });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { setOpen(false); return; }
-    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { setOpen(true); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, matches.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)); }
-    else if (e.key === 'Enter' && open && matches[highlight]) { e.preventDefault(); pick(matches[highlight]); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!open) { setOpen(true); return; }
+      moveHighlight(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (open && matches[activeIndex]) pick(matches[activeIndex]);
+      else commitText();
+    }
   };
 
   return (
@@ -76,38 +136,75 @@ export function GaCombobox({ value, onChange, options, recentAddresses, placehol
         className="glass-input"
         value={value}
         placeholder={placeholder}
-        onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(0); }}
-        onFocus={() => setOpen(true)}
+        onChange={e => { pickedRef.current = false; onChange(e.target.value); setOpen(true); setHighlight(0); }}
+        onFocus={() => { pickedRef.current = false; setOpen(true); }}
+        onBlur={() => {
+          if (pickedRef.current) { pickedRef.current = false; setOpen(false); return; }
+          // Incomplete text with the list still open adopts the highlighted
+          // entry, which is the first one until the cursor moves. Both fields
+          // of this row then resolve to that GA.
+          const incomplete = value.trim() !== '' && !isExact(value);
+          const chosen = matches[activeIndex];
+          if (open && incomplete && chosen) { pick(chosen); return; }
+          setOpen(false);
+          onCommit?.(value);
+        }}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-activedescendant={open && matches[activeIndex] ? `${listId}-opt-${activeIndex}` : undefined}
         onKeyDown={onKeyDown}
-        style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }}
+        style={{ width: '100%', fontFamily: display === 'name' ? 'inherit' : "'JetBrains Mono', monospace" }}
       />
       {open && matches.length > 0 && (
-        <div style={{
+        <div
+          id={listId}
+          role="listbox"
+          onMouseMove={() => { keyboardNav.current = false; }}
+          style={{
           position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 50,
           width: 'max(100%, 260px)', maxHeight: 280, overflowY: 'auto',
           background: 'var(--bg-panel)', backdropFilter: 'var(--glass-blur)',
           border: '1px solid var(--border-color)', borderRadius: 8, boxShadow: 'var(--shadow-lg)',
           padding: '0.25rem',
         }}>
-          {matches.map((o, i) => (
+          {matches.map((o, i) => {
+            const nameFirst = display === 'name';
+            const primary = nameFirst ? (o.name || o.address) : o.address;
+            const secondary = nameFirst ? (o.name ? o.address : undefined) : o.name;
+            const primaryMono = !nameFirst || !o.name;
+            const active = i === activeIndex;
+            return (
             <button
-              key={o.address}
+              type="button"
+              key={o.address ?? o.name}
+              id={`${listId}-opt-${i}`}
+              role="option"
+              aria-selected={active}
+              data-active={active ? 'true' : 'false'}
+              ref={el => { optionRefs.current[i] = el; }}
               onMouseDown={e => { e.preventDefault(); pick(o); }}
-              onMouseEnter={() => setHighlight(i)}
+              onMouseEnter={() => { if (!keyboardNav.current) setHighlight(i); }}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.1rem',
                 width: '100%', textAlign: 'left', border: 'none', borderRadius: 6, cursor: 'pointer',
                 padding: '0.35rem 0.5rem',
-                background: i === highlight ? 'var(--bg-hover)' : 'transparent',
+                background: active ? 'rgba(99,102,241,0.18)' : 'transparent',
+                outline: active ? '1px solid var(--accent-primary)' : 'none',
               }}
             >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', color: 'var(--text-main)' }}>
-                {o.address}
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontFamily: primaryMono ? "'JetBrains Mono', monospace" : 'inherit', fontSize: '0.78rem', color: 'var(--text-main)' }}>
+                {primary}
                 {i < recentCount && <Clock size={11} style={{ color: 'var(--text-dim)' }} />}
               </span>
-              {o.name && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{o.name}</span>}
+              {secondary && (
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: nameFirst ? "'JetBrains Mono', monospace" : 'inherit' }}>
+                  {secondary}
+                </span>
+              )}
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

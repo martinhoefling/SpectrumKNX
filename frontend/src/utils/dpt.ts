@@ -45,3 +45,43 @@ export const bareDptLabel = (main: number): string => {
   const width = dptWidthLabel(main);
   return `DPT ${main} · all${width ? ` ${width}` : ''} subtypes`;
 };
+
+/**
+ * Bezeichnung of the DPTs offered in the write panel. Matches the names xknx
+ * reports (`format_dpt_name`), with the unit where one exists.
+ */
+const DPT_DESIGNATIONS: Record<string, string> = {
+  '1.001': 'Switch',
+  '1.002': 'Boolean',
+  '2.001': 'Switch control',
+  '3.007': 'Dimming control',
+  '4.001': 'Character',
+  '5.001': 'Percent (%)',
+  '5.004': 'Percent U8 (%)',
+  '5.010': 'Pulse counter',
+  '6.010': 'Counter pulses',
+  '7.001': 'Pulse (2-byte)',
+  '8.001': 'Pulse signed (2-byte)',
+  '9.001': 'Temperature (°C)',
+  '9.004': 'Illuminance (lx)',
+  '10.001': 'Time',
+  '11.001': 'Date',
+  '12.001': 'Pulse (4-byte unsigned)',
+  '13.001': 'Pulse (4-byte)',
+  '14.056': 'Power (W)',
+  '16.000': 'String',
+  '17.001': 'Scene number',
+  '18.001': 'Scene control',
+  '19.001': 'Date time',
+  '20.102': 'HVAC mode',
+  '232.600': 'RGB colour',
+};
+
+/** Name shown beside a DPT number. A catalog label ("5.001 - Percent") wins. */
+export function dptDesignation(key: string, label?: string | null): string {
+  if (label) {
+    const stripped = label.replace(new RegExp(`^${key.replace(/\./g, '\\.')}\\s*[–-]\\s*`), '');
+    if (stripped && stripped !== label) return stripped;
+  }
+  return DPT_DESIGNATIONS[key] ?? '';
+}
