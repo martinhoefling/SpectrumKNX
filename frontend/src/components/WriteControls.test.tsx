@@ -61,6 +61,18 @@ test('a 4-bit control subtype lists only its legal direction and step codes', ()
   expect(onWrite).toHaveBeenCalledWith({ control: 'down', step_code: 0 });
 });
 
+test('changing the DPT resets the select to its first entry', () => {
+  const { rerender } = render(
+    <WriteControls dptMain={3} dptKey="3.008" value="" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  const select = screen.getByRole('combobox', { name: 'Value' });
+  fireEvent.change(select, { target: { value: '8' } });
+  expect(select).toHaveValue('8');
+
+  rerender(<WriteControls dptMain={3} dptKey="3.007" value="" onValueChange={() => {}} onWrite={() => {}} />);
+  expect(screen.getByRole('combobox', { name: 'Value' })).toHaveValue('0');
+});
+
 test('non-DPT-1 renders a value field and a Write button', () => {
   const onWrite = vi.fn();
   render(<WriteControls dptMain={5} value="50" onValueChange={() => {}} onWrite={onWrite} />);

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Send } from 'lucide-react';
 
 import { coerceValue } from '../utils/knxSend';
@@ -79,21 +79,21 @@ const saveRecentValue = (val: string, address?: string | null, dptKey?: string |
  */
 export function WriteControls({ dptMain, dptKey, address, value, onValueChange, onWrite, disabled = false }: Props) {
   const [focused, setFocused] = useState(false);
-  const [picked, setPicked] = useState(0);
+  // The select index belongs to one DPT. A different key reads as the first entry,
+  // so changing the DPT does not need an effect to clear a stale pick.
+  const [picked, setPicked] = useState({ key: dptKey, index: 0 });
   const recents = useMemo(() => getRecentValues(address, dptKey, dptMain), [address, dptKey, dptMain]);
   const choices = useMemo(() => discreteDptValues(dptKey), [dptKey]);
 
-  useEffect(() => { setPicked(0); }, [dptKey]);
-
   if (choices && choices.length > 4) {
-    const index = picked < choices.length ? picked : 0;
+    const index = picked.key === dptKey && picked.index < choices.length ? picked.index : 0;
     return (
       <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
         <select
           aria-label="Value"
           className="glass-input"
           value={index}
-          onChange={e => setPicked(Number(e.target.value))}
+          onChange={e => setPicked({ key: dptKey, index: Number(e.target.value) })}
           disabled={disabled}
           style={{ width: 170 }}
         >
