@@ -42,6 +42,20 @@ test('the DPT field stays closed until the row has a group address', () => {
   expect(dptInput(container)).toBeEnabled();
 });
 
+test('clearing the group address closes the DPT suggestions and they stay closed', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  const address = screen.getByPlaceholderText(/Group address/);
+  fireEvent.change(address, { target: { value: '1/2/3' } });
+  fireEvent.focus(dptInput(container));
+  expect(screen.getByRole('listbox', { name: 'Datapoint types' })).toBeInTheDocument();
+
+  fireEvent.change(address, { target: { value: '' } });
+  expect(screen.queryByRole('listbox', { name: 'Datapoint types' })).not.toBeInTheDocument();
+
+  fireEvent.change(address, { target: { value: '1/2/3' } });
+  expect(screen.queryByRole('listbox', { name: 'Datapoint types' })).not.toBeInTheDocument();
+});
+
 test('the DPT suggestions sit with the field and name each type', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
   fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });

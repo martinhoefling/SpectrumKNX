@@ -645,6 +645,13 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  // Close the menu when the field becomes disabled (no valid GA) without an
+  // effect, so re-enabling it does not pop the suggestions back open.
+  const [prevDisabled, setPrevDisabled] = useState(disabled);
+  if (disabled !== prevDisabled) {
+    setPrevDisabled(disabled);
+    if (disabled) setOpen(false);
+  }
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -688,10 +695,6 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
-
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
 
   const pick = (choice: DptChoice) => {
     onChange(choice.key);
