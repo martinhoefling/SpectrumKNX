@@ -313,6 +313,36 @@ test('removing a row while start is pending cancels the job once the server retu
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
 });
 
+test('delay and every are locked while that row job is waiting or running', async () => {
+  for (const job of [RUNNING_JOB, WAITING_JOB]) {
+    vi.stubGlobal('fetch', mockFetch({ '/api/knx/send/scheduled/status': statusOf(job) }));
+    localStorage.setItem(ROWS_KEY, JSON.stringify([
+      { address: '1/2/3', dpt: '', value: '50', delay: '2', every: '5', scheduledJobId: job.id },
+      { address: '4/5/6', dpt: '', value: '', delay: '', every: '' },
+    ]));
+    const view = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
+
+    const delays = screen.getAllByPlaceholderText('delay') as HTMLInputElement[];
+    const everys = screen.getAllByPlaceholderText('every') as HTMLInputElement[];
+    expect(delays[0]).toBeDisabled();
+    expect(everys[0]).toBeDisabled();
+    expect(delays[0]).toHaveValue('2');
+    expect(everys[0]).toHaveValue('5');
+    fireEvent.change(delays[0], { target: { value: '99' } });
+    fireEvent.change(everys[0], { target: { value: '99' } });
+    expect(delays[0]).toHaveValue('2');
+    expect(everys[0]).toHaveValue('5');
+
+    expect(delays[1]).toBeEnabled();
+    expect(everys[1]).toBeEnabled();
+    fireEvent.change(delays[1], { target: { value: '8' } });
+    expect(delays[1]).toHaveValue('8');
+
+    view.unmount();
+  }
+});
+
 test('picks up an already-running job on mount', async () => {
   vi.stubGlobal('fetch', mockFetch({ '/api/knx/send/scheduled/status': statusOf(RUNNING_JOB) }));
   localStorage.setItem(ROWS_KEY, JSON.stringify([

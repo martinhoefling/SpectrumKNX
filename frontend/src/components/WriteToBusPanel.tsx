@@ -330,12 +330,14 @@ function SecondsField({
   placeholder,
   title,
   col,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   title: string;
   col: string;
+  disabled?: boolean;
 }) {
   const showUnit = value.trim() !== '';
   // Floor against placeholder and a typical filled "0" so empty tracks stay usable.
@@ -354,24 +356,29 @@ function SecondsField({
           padding: '0.2rem 0.35rem',
           gap: showUnit ? '0.3rem' : undefined,
           fontSize: '0.72rem',
+          opacity: disabled ? 0.45 : 1,
+          cursor: disabled ? 'not-allowed' : undefined,
         }}
       >
         <input
           placeholder={placeholder}
           value={value}
-          onChange={e => onChange(e.target.value)}
+          disabled={disabled}
+          onChange={e => { if (!disabled) onChange(e.target.value); }}
           onBlur={() => {
+            if (disabled) return;
             const next = sanitizeSecondsInput(value);
             if (next !== value) onChange(next);
           }}
           inputMode="numeric"
-          title={title}
+          title={disabled ? `${title} (locked while this job is running)` : title}
           style={{
             ...secondsBareInput,
             flex: '1 1 auto',
             width: `${inputCh}ch`,
             minWidth: `${inputCh}ch`,
             textAlign: 'right',
+            cursor: disabled ? 'not-allowed' : undefined,
           }}
         />
         {showUnit && (
@@ -1495,6 +1502,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                     value={row.delay}
                     onChange={v => updateRow(row.id, { delay: v })}
                     title="delay"
+                    disabled={showJob}
                   />
                   <SecondsField
                     col="8"
@@ -1502,6 +1510,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                     value={row.every}
                     onChange={v => updateRow(row.id, { every: v })}
                     title="every"
+                    disabled={showJob}
                   />
                   <button
                     data-wtb-col="9"
