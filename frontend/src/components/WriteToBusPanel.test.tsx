@@ -934,7 +934,7 @@ test('waiting Cancel clears the status wait', async () => {
   expect(clearBtn.style.borderLeft).not.toContain('solid');
 });
 
-test('waiting Cancel restores the last write instead of clearing', async () => {
+test('waiting Cancel keeps unanswered Read instead of restoring the last write', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
     '/api/knx/send': { status: 'sent' },
@@ -957,11 +957,11 @@ test('waiting Cancel restores the last write instead of clearing', async () => {
   await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
 
-  expect(screen.queryByLabelText(/read request sent/)).not.toBeInTheDocument();
-  const restored = await screen.findByLabelText(/written '50' to 1\/2\/3/);
-  expect(restored.querySelector('.lucide-send')).not.toBeNull();
-  expect(restored.textContent).toMatch(/Write/);
-  expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
+  // Wait ended (no Cancel); unanswered Read tip stays — Write is not restored.
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+  const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
+  expect(pending.querySelector('.lucide-radio')).not.toBeNull();
+  expect(screen.queryByLabelText(/written '50' to 1\/2\/3/)).not.toBeInTheDocument();
 });
 
 test('delayed Write keeps a prior Read event visible during the countdown', async () => {
@@ -1576,7 +1576,7 @@ test('each row keeps its own send job and read-wait status', async () => {
   expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
 });
 
-test('Cancel during cyclic Read-wait ends both the wait and the job', async () => {
+test('Cancel during cyclic Read-wait ends the job but keeps unanswered Read', async () => {
   const cyclicRunning = {
     state: 'running',
     id: 'cyc-2',
@@ -1619,12 +1619,81 @@ test('Cancel during cyclic Read-wait ends both the wait and the job', async () =
   expect(screen.getByLabelText(/Sends done 2/)).toHaveTextContent('2');
 
   fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
-  await waitFor(() => expect(screen.queryByLabelText(/read request sent/)).not.toBeInTheDocument());
   await waitFor(() => expect(screen.queryByLabelText(/cyclic send/)).not.toBeInTheDocument());
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
   // Ending the job zeroes the cyclic count and drops the count column.
   expect(screen.queryByLabelText(/Sends done/)).not.toBeInTheDocument();
   expect(document.querySelector('[data-status-metric="count"]')).toBeNull();
+  // Unanswered Read remains so the user can see the GA did not answer.
+  const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
+  expect(pending.querySelector('.lucide-radio')).not.toBeNull();
+  expect(screen.queryByLabelText(/written '/)).not.toBeInTheDocument();
+});
+
+test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not the Write', async () => {
+  const cyclicRunning = {
+    state: 'running',
+    id: 'cyc-read-keep',
+    address: '1/2/3',
+    interval_seconds: 5,
+    sends_done: 1,
+    sends_skipped: 0,
+    next_send_at: new Date(Date.now() + 4_000).toISOString(),
+  };
+  const activeJobs: Record<string, unknown> = { [cyclicRunning.id]: cyclicRunning };
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/knx/send/scheduled/status')) {
+      return { ok: true, json: async () => ({ jobs: Object.values(activeJobs) }) } as Response;
+    }
+    if (url.includes('/api/knx/send/scheduled/cancel')) {
+      delete activeJobs[cyclicRunning.id];
+      return { ok: true, json: async () => ({ status: 'ok' }) } as Response;
+    }
+    if (url.includes('/api/knx/read')) {
+      return { ok: true, json: async () => ({ status: 'sent' }) } as Response;
+    }
+    if (url.includes('/api/telegrams/last')) {
+      return { ok: true, json: async () => ({ telegrams: [] }) } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }));
+
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '', value: '50', delay: '', every: '5', scheduledJobId: 'cyc-read-keep' },
+  ]));
+  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
+
+  const writeTg = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T12:00:00.000000+00:00', value_formatted: '50', unit: null,
+  });
+  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  await screen.findByRole('button', { name: 'Go to status telegram' });
+
+  fireEvent.click(screen.getByRole('button', { name: /Read/ }));
+  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
+
+  const readTg = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T12:00:01.000000+00:00',
+    telegram_type: 'GroupValueRead',
+    simplified_type: 'Read',
+  });
+  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readTg} />);
+  await waitFor(() => {
+    expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/Read/);
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
+  await waitFor(() => expect(screen.queryByLabelText(/cyclic send/)).not.toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+
+  const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
+  expect(pending.querySelector('.lucide-radio')).not.toBeNull();
+  expect(pending.textContent).toMatch(/Read/);
+  expect(pending.textContent).not.toMatch(/Write/);
+  expect(screen.queryByLabelText(/written '/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
 });
 
 test('Cancel on a cyclic job zeroes sends_done and hides the count column', async () => {
@@ -1832,9 +1901,10 @@ test('header Cancel ends jobs and read waits but keeps row addresses', async () 
 
   fireEvent.click(screen.getByTitle('Cancel all jobs and read waits'));
   await waitFor(() => expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument());
-  // Read-wait and jobs ended (no Cancel); leftover Read feedback may remain until Clear — same as row Cancel.
+  // Read-wait and jobs ended (no Cancel); leftover Read feedback remains until Clear — same as row Cancel.
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/cyclic send/)).not.toBeInTheDocument();
+  expect(screen.getByLabelText(/read request sent to 4\/5\/6 without response/)).toBeInTheDocument();
   const addresses = screen.getAllByPlaceholderText('GA');
   expect(addresses).toHaveLength(2);
   expect(addresses[0]).toHaveValue('1/2/3');

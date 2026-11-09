@@ -63,8 +63,9 @@ interface Row {
   /** Bus telegram currently shown in Status (time + jump). */
   statusTelegram: Telegram | null;
   /**
-   * Last Write this row caused on the bus. Survives Read waits / Clear of the
-   * transient wait so Cancel-on-wait can restore the prior write status.
+   * Last Write this row caused on the bus. Survives Read waits / Clear so a
+   * later Write or idle fallback can reuse it — Cancel never restores it over
+   * an unanswered Read.
    */
   lastSentTelegram: Telegram | null;
   /**
@@ -177,6 +178,25 @@ function clearAllStatusPatch(): Pick<
 function isWriteTelegram(tg: Telegram | null | undefined): boolean {
   if (!tg) return false;
   return tg.simplified_type === 'Write' || Boolean(tg.telegram_type?.includes('Write'));
+}
+
+function isReadTelegram(tg: Telegram | null | undefined): boolean {
+  if (!tg) return false;
+  if (tg.simplified_type === 'Read') return true;
+  return Boolean(tg.telegram_type?.includes('Read')) && !tg.telegram_type?.includes('Response');
+}
+
+function isReadRequestFeedback(feedback: Row['feedback']): boolean {
+  return Boolean(feedback?.ok && /^Read request/i.test(feedback.msg));
+}
+
+/** Active wait or leftover Read feedback / Read telegram — do not restore Write over this. */
+function hasUnansweredRead(
+  row: Pick<Row, 'feedback' | 'statusWatch' | 'statusTelegram'>,
+): boolean {
+  return row.statusWatch === 'read'
+    || isReadRequestFeedback(row.feedback)
+    || isReadTelegram(row.statusTelegram);
 }
 
 function telegramValue(tg: Telegram | null | undefined, fallback = '', dpt?: string): string {
@@ -1344,19 +1364,22 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           const lastHasValue = lastTelegram != null && lastTelegram.simplified_type !== 'Read';
           // Stay "waiting" until a Response clears statusWatch (or Cancel).
           const awaiting = row.statusWatch === 'read';
+          // Leftover Read feedback after Cancel — keep unanswered Read chrome,
+          // never fall back to lastSentTelegram Write.
+          const unansweredRead = awaiting || isReadRequestFeedback(row.feedback);
           const scheduledDisabled = row.busy || !addressValid;
           const rowJob = jobsByRowId[row.id] ?? null;
           const showJob = isLiveJob(rowJob);
           // Errors own the status body. While a send is in flight, suppress the
           // last-Write fallback so time/jump cannot flash before success or error.
-          // Otherwise: bound telegram, else (when not mid-read-wait) this row's
-          // last Write, else idle GA Write fallback.
+          // Otherwise: bound telegram, else (when not mid-read / leftover Read
+          // feedback) this row's last Write, else idle GA Write fallback.
           const statusTelegram = (row.feedback && !row.feedback.ok) || row.busy
             ? null
             : (row.statusTelegram
-              ?? (!awaiting ? row.lastSentTelegram : null)
+              ?? (!unansweredRead ? row.lastSentTelegram : null)
               ?? (!showJob
-                && !awaiting
+                && !unansweredRead
                 && row.statusWatch === 'write'
                 && lastTelegram
                 && isWriteTelegram(lastTelegram)
@@ -1520,17 +1543,8 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                       void cancelJob(row.id);
                     }}
                     onStopAwait={() => {
-                      const last = row.lastSentTelegram;
-                      if (isWriteTelegram(last)) {
-                        const val = telegramValue(last, row.value, row.dpt);
-                        updateRow(row.id, {
-                          readBaseline: null,
-                          statusWatch: 'write',
-                          statusTelegram: last,
-                          feedback: { ok: true, msg: `written '${val}' to ${row.address.trim()}` },
-                        });
-                        return;
-                      }
+                      // End the wait only — keep Read feedback / Read telegram so
+                      // the user still sees that the GA did not answer.
                       updateRow(row.id, { readBaseline: null, statusWatch: null });
                     }}
                     onClear={() => {
@@ -1868,7 +1882,8 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       }
     }
     await refreshJobs();
-    // Restore status chrome on this row when a Write already went out.
+    // Restore status chrome on this row when a Write already went out — but never
+    // overwrite an unanswered Read (user needs to see the GA did not answer).
     if (!cancelled?.address) {
       updateRow(rowId, { scheduledJobId: null });
       return;
@@ -1877,6 +1892,10 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     setRows(rs => rs.map(r => {
       if (r.id !== rowId) return r;
       const base = { ...r, scheduledJobId: null as string | null };
+      // Preserve unanswered Read chrome (and end the wait if still armed).
+      if (hasUnansweredRead(r)) {
+        return { ...base, readBaseline: null, statusWatch: null };
+      }
       const tg = r.lastSentTelegram ?? r.statusTelegram;
       if (!isWriteTelegram(tg) && !(cancelled.sends_done && cancelled.sends_done > 0)) return base;
       const val = telegramValue(tg, r.value, r.dpt);
@@ -1913,21 +1932,10 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       const cancelled = snapshot[r.id];
       let next: Row = { ...r, scheduledJobId: null };
       if (r.statusWatch === 'read') {
-        const last = r.lastSentTelegram;
-        if (isWriteTelegram(last)) {
-          const val = telegramValue(last, r.value, r.dpt);
-          next = {
-            ...next,
-            readBaseline: null,
-            statusWatch: 'write',
-            statusTelegram: last,
-            feedback: { ok: true, msg: `written '${val}' to ${r.address.trim()}` },
-          };
-        } else {
-          next = { ...next, readBaseline: null, statusWatch: null };
-        }
+        // End wait; keep Read feedback / telegram (no Write restore).
+        next = { ...next, readBaseline: null, statusWatch: null };
       }
-      if (isLiveJob(cancelled)) {
+      if (isLiveJob(cancelled) && !hasUnansweredRead(next)) {
         const tg = next.lastSentTelegram ?? next.statusTelegram;
         const addr = (cancelled.address ?? r.address).trim();
         if (isWriteTelegram(tg) || (cancelled.sends_done && cancelled.sends_done > 0)) {
@@ -2225,10 +2233,11 @@ function RowStatus({
         <button
           key="status-cancel"
           type="button"
-          // Ends Read-wait and/or scheduled job — whichever is active.
+          // Job cancel also ends a concurrent Read-wait (keeps unanswered Read).
+          // Read-only Cancel goes through onStopAwait.
           onClick={() => {
-            if (awaiting) onStopAwait();
             if (jobLive) onCancel();
+            else if (awaiting) onStopAwait();
           }}
           style={{
             display: 'inline-flex',
