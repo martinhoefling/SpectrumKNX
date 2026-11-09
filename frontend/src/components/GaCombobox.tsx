@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Clock } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
@@ -29,12 +30,17 @@ interface Props {
  * Themed searchable group-address picker. Filters by address or name and still
  * allows typing an arbitrary address (free entry), unlike a native <datalist>
  * which the browser renders unthemed.
+ *
+ * The suggestion list is portaled to document.body so it cannot expand the
+ * write-panel scroll area and shift the row grid.
  */
 export function GaCombobox({ value, onChange, onCommit, options, recentAddresses, placeholder, width = 220, display = 'address' }: Props) {
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // A list pick commits through onChange. Blur follows the click and must not
   // also commit the text from before the pick.
@@ -79,6 +85,31 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
     });
   };
 
+  const place = () => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const widthPx = Math.max(r.width, 260);
+    let left = r.left;
+    if (left + widthPx > window.innerWidth - 8) left = Math.max(8, window.innerWidth - widthPx - 8);
+    setBox({ top: r.bottom + 4, left, width: widthPx });
+  };
+
+  useLayoutEffect(() => {
+    if (!open || matches.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- drop portal coords when closed/empty
+      setBox(null);
+      return;
+    }
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, matches.length, value]);
+
   useEffect(() => {
     if (!open) return;
     optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
@@ -87,7 +118,9 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
   useEffect(() => {
     if (!open) return;
     const onDocMouseDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
@@ -130,12 +163,17 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
     }
   };
 
+  // Drive intrinsic width from visible text so column measure isn't stuck at the
+  // browser's default size=20 (empty "GA" would otherwise reserve ~20ch).
+  const size = Math.max(value.length, placeholder?.length ?? 0, 1);
+
   return (
     <div ref={wrapRef} style={{ position: 'relative', width }}>
       <input
         className="glass-input"
         value={value}
         placeholder={placeholder}
+        size={size}
         onChange={e => { pickedRef.current = false; onChange(e.target.value); setOpen(true); setHighlight(0); }}
         onFocus={() => { pickedRef.current = false; setOpen(true); }}
         onBlur={() => {
@@ -156,18 +194,20 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
         onKeyDown={onKeyDown}
         style={{ width: '100%', fontFamily: display === 'name' ? 'inherit' : "'JetBrains Mono', monospace" }}
       />
-      {open && matches.length > 0 && (
+      {open && matches.length > 0 && box && createPortal(
         <div
+          ref={menuRef}
           id={listId}
           role="listbox"
           onMouseMove={() => { keyboardNav.current = false; }}
           style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 50,
-          width: 'max(100%, 260px)', maxHeight: 280, overflowY: 'auto',
-          background: 'var(--bg-panel)', backdropFilter: 'var(--glass-blur)',
-          border: '1px solid var(--border-color)', borderRadius: 8, boxShadow: 'var(--shadow-lg)',
-          padding: '0.25rem',
-        }}>
+            position: 'fixed', top: box.top, left: box.left, width: box.width, zIndex: 80,
+            maxHeight: 280, overflowY: 'auto',
+            background: 'var(--bg-panel)', backdropFilter: 'var(--glass-blur)',
+            border: '1px solid var(--border-color)', borderRadius: 8, boxShadow: 'var(--shadow-lg)',
+            padding: '0.25rem',
+          }}
+        >
           {matches.map((o, i) => {
             const nameFirst = display === 'name';
             const primary = nameFirst ? (o.name || o.address) : o.address;
@@ -175,37 +215,38 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
             const primaryMono = !nameFirst || !o.name;
             const active = i === activeIndex;
             return (
-            <button
-              type="button"
-              key={o.address ?? o.name}
-              id={`${listId}-opt-${i}`}
-              role="option"
-              aria-selected={active}
-              data-active={active ? 'true' : 'false'}
-              ref={el => { optionRefs.current[i] = el; }}
-              onMouseDown={e => { e.preventDefault(); pick(o); }}
-              onMouseEnter={() => { if (!keyboardNav.current) setHighlight(i); }}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.1rem',
-                width: '100%', textAlign: 'left', border: 'none', borderRadius: 6, cursor: 'pointer',
-                padding: '0.35rem 0.5rem',
-                background: active ? 'rgba(99,102,241,0.18)' : 'transparent',
-                outline: active ? '1px solid var(--accent-primary)' : 'none',
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontFamily: primaryMono ? "'JetBrains Mono', monospace" : 'inherit', fontSize: '0.78rem', color: 'var(--text-main)' }}>
-                {primary}
-                {i < recentCount && <Clock size={11} style={{ color: 'var(--text-dim)' }} />}
-              </span>
-              {secondary && (
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: nameFirst ? "'JetBrains Mono', monospace" : 'inherit' }}>
-                  {secondary}
+              <button
+                type="button"
+                key={o.address ?? o.name}
+                id={`${listId}-opt-${i}`}
+                role="option"
+                aria-selected={active}
+                data-active={active ? 'true' : 'false'}
+                ref={el => { optionRefs.current[i] = el; }}
+                onMouseDown={e => { e.preventDefault(); pick(o); }}
+                onMouseEnter={() => { if (!keyboardNav.current) setHighlight(i); }}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.1rem',
+                  width: '100%', textAlign: 'left', border: 'none', borderRadius: 6, cursor: 'pointer',
+                  padding: '0.35rem 0.5rem',
+                  background: active ? 'rgba(99,102,241,0.18)' : 'transparent',
+                  outline: active ? '1px solid var(--accent-primary)' : 'none',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontFamily: primaryMono ? "'JetBrains Mono', monospace" : 'inherit', fontSize: '0.78rem', color: 'var(--text-main)' }}>
+                  {primary}
+                  {i < recentCount && <Clock size={11} style={{ color: 'var(--text-dim)' }} />}
                 </span>
-              )}
-            </button>
+                {secondary && (
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: nameFirst ? "'JetBrains Mono', monospace" : 'inherit' }}>
+                    {secondary}
+                  </span>
+                )}
+              </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

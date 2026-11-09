@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useContext } from 'react';
-import { format } from 'date-fns';
 import { Filter, Clock, LineChart, ChevronUp, ChevronDown } from 'lucide-react';
 import { GaNameWidthContext } from '../utils/gaNameWidth';
 import { useLastSeenValues } from '../hooks/useLastSeenValues';
 import { SendToGaPopover } from './SendToGaPopover';
+import { BusValueText } from './BusValueText';
+import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
+import { formatDpt } from '../utils/knxSend';
 import type { Telegram } from '../hooks/useWebSocket';
 
 // Sortable table of group addresses with their last seen values (#269).
@@ -32,6 +34,8 @@ interface GaValuesTableProps {
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   /** Open the visualization panel plotting this GA (#307). */
   onVisualizeGAs: (addresses: string[]) => void;
+  /** Jump the telegram list to a last-seen telegram. */
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 const gaSortValue = (address: string): number => {
@@ -96,7 +100,7 @@ const HeaderCell: React.FC<{
 };
 
 export const GaValuesTable: React.FC<GaValuesTableProps> = ({
-  entries, depth, latestTelegram, writeEnabled, onFilterGAs, onLastSeen, onVisualizeGAs,
+  entries, depth, latestTelegram, writeEnabled, onFilterGAs, onLastSeen, onVisualizeGAs, onGotoTelegram,
 }) => {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null);
   const nameWidthCh = useContext(GaNameWidthContext);
@@ -190,14 +194,21 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
                   style={{ ...cellStyle, width: '1%', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}
                   title={t ? `by ${t.source_address}${t.source_name ? ` (${t.source_name})` : ''}` : 'Never updated'}
                 >
-                  {t ? format(new Date(t.timestamp), 'yyyy-MM-dd HH:mm:ss.SS') : ''}
+                  {t ? (
+                    <TelegramWhenJump
+                      timestamp={t.timestamp}
+                      eventType={telegramEventType(t)}
+                      onJump={onGotoTelegram ? () => onGotoTelegram(t) : undefined}
+                    />
+                  ) : null}
                 </td>
-                <td style={{ ...cellStyle, fontWeight: 600, color: t ? 'var(--text-main)' : 'var(--text-dim)' }}>
+                <td style={{ ...cellStyle, color: t ? undefined : 'var(--text-dim)' }}>
                   {t && (
-                    <>
-                      {t.value_formatted ?? t.value_numeric ?? '—'}
-                      {t.unit && <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}> {t.unit}</span>}
-                    </>
+                    <BusValueText
+                      value={t}
+                      dpt={formatDpt(entry.dpt?.main, entry.dpt?.sub)}
+                      as="span"
+                    />
                   )}
                 </td>
                 <td style={{ ...cellStyle, width: '1%' }}>
@@ -209,6 +220,7 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
                         dptMain={entry.dpt.main}
                         dptSub={entry.dpt.sub}
                         buttonStyle={iconBtnStyle}
+                        onGotoTelegram={onGotoTelegram}
                       />
                     )}
                     <button

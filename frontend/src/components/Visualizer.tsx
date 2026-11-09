@@ -33,11 +33,12 @@ interface VisualizerProps {
   /** Show a GA's telegrams in the telegram list (legend click, #521). */
   onShowGaTelegrams?: (address: string) => void;
   onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 export const Visualizer: React.FC<VisualizerProps> = ({
   telegrams, selectedTargets, onTargetsChange, onClose, getShareLink, embed = false,
-  zoomRange, onZoomRangeChange, onTimeClick, writeEnabled, onFilterGAs, onShowGaTelegrams, onLastSeen,
+  zoomRange, onZoomRangeChange, onTimeClick, writeEnabled, onFilterGAs, onShowGaTelegrams, onLastSeen, onGotoTelegram,
 }) => {
 
   const chartWrapperRef = useRef<HTMLDivElement>(null);
@@ -249,6 +250,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           writeEnabled={writeEnabled}
           onFilterGAs={onFilterGAs}
           onLastSeen={onLastSeen}
+          onGotoTelegram={onGotoTelegram}
         />
 
         {/* Chart Area */}

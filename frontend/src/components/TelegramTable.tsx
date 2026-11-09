@@ -15,6 +15,9 @@ import { downloadTelegramsCsv } from '../utils/telegramCsv';
 import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
 import { moveColumn, readColumnOrderPref, writeColumnOrderPref } from '../utils/columnOrder';
+import { formatDpt } from '../utils/knxSend';
+import { TT, ttTypeClass, ttDirectionClass, ttDptDotClass } from '../utils/telegramCellStyles';
+import { BusValueText } from './BusValueText';
 
 export type { SortKey, SortLevel, SortConfig };
 
@@ -30,6 +33,8 @@ interface TelegramTableProps {
   onQuickLastSeen?: (address: string, mode: 'ga' | 'pa') => void;
   /** Enables the per-row "Send to this GA" quick popover; true only when the bus is writable (#214). */
   canSend?: boolean;
+  /** Jump from the send popover's last-value timestamp to the telegram list. */
+  onGotoTelegram?: (telegram: Telegram) => void;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -117,22 +122,6 @@ const COLUMN_WIDTHS_PREF = 'columnWidths';
 // button is not the user scrolling (#435).
 const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
 
-const getTypeColor = (type?: string | null) => {
-  switch (type) {
-    case 'Write': return 'var(--accent-primary)';
-    case 'Read': return 'var(--warning-text)';
-    case 'Response': return 'var(--success)';
-    default: return 'var(--text-dim)';
-  }
-};
-
-const getDPTColor = (dpt_main: number | null) => {
-  if (dpt_main === 1) return 'var(--dpt-1, #818cf8)';
-  if (dpt_main === 5) return 'var(--dpt-5, #34d399)';
-  if (dpt_main === 9) return 'var(--dpt-9, #fb923c)';
-  return 'var(--dpt-unknown, #6b7280)';
-};
-
 const getDPTLabel = (dpt_main: number | null) => {
   if (dpt_main === 1) return 'DPT 1.x – Binary / Switch';
   if (dpt_main === 5) return 'DPT 5.x – 8-bit unsigned';
@@ -149,8 +138,6 @@ const formatDeltaMs = (diffMs: number): string => {
   const ms = String(diffMs % 1000).padStart(3, '0');
   return `+ ${mm}:${ss}.${ms}`;
 };
-
-const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
 const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 
@@ -192,7 +179,7 @@ function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascendi
 
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
-  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend,
+  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -1123,11 +1110,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     switch (id) {
       case 'time':
         return (
-          <div style={{ padding: cellPadding }}>
-            <div className="mono-addr" style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+          <div className={TT.cell}>
+            <div className={`${TT.time} mono-addr`}>
               {format(new Date(t.timestamp), 'HH:mm:ss.SS')}
             </div>
-            <div className="subtitle-name" style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.15rem', fontVariantNumeric: 'tabular-nums' }}>
+            <div className={`${TT.timeDate} subtitle-name`}>
               {format(new Date(t.timestamp), 'yyyy-MM-dd')}
             </div>
           </div>
@@ -1137,7 +1124,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         const key = anchorKey(t);
         const flagged = anchorsContext(key);
         return (
-          <div style={{ padding: cellPadding, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          <div className={`${TT.cell} ${TT.deltaRow}`}>
             <button
               style={{
                 background: 'transparent', border: 'none', cursor: 'pointer', padding: '0.15rem',
@@ -1153,7 +1140,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               {flagged ? <CircleDot size={12} /> : <Circle size={12} />}
             </button>
             {t.deltaStr && (
-              <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+              <div className={`${TT.delta} mono-addr`}>
                 {t.deltaStr}
               </div>
             )}
@@ -1163,9 +1150,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
       case 'source':
         return (
-          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+          <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-              <div className="mono-addr highlight" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+              <div className={`${TT.addr} ${TT.addrSource} mono-addr highlight`}>
                 {t.source_address}
               </div>
               <button
@@ -1187,7 +1174,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               )}
             </div>
             {visibleColumns.sourceName && (
-              <div className="subtitle-name" title={t.source_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div className={`${TT.subtitle} subtitle-name`} title={t.source_name || undefined}>
                 {t.source_name || '-'}
               </div>
             )}
@@ -1196,9 +1183,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
       case 'target':
         return (
-          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+          <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-              <div className="mono-addr highlight-target" style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
+              <div className={`${TT.addr} ${TT.addrTarget} mono-addr highlight-target`}>
                 {t.target_address}
               </div>
               <button
@@ -1225,11 +1212,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   dptMain={t.dpt_main}
                   dptSub={t.dpt_sub}
                   buttonClassName="quick-send-btn"
+                  onGotoTelegram={onGotoTelegram}
                 />
               )}
             </div>
             {visibleColumns.targetName && (
-              <div className="subtitle-name" title={t.target_name || undefined} style={{ fontSize: '0.7rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div
+                className={`${TT.subtitle} ${TT.subtitleTargetName} subtitle-name`}
+                title={t.target_name || undefined}
+              >
                 {t.target_name || '-'}
               </div>
             )}
@@ -1238,9 +1229,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
       case 'type':
         return (
-          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+          <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-              <div style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>
+              <div className={ttTypeClass(t.simplified_type)}>
                 {t.simplified_type || t.telegram_type}
               </div>
               <button
@@ -1252,17 +1243,19 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                 <X className="cancel-icon" size={12} />
               </button>
             </div>
-            <div style={{ fontSize: '0.65rem', color: t.direction === 'Outgoing' ? 'var(--warning-text)' : 'var(--success)', marginTop: '0.1rem' }}>{t.direction === 'Outgoing' ? 'Outgoing' : 'Incoming'}</div>
+            <div className={ttDirectionClass(t.direction)}>
+              {t.direction === 'Outgoing' ? 'Outgoing' : 'Incoming'}
+            </div>
           </div>
         );
 
       case 'dpt':
         return (
-          <div style={{ padding: cellPadding, minWidth: 0, overflow: 'hidden' }} className="filterable-cell">
+          <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>
             {t.dpt_name && t.dpt_main != null ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-                <div title={getDPTLabel(t.dpt_main)} style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: getDPTColor(t.dpt_main), flexShrink: 0 }} />
-                <span title={t.dpt_name ?? undefined} style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.dpt_name}</span>
+                <div title={getDPTLabel(t.dpt_main)} className={ttDptDotClass(t.dpt_main)} />
+                <span title={t.dpt_name ?? undefined} className={TT.dpt}>{t.dpt_name}</span>
                 <button
                   className={`quick-filter-btn ${activeFilters.dpts.includes(dptKey(t.dpt_main, t.dpt_sub)) ? 'active' : ''}`}
                   onClick={(e) => { e.stopPropagation(); if (t.dpt_main != null) onQuickFilter('dpts', dptKey(t.dpt_main, t.dpt_sub)); }}
@@ -1278,13 +1271,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
       case 'value':
         return (
-          <div style={{ padding: cellPadding }} className="filterable-cell">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '0.9375rem', wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: 1.2 }}>
-                {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '-')}
-              </span>
-              {t.unit && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500 }}>{t.unit}</span>}
-
+          <div className={`${TT.cell} filterable-cell`}>
+            <div className={TT.valueRow}>
+              <BusValueText
+                value={t}
+                dpt={formatDpt(t.dpt_main, t.dpt_sub)}
+                as="span"
+              />
               <button
                 className="quick-visualize-btn"
                 onClick={(e) => { e.stopPropagation(); onQuickVisualize(t.target_address); }}
@@ -1294,8 +1287,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               </button>
             </div>
             {visibleColumns.data && t.raw_hex && (
-              <div className="raw-badge" style={{ marginTop: '0.4rem', background: 'var(--bg-tag)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.65rem', color: 'var(--text-dim)', display: 'inline-block', fontFamily: 'var(--font-mono)' }}>
-                {t.raw_hex}
+              <div style={{ marginTop: '0.4rem' }}>
+                <BusValueText
+                  value={t}
+                  dpt={formatDpt(t.dpt_main, t.dpt_sub)}
+                  as="span"
+                  defaultShowHex
+                />
               </div>
             )}
           </div>
@@ -1427,8 +1425,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         {visibleCols.map((c, i) => (
           <div
             key={c.id}
-            className={`header-col${draggingColumn === c.id ? ' drag-source' : ''}${dropTarget?.id === c.id ? ` drop-${dropTarget.side}` : ''}`}
-            style={{ padding: cellPadding, position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            className={`header-col ${TT.cell}${draggingColumn === c.id ? ' drag-source' : ''}${dropTarget?.id === c.id ? ` drop-${dropTarget.side}` : ''}`}
+            style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             draggable
             onMouseDownCapture={e => { dragOriginRef.current = e.target; }}
             onDragStart={e => {

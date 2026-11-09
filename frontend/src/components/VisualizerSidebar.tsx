@@ -29,12 +29,13 @@ interface VisualizerSidebarProps {
   writeEnabled?: boolean;
   onFilterGAs?: (addresses: string[]) => void;
   onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
   telegrams, selectedTargets, onTargetsChange,
   untypedTargets, dptOverrides = {}, onDptOverrideChange,
-  writeEnabled, onFilterGAs, onLastSeen,
+  writeEnabled, onFilterGAs, onLastSeen, onGotoTelegram,
 }) => {
   // Persisted so the Targets filter survives closing/reopening the panel and
   // reloads, like the other visualization prefs (#361).
@@ -148,6 +149,7 @@ export const VisualizerSidebar: React.FC<VisualizerSidebarProps> = ({
                         dptMain={t.dptMain}
                         dptSub={t.dptSub}
                         buttonStyle={rowIconBtnStyle}
+                        onGotoTelegram={onGotoTelegram}
                       />
                     )}
                     {onFilterGAs && (
