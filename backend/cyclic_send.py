@@ -1,8 +1,9 @@
 """Delayed and cyclic send-to-bus jobs (#167).
 
-A single job at a time (mirroring telegram_import): an optional one-shot
-delay before the first send, then optionally repeating at a fixed interval
-until cancelled. Jobs live in memory only and do not survive restarts.
+Multiple jobs may run at once (one per Write-to-bus panel row): each has an
+optional one-shot delay before the first send, then optionally repeats at a
+fixed interval until cancelled. Jobs live in memory only and do not survive
+restarts.
 """
 
 import asyncio
@@ -54,8 +55,9 @@ class SendJob:
         }
 
 
-current_job: SendJob | None = None
-_job_task: asyncio.Task | None = None
+# Active + recently finished jobs, keyed by job id.
+jobs: dict[str, SendJob] = {}
+_tasks: dict[str, asyncio.Task] = {}
 
 
 async def _attempt_send(job: SendJob) -> None:
@@ -92,6 +94,7 @@ async def _run_job(job: SendJob) -> None:
     finally:
         job.finished_at = datetime.now(UTC)
         job.next_send_at = None
+        _tasks.pop(job.id, None)
 
 
 def start_send(
@@ -102,11 +105,8 @@ def start_send(
     delay_seconds: float,
     interval_seconds: float | None,
 ) -> SendJob:
-    """Starts a background delayed/cyclic send. Raises if one is active."""
-    global current_job, _job_task
-    if current_job is not None and current_job.state in ("waiting", "running"):
-        raise RuntimeError("A scheduled send is already active")
-    current_job = SendJob(
+    """Starts a background delayed/cyclic send. Multiple jobs may run concurrently."""
+    job = SendJob(
         address=address,
         payload=payload,
         dpt=dpt,
@@ -114,22 +114,46 @@ def start_send(
         delay_seconds=delay_seconds,
         interval_seconds=interval_seconds,
     )
-    _job_task = asyncio.get_running_loop().create_task(_run_job(current_job))
-    return current_job
+    jobs[job.id] = job
+    _tasks[job.id] = asyncio.get_running_loop().create_task(_run_job(job))
+    return job
 
 
-def cancel_send() -> bool:
-    """Cancels the active scheduled send. Returns False if none is active."""
-    if current_job is None or current_job.state not in ("waiting", "running"):
+def cancel_send(job_id: str) -> bool:
+    """Cancels the scheduled send with the given id. Returns False if none active."""
+    job = jobs.get(job_id)
+    if job is None or job.state not in ("waiting", "running"):
         return False
-    if _job_task is not None:
-        _job_task.cancel()
-    return True
+    task = _tasks.get(job_id)
+    if task is not None and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
+def cancel_all_sends() -> int:
+    """Cancels every waiting/running scheduled send. Returns how many were cancelled."""
+    cancelled = 0
+    for job in list_active_jobs():
+        if cancel_send(job.id):
+            cancelled += 1
+    return cancelled
+
+
+def list_active_jobs() -> list[SendJob]:
+    """Jobs currently waiting or running."""
+    return [j for j in jobs.values() if j.state in ("waiting", "running")]
+
+
+def get_job(job_id: str) -> SendJob | None:
+    return jobs.get(job_id)
 
 
 async def shutdown() -> None:
-    """Cancels and awaits the job task on application shutdown."""
-    if _job_task is not None and not _job_task.done():
-        _job_task.cancel()
+    """Cancels and awaits every job task on application shutdown."""
+    active = [t for t in _tasks.values() if not t.done()]
+    for task in active:
+        task.cancel()
+    for task in active:
         with contextlib.suppress(asyncio.CancelledError):
-            await _job_task
+            await task
