@@ -11,12 +11,14 @@ import cyclic_send
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_job_state():
     yield
-    if cyclic_send._job_task is not None and not cyclic_send._job_task.done():
-        cyclic_send._job_task.cancel()
+    active = [t for t in list(cyclic_send._tasks.values()) if not t.done()]
+    for task in active:
+        task.cancel()
+    for task in active:
         with contextlib.suppress(asyncio.CancelledError):
-            await cyclic_send._job_task
-    cyclic_send.current_job = None
-    cyclic_send._job_task = None
+            await task
+    cyclic_send.jobs.clear()
+    cyclic_send._tasks.clear()
 
 
 @pytest.mark.asyncio
@@ -27,7 +29,7 @@ async def test_one_shot_delayed_send():
     ):
         job = cyclic_send.start_send("1/2/3", 50, "5.001", False, delay_seconds=0.01, interval_seconds=None)
         assert job.state == "waiting"
-        await cyclic_send._job_task
+        await cyclic_send._tasks[job.id]
 
     assert job.state == "done"
     assert job.sends_done == 1
@@ -42,11 +44,12 @@ async def test_cyclic_send_ticks_until_cancelled():
         patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()) as send,
     ):
         job = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=0.01)
+        task = cyclic_send._tasks[job.id]
         await asyncio.sleep(0.05)
         assert job.state == "running"
-        assert cyclic_send.cancel_send() is True
+        assert cyclic_send.cancel_send(job.id) is True
         with contextlib.suppress(asyncio.CancelledError):
-            await cyclic_send._job_task
+            await task
 
     assert job.state == "cancelled"
     assert job.sends_done >= 2
@@ -56,15 +59,46 @@ async def test_cyclic_send_ticks_until_cancelled():
 
 
 @pytest.mark.asyncio
-async def test_second_job_rejected_while_active():
+async def test_two_jobs_run_concurrently():
     with (
         patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
         patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()),
     ):
-        cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=1.0)
+        a = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=1.0)
+        b = cyclic_send.start_send("4/5/6", False, "1.001", False, delay_seconds=0, interval_seconds=1.0)
         await asyncio.sleep(0)
-        with pytest.raises(RuntimeError, match="already active"):
-            cyclic_send.start_send("4/5/6", False, "1.001", False, delay_seconds=0, interval_seconds=1.0)
+        active = cyclic_send.list_active_jobs()
+        assert {j.id for j in active} == {a.id, b.id}
+        assert cyclic_send.cancel_send(a.id) is True
+        with contextlib.suppress(asyncio.CancelledError):
+            task_a = cyclic_send._tasks.get(a.id)
+            if task_a:
+                await task_a
+        assert b.state == "running"
+        assert cyclic_send.cancel_send(b.id) is True
+
+
+@pytest.mark.asyncio
+async def test_two_jobs_same_address_are_independent():
+    with (
+        patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
+        patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()),
+    ):
+        a = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=1.0)
+        b = cyclic_send.start_send("1/2/3", False, "1.001", False, delay_seconds=0, interval_seconds=1.0)
+        await asyncio.sleep(0)
+        assert a.id != b.id
+        active = cyclic_send.list_active_jobs()
+        assert {j.id for j in active} == {a.id, b.id}
+        assert all(j.address == "1/2/3" for j in active)
+        assert cyclic_send.cancel_send(a.id) is True
+        with contextlib.suppress(asyncio.CancelledError):
+            task_a = cyclic_send._tasks.get(a.id)
+            if task_a:
+                await task_a
+        assert b.state == "running"
+        assert {j.id for j in cyclic_send.list_active_jobs()} == {b.id}
+        assert cyclic_send.cancel_send(b.id) is True
 
 
 @pytest.mark.asyncio
@@ -90,25 +124,52 @@ async def test_send_failure_marks_job_failed():
         patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock(side_effect=RuntimeError("boom"))),
     ):
         job = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=None)
-        await cyclic_send._job_task
+        await cyclic_send._tasks[job.id]
 
     assert job.state == "failed"
     assert job.error == "boom"
 
 
 @pytest.mark.asyncio
-async def test_cancel_when_idle_returns_false():
-    assert cyclic_send.cancel_send() is False
+async def test_cancel_unknown_returns_false():
+    assert cyclic_send.cancel_send("missing") is False
 
 
 @pytest.mark.asyncio
-async def test_shutdown_cancels_active_job():
+async def test_cancel_all_sends_cancels_multiple_jobs():
     with (
         patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
         patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()),
     ):
-        job = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=60.0)
+        a = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=60.0)
+        b = cyclic_send.start_send("4/5/6", False, "1.001", False, delay_seconds=0, interval_seconds=60.0)
+        await asyncio.sleep(0)
+        assert cyclic_send.cancel_all_sends() == 2
+        for job_id in (a.id, b.id):
+            task = cyclic_send._tasks.get(job_id)
+            if task:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    assert a.state == "cancelled"
+    assert b.state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_all_sends_idle_returns_zero():
+    assert cyclic_send.cancel_all_sends() == 0
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_active_jobs():
+    with (
+        patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
+        patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()),
+    ):
+        a = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=60.0)
+        b = cyclic_send.start_send("4/5/6", False, "1.001", False, delay_seconds=0, interval_seconds=60.0)
         await asyncio.sleep(0)
         await cyclic_send.shutdown()
 
-    assert job.state == "cancelled"
+    assert a.state == "cancelled"
+    assert b.state == "cancelled"

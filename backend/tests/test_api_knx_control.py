@@ -110,19 +110,6 @@ def test_scheduled_send_starts_job():
     start.assert_called_once_with("1/2/3", 50, "5.001", False, 2.0, 5.0)
 
 
-def test_scheduled_send_rejected_when_job_active():
-    with (
-        patch.object(knx_daemon, "ALLOW_WRITE", True),
-        patch.object(knx_daemon, "is_connected", return_value=True),
-        patch.object(cyclic_send, "start_send", side_effect=RuntimeError("A scheduled send is already active")),
-    ):
-        response = client.post(
-            "/api/knx/send/scheduled",
-            json={"address": "1/2/3", "payload": True, "dpt": "1.001", "interval_seconds": 5},
-        )
-    assert response.status_code == 409
-
-
 def test_scheduled_send_without_delay_or_interval_returns_400():
     with (
         patch.object(knx_daemon, "ALLOW_WRITE", True),
@@ -166,33 +153,51 @@ def test_scheduled_send_rejected_when_write_disabled():
 
 
 def test_scheduled_send_status_idle():
-    with patch.object(cyclic_send, "current_job", None):
+    with patch.object(cyclic_send, "list_active_jobs", return_value=[]):
         response = client.get("/api/knx/send/scheduled/status")
     assert response.status_code == 200
-    assert response.json() == {"state": "idle"}
+    assert response.json() == {"jobs": []}
 
 
-def test_scheduled_send_status_reports_job():
+def test_scheduled_send_status_reports_jobs():
     job = SendJob(address="1/2/3", interval_seconds=5.0)
     job.state = "running"
     job.sends_done = 3
-    with patch.object(cyclic_send, "current_job", job):
+    with patch.object(cyclic_send, "list_active_jobs", return_value=[job]):
         response = client.get("/api/knx/send/scheduled/status")
     assert response.status_code == 200
     data = response.json()
-    assert data["state"] == "running"
-    assert data["address"] == "1/2/3"
-    assert data["sends_done"] == 3
+    assert len(data["jobs"]) == 1
+    assert data["jobs"][0]["state"] == "running"
+    assert data["jobs"][0]["address"] == "1/2/3"
+    assert data["jobs"][0]["sends_done"] == 3
 
 
 def test_scheduled_send_cancel():
-    with patch.object(cyclic_send, "cancel_send", return_value=True):
-        response = client.post("/api/knx/send/scheduled/cancel")
+    with patch.object(cyclic_send, "cancel_send", return_value=True) as cancel:
+        response = client.post("/api/knx/send/scheduled/cancel", json={"id": "abc123"})
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    cancel.assert_called_once_with("abc123")
 
 
 def test_scheduled_send_cancel_when_idle_returns_404():
     with patch.object(cyclic_send, "cancel_send", return_value=False):
-        response = client.post("/api/knx/send/scheduled/cancel")
+        response = client.post("/api/knx/send/scheduled/cancel", json={"id": "missing"})
     assert response.status_code == 404
+
+
+def test_scheduled_send_cancel_all_with_empty_body():
+    with patch.object(cyclic_send, "cancel_all_sends", return_value=2) as cancel_all:
+        response = client.post("/api/knx/send/scheduled/cancel", json={})
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    cancel_all.assert_called_once_with()
+
+
+def test_scheduled_send_cancel_all_with_no_body():
+    with patch.object(cyclic_send, "cancel_all_sends", return_value=0) as cancel_all:
+        response = client.post("/api/knx/send/scheduled/cancel")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    cancel_all.assert_called_once_with()

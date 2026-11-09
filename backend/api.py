@@ -620,9 +620,13 @@ class KnxScheduledSendRequest(BaseModel):
     interval_seconds: float | None = Field(None, ge=1.0, le=86400)
 
 
+class KnxScheduledCancelRequest(BaseModel):
+    id: str | None = None
+
+
 @router.post("/api/knx/send/scheduled")
 async def knx_send_scheduled(request: KnxScheduledSendRequest):
-    """Start a delayed and/or cyclic send job (#167). One job at a time."""
+    """Start a delayed and/or cyclic send job (#167). Multiple jobs may run at once."""
     _require_bus_write()
     if request.delay_seconds == 0 and request.interval_seconds is None:
         raise HTTPException(status_code=400, detail="Set a delay or interval; use /api/knx/send for immediate sends")
@@ -632,32 +636,33 @@ async def knx_send_scheduled(request: KnxScheduledSendRequest):
         knx_daemon._encode_payload(request.payload, request.dpt)
     except (ConversionError, CouldNotParseAddress, ValueError) as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
-    try:
-        job = cyclic_send.start_send(
-            request.address,
-            request.payload,
-            request.dpt,
-            request.response,
-            request.delay_seconds,
-            request.interval_seconds,
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+    job = cyclic_send.start_send(
+        request.address,
+        request.payload,
+        request.dpt,
+        request.response,
+        request.delay_seconds,
+        request.interval_seconds,
+    )
     return job.to_dict()
 
 
 @router.get("/api/knx/send/scheduled/status")
 async def get_scheduled_send_status():
-    """Returns the state of the current/last scheduled send job."""
-    job = cyclic_send.current_job
-    return job.to_dict() if job else {"state": "idle"}
+    """Returns all waiting/running scheduled send jobs."""
+    active = cyclic_send.list_active_jobs()
+    return {"jobs": [j.to_dict() for j in active]}
 
 
 @router.post("/api/knx/send/scheduled/cancel")
-async def cancel_scheduled_send():
-    """Cancels the active scheduled send job."""
-    if not cyclic_send.cancel_send():
-        raise HTTPException(status_code=404, detail="No scheduled send is active")
+async def cancel_scheduled_send(request: KnxScheduledCancelRequest | None = None):
+    """Cancels one scheduled send by id, or all active jobs when id is omitted."""
+    job_id = request.id if request else None
+    if job_id:
+        if not cyclic_send.cancel_send(job_id):
+            raise HTTPException(status_code=404, detail="No scheduled send is active")
+        return {"status": "ok"}
+    cyclic_send.cancel_all_sends()
     return {"status": "ok"}
 
 
