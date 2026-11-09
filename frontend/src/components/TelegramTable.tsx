@@ -154,6 +154,35 @@ const cellPadding = '0.75rem 1rem'; // Unified padding for all cells
 
 const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 
+function timeMs(timestamp: string): number {
+  return new Date(timestamp).getTime();
+}
+
+/**
+ * Rows strictly newer than `newestMs` in a list ordered by time.
+ * Descending lists (newest first) keep those rows at the start; ascending
+ * lists keep them at the end.
+ */
+function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascending: boolean): number {
+  if (!Number.isFinite(newestMs) || rows.length === 0) return 0;
+  let lo = 0;
+  let hi = rows.length;
+  if (ascending) {
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (timeMs(rows[mid].timestamp) <= newestMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return rows.length - lo;
+  }
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (timeMs(rows[mid].timestamp) > newestMs) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 // ── Quick filter bar (#271, #309) ────────────────────────────────────────────
 // Two rows per applicable column: a top pattern row (address/DPT-key patterns
 // with wildcards and ranges, or a from/range bound) and a bottom text row
@@ -549,8 +578,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // ── ETS-style scroll anchoring (#202) ───────────────────────────────────────
   // Auto-scroll only while the scrollbar sits at the live edge (top for
   // newest-first, bottom for oldest-first). Scrolled away, the viewed rows are
-  // anchored — new telegrams keep filling the list and a pill offers the way
-  // back. Only meaningful for the timestamp sort, where the live edge exists.
+  // anchored. The jump-to-live pill counts telegrams newer than the newest one
+  // on screen, so it stays hidden while that newest telegram is visible —
+  // which is always the case in live mode. Only meaningful for the timestamp
+  // sort, where the live edge exists.
   //
   // Rows are dynamically measured (ResizeObserver), so a new row enters the
   // layout at the 85px estimate and later shrinks to its real height. Estimate-
@@ -564,7 +595,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const isTimeSort = primarySort?.key === 'timestamp' && !deltaSortActive;
   const liveEdge = primarySort?.direction === 'asc' ? 'bottom' : 'top';
   const atEdgeRef = useRef(listFollow ?? true);
-  const [newSinceAnchor, setNewSinceAnchor] = useState(0);
+  // Mirrors atEdgeRef for render. Live mode never shows the jump pill.
+  const [followingLive, setFollowingLive] = useState(listFollow ?? true);
   // The row held still while anchored, and its offset from the scroll-container
   // top: the selected (last-marked) row while it is on screen (#435), otherwise
   // the top-most visible one. Captured from user scrolls and row clicks only.
@@ -618,6 +650,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   useEffect(() => {
     if (listFollow !== undefined) {
       atEdgeRef.current = listFollow;
+      setFollowingLive(listFollow);
     }
   }, [listFollow]);
 
@@ -709,10 +742,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const atEdge = checkAtEdge();
     if (atEdge !== atEdgeRef.current) {
       atEdgeRef.current = atEdge;
+      setFollowingLive(atEdge);
       onListFollowChange?.(atEdge);
     }
     if (atEdge) {
-      setNewSinceAnchor(0);
       anchorRef.current = null;
       onListAnchorKeyChange?.(null);
     } else {
@@ -762,6 +795,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     // ── Pause live-following on an edge click (#266), unchanged ──
     if (isTimeSort && atEdgeRef.current) {
       atEdgeRef.current = false;
+      setFollowingLive(false);
       onListFollowChange?.(false);
     }
     // Hold the clicked row still from here on (#435).
@@ -775,10 +809,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 
   const jumpToLive = () => {
     atEdgeRef.current = true;
+    setFollowingLive(true);
     onListFollowChange?.(true);
     anchorRef.current = null;
     onListAnchorKeyChange?.(null);
-    setNewSinceAnchor(0);
     scrollToEdge();
   };
 
@@ -788,8 +822,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const gotoIndex = (idx: number) => {
     if (idx < 0 || idx >= telegramRows.length) return;
     atEdgeRef.current = false;
+    setFollowingLive(false);
     onListFollowChange?.(false);
-    setNewSinceAnchor(0);
     // The old anchor is about to leave the rendered window on purpose.
     anchorRef.current = null;
     markProgrammatic();
@@ -799,6 +833,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     requestAnimationFrame(() => requestAnimationFrame(() => {
       captureAnchor();
       atEdgeRef.current = false;
+      setFollowingLive(false);
       onListFollowChange?.(false);
     }));
   };
@@ -912,13 +947,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       // instead of treating the second one as a real sortConfig change.
       return () => { sortEffectMounted.current = false; };
     }
-    setNewSinceAnchor(0);
     setStripeOffset(0);
     anchorRef.current = null;
     onListAnchorKeyChange?.(null);
     const atEdge = checkAtEdge();
     if (atEdge !== atEdgeRef.current) {
       atEdgeRef.current = atEdge;
+      setFollowingLive(atEdge);
       onListFollowChange?.(atEdge);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1015,7 +1050,6 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       }
       anchorRef.current = null;
       onListAnchorKeyChange?.(null);
-      setNewSinceAnchor(0);
       setStripeOffset(0);
       return;
     }
@@ -1029,7 +1063,6 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       return;
     }
 
-    setNewSinceAnchor(n => n + added);
     pinAnchor();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramRows]);
@@ -1278,6 +1311,28 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const infoChipBtnStyle: React.CSSProperties = {
     ...infoChipStyle, cursor: 'pointer', background: 'transparent',
   };
+
+  // Refresh the visible index range, then count telegrams strictly newer than
+  // the newest one inside it. Overscan rows are rendered but not on screen.
+  // A range computed while every row still has size 0 is meaningless: the
+  // virtualizer's binary search treats every start offset as equal and lands
+  // on an arbitrary middle index.
+  const virtualItems = virtualizer.getVirtualItems();
+  const visibleRange = virtualizer.range;
+  let newerCount = 0;
+  const rangeMeasured = virtualItems.some(item => item.size > 0);
+  if (isTimeSort && visibleRange && rangeMeasured && telegramRows.length > 0 && virtualizer.getTotalSize() > 0) {
+    const start = Math.max(0, visibleRange.startIndex);
+    const end = Math.min(telegramRows.length - 1, visibleRange.endIndex);
+    if (end >= start) {
+      let newest = -Infinity;
+      for (let i = start; i <= end; i++) {
+        const ms = timeMs(telegramRows[i].timestamp);
+        if (ms > newest) newest = ms;
+      }
+      newerCount = countNewerThan(telegramRows, newest, liveEdge === 'bottom');
+    }
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1602,8 +1657,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           below the header, not over it. */}
       <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Jump-to-live pill — shown while anchored away from the edge (#202) */}
-      {isTimeSort && newSinceAnchor > 0 && (
+      {/* Jump-to-live pill — telegrams newer than the newest one on screen.
+          Hidden in live mode, where that telegram is always visible. */}
+      {isTimeSort && !followingLive && newerCount > 0 && (
         <button
           onClick={jumpToLive}
           className="jump-to-live-pill"
@@ -1614,7 +1670,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           title="Jump back to the live edge"
         >
           {liveEdge === 'top' ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {newSinceAnchor.toLocaleString()} new telegram{newSinceAnchor === 1 ? '' : 's'}
+          {newerCount.toLocaleString()} {newerCount === 1 ? 'new telegram' : 'newer telegrams'}
         </button>
       )}
 

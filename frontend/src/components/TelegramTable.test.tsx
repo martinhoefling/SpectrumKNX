@@ -7,7 +7,9 @@ import { DEFAULT_FILTERS } from '../types/filters';
 import { anchorKey } from '../utils/anchorKey';
 
 // jsdom has no layout: give the virtualizer a viewport and rows a rect so it
-// renders items and the anchor logic finds rows.
+// renders items and the anchor logic finds rows. `scrollBlockSize` is the
+// scrollport height; a test can shrink it before rendering.
+let scrollBlockSize = 800;
 beforeAll(() => {
   globalThis.ResizeObserver = class {
     private cb: ResizeObserverCallback;
@@ -15,7 +17,7 @@ beforeAll(() => {
       this.cb = cb;
     }
     observe(el: Element) {
-      const size = { inlineSize: 1000, blockSize: el.classList.contains('log-row') ? 85 : 800 };
+      const size = { inlineSize: 1000, blockSize: el.classList.contains('log-row') ? 85 : scrollBlockSize };
       this.cb(
         [{ target: el, contentRect: el.getBoundingClientRect(), borderBoxSize: [size], contentBoxSize: [size] } as unknown as ResizeObserverEntry],
         this as unknown as ResizeObserver,
@@ -26,6 +28,39 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
   Element.prototype.getBoundingClientRect = () =>
     ({ width: 1000, height: 800, top: 0, bottom: 800, left: 0, right: 1000, x: 0, y: 0, toJSON: () => {} }) as DOMRect;
+  // @tanstack/virtual reads clientHeight, which jsdom leaves at 0.
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      if (this.classList?.contains('custom-scrollbar')) return scrollBlockSize;
+      if (this.classList?.contains('log-row')) return 85;
+      return 800;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get() { return 1000; },
+  });
+  // Item measurement falls back to offsetHeight when no ResizeObserver entry
+  // is passed. jsdom reports 0, which collapses the list and makes the
+  // virtualizer's visible range land on an arbitrary index.
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get() {
+      if (this.classList?.contains('custom-scrollbar')) return scrollBlockSize;
+      if (this.classList?.contains('log-row')) return 85;
+      return 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    configurable: true,
+    get() {
+      if (!this.classList?.contains('custom-scrollbar')) return 0;
+      const inner = this.firstElementChild as HTMLElement | null;
+      const height = inner ? Number.parseFloat(inner.style.height) : 0;
+      return Number.isFinite(height) && height > 0 ? height : scrollBlockSize;
+    },
+  });
 });
 
 const visibleColumns = {
@@ -96,8 +131,22 @@ test('zebra stripes stay with their telegram when new ones are prepended (#266)'
 });
 
 test('clicking a row pauses live-following (#266)', () => {
-  const { container, rerender } = renderTable(makeList(6, 5));
+  const onListFollowChange = vi.fn();
+  const { container, rerender } = render(
+    <TelegramTable
+      telegrams={makeList(6, 5)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      listFollow
+      onListFollowChange={onListFollowChange}
+    />,
+  );
   fireEvent.click(container.querySelectorAll('.log-row')[2]);
+  expect(onListFollowChange).toHaveBeenCalledWith(false);
 
   rerender(
     <TelegramTable
@@ -108,34 +157,38 @@ test('clicking a row pauses live-following (#266)', () => {
       activeFilters={DEFAULT_FILTERS}
       onQuickFilter={vi.fn()}
       onQuickVisualize={vi.fn()}
+      listFollow={false}
+      onListFollowChange={onListFollowChange}
     />,
   );
 
-  // Anchored away from the live edge: the jump-to-live pill appears.
-  expect(screen.getByText(/1 new telegram/)).toBeInTheDocument();
+  // The newest telegram is still on screen, so there is nothing newer to report.
+  expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
 });
 
 test('newest-on-bottom: clicking a row stays anchored while the full buffer evicts (#297)', () => {
   const asc: SortConfig = [{ key: 'timestamp', direction: 'asc' }];
   // In asc view the parent hands rows oldest-first, newest at the bottom edge.
   const oldestFirst = (count: number, newestOffsetS: number) => makeList(count, newestOffsetS).slice().reverse();
-  const renderAsc = (telegrams: Telegram[]) =>
-    render(
-      <TelegramTable
-        telegrams={telegrams}
-        visibleColumns={visibleColumns}
-        sortConfig={asc}
-        onSort={vi.fn()}
-        activeFilters={DEFAULT_FILTERS}
-        onQuickFilter={vi.fn()}
-        onQuickVisualize={vi.fn()}
-      />,
-    );
 
-  const { container, rerender } = renderAsc(oldestFirst(6, 5));
+  const onListFollowChange = vi.fn();
+  const { container, rerender } = render(
+    <TelegramTable
+      telegrams={oldestFirst(6, 5)}
+      visibleColumns={visibleColumns}
+      sortConfig={asc}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      listFollow
+      onListFollowChange={onListFollowChange}
+    />,
+  );
   // Click a row that is neither the oldest nor the newest, then simulate a
   // capacity eviction: one new telegram at the bottom, one dropped from the top.
   fireEvent.click(container.querySelectorAll('.log-row')[2]);
+  expect(onListFollowChange).toHaveBeenCalledWith(false);
   rerender(
     <TelegramTable
       telegrams={oldestFirst(6, 6)}
@@ -145,11 +198,13 @@ test('newest-on-bottom: clicking a row stays anchored while the full buffer evic
       activeFilters={DEFAULT_FILTERS}
       onQuickFilter={vi.fn()}
       onQuickVisualize={vi.fn()}
+      listFollow={false}
+      onListFollowChange={onListFollowChange}
     />,
   );
 
-  // The list stayed anchored rather than snapping to the (bottom) live edge.
-  expect(screen.getByText(/1 new telegram/)).toBeInTheDocument();
+  // Every row still fits, including the newest, so the pill stays hidden.
+  expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
 });
 
 test('without a click the table keeps following the live edge', () => {
@@ -167,6 +222,65 @@ test('without a click the table keeps following the live edge', () => {
     />,
   );
   expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
+});
+
+test('jump pill counts telegrams newer than the newest one on screen, for both time directions', () => {
+  const ROW = 85;
+  scrollBlockSize = ROW * 2;
+  const table = (telegrams: Telegram[], sort: SortConfig, follow: boolean, anchor: string | null = null) => (
+    <TelegramTable
+      telegrams={telegrams}
+      visibleColumns={visibleColumns}
+      sortConfig={sort}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      listFollow={follow}
+      onListFollowChange={vi.fn()}
+      listAnchorKey={anchor}
+      onListAnchorKeyChange={vi.fn()}
+    />
+  );
+
+  const scrollTo = (container: HTMLElement, top: number) => {
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = top;
+    fireEvent.scroll(port);
+  };
+
+  try {
+    const rows = makeList(10, 9);
+    // Newest first and still following: the newest row is on screen, so no pill.
+    const live = render(table(rows, sortConfig, true));
+    expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
+    live.unmount();
+
+    // Scrolled so the fourth row is the newest one on screen: three are newer.
+    const three = render(table(rows, sortConfig, false));
+    scrollTo(three.container, ROW * 3);
+    expect(screen.getByRole('button', { name: '3 newer telegrams' })).toBeInTheDocument();
+    three.unmount();
+
+    // One newer telegram keeps the singular "new telegram".
+    const one = render(table(rows, sortConfig, false));
+    scrollTo(one.container, ROW);
+    expect(screen.getByRole('button', { name: '1 new telegram' })).toBeInTheDocument();
+    one.unmount();
+
+    // Oldest first. The viewport holds the two oldest rows, so eight are newer.
+    const asc: SortConfig = [{ key: 'timestamp', direction: 'asc' }];
+    const ascRows = rows.slice().reverse();
+    const view = render(table(ascRows, asc, false));
+    scrollTo(view.container, 0);
+    expect(screen.getByRole('button', { name: '8 newer telegrams' })).toBeInTheDocument();
+
+    // Live mode hides the pill even while those newer rows are off screen.
+    view.rerender(table(ascRows, asc, true));
+    expect(screen.queryByText(/new telegram/)).not.toBeInTheDocument();
+  } finally {
+    scrollBlockSize = 800;
+  }
 });
 
 test('multi-level sort (#311): plain click replaces, ctrl-click adds a level', () => {
