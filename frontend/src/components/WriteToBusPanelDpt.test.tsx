@@ -38,13 +38,13 @@ afterEach(() => {
 test('the DPT field stays closed until the row has a group address', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
   expect(dptInput(container)).toBeDisabled();
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   expect(dptInput(container)).toBeEnabled();
 });
 
 test('clearing the group address closes the DPT suggestions and they stay closed', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  const address = screen.getByPlaceholderText(/Group address/);
+  const address = screen.getByPlaceholderText('GA');
   fireEvent.change(address, { target: { value: '1/2/3' } });
   fireEvent.focus(dptInput(container));
   expect(screen.getByRole('listbox', { name: 'Datapoint types' })).toBeInTheDocument();
@@ -58,8 +58,9 @@ test('clearing the group address closes the DPT suggestions and they stay closed
 
 test('the DPT suggestions sit with the field and name each type', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   const input = dptInput(container);
+  const shell = container.querySelector('[data-dpt-field]') as HTMLElement;
   fireEvent.focus(input);
   const list = screen.getByRole('listbox', { name: 'Datapoint types' });
   const option = screen.getByRole('option', { name: /5\.001/ });
@@ -68,15 +69,61 @@ test('the DPT suggestions sit with the field and name each type', () => {
   expect(screen.queryByRole('option', { name: /1\.001/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('option', { name: /9\.001/ })).not.toBeInTheDocument();
   expect(list).toContainElement(option);
-  const rect = input.getBoundingClientRect();
+  const rect = shell.getBoundingClientRect();
   expect(list.style.position).toBe('fixed');
   expect(list.style.left).toBe(`${rect.left}px`);
   expect(Number.parseFloat(list.style.top)).toBeCloseTo(rect.bottom + 4, 0);
 });
 
+test('a GA with no project DPT offers every known DPT', () => {
+  const { container } = render(
+    <WriteToBusPanel
+      targets={[{ address: '0/7/0', name: '', main: null, sub: null }]}
+      onClose={() => {}}
+    />,
+  );
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '0/7/0' } });
+  expect(dptInput(container)).toHaveValue('');
+  fireEvent.focus(dptInput(container));
+  // Full catalog — not constrained to one main (and ^ so 11.001 ≠ 1.001).
+  expect(screen.getByRole('option', { name: /^1\.001/ })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: /^5\.001/ })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: /^9\.001/ })).toBeInTheDocument();
+});
+
+test('picking a DPT blurs the field so the next click opens the list again', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  const input = dptInput(container);
+  fireEvent.focus(input);
+  fireEvent.mouseDown(screen.getByRole('option', { name: /5\.010/ }));
+  expect(input).toHaveValue('5.010');
+  expect(input).not.toHaveFocus();
+  expect(screen.queryByRole('listbox', { name: 'Datapoint types' })).not.toBeInTheDocument();
+});
+
+test('the reset control sits inside the DPT field', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  const shell = container.querySelector('[data-dpt-field]') as HTMLElement;
+  expect(screen.queryByTitle(/Reset to project DPT/)).not.toBeInTheDocument();
+
+  fireEvent.change(dptInput(container), { target: { value: '5.010' } });
+  expect(screen.getByTitle('Reset to project DPT 5.001')).toBeInTheDocument();
+  expect(shell.contains(screen.getByTitle('Reset to project DPT 5.001'))).toBe(true);
+});
+
+test('the DPT field shows the designation beside the key', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  expect(dptInput(container)).toHaveValue('5.001');
+  const shell = container.querySelector('[data-dpt-field]') as HTMLElement;
+  expect(shell).toContainElement(screen.getByText('Percent (%)'));
+});
+
 test('DPT prefills from the project when a GA is chosen', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   expect(dptInput(container)).toHaveValue('5.001');
   // Not overridden yet → no reset affordance.
   expect(screen.queryByTitle(/Reset to project DPT/)).not.toBeInTheDocument();
@@ -84,7 +131,7 @@ test('DPT prefills from the project when a GA is chosen', () => {
 
 test('overriding the DPT changes the effective DPT and shows a reset affordance', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
 
   fireEvent.change(dptInput(container), { target: { value: '5.010' } });
   expect(dptInput(container)).toHaveValue('5.010');
@@ -93,20 +140,20 @@ test('overriding the DPT changes the effective DPT and shows a reset affordance'
 
 test('the write widget follows the overridden DPT (main 5 → 1 renders On/Off)', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   // main 5 → free-value input
   expect(screen.getByPlaceholderText(/Value/)).toBeInTheDocument();
 
   fireEvent.change(dptInput(container), { target: { value: '1.001' } });
   // main 1 → On/Off buttons, free-value input gone
-  expect(screen.getByRole('button', { name: /^On$/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^Off$/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^on$/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^off$/ })).toBeInTheDocument();
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
 });
 
 test('changing the DPT main clears a stale value', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   expect(screen.getByPlaceholderText(/Value/)).toHaveValue('50');
 
@@ -120,12 +167,12 @@ test('sending uses the overridden DPT (the #342 case: 128 as 5.010)', async () =
   vi.stubGlobal('fetch', fetchMock);
 
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(dptInput(container), { target: { value: '5.010' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '128' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
 
-  await waitFor(() => expect(screen.getByText(/Sent 128 to 1\/2\/3/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText(/written '128' to 1\/2\/3/)).toBeInTheDocument());
   const sendCall = fetchMock.mock.calls.find(
     ([u]) => String(u).includes('/api/knx/send') && !String(u).includes('scheduled'),
   );
@@ -145,20 +192,42 @@ test('an unknown DPT surfaces the backend error inline', async () => {
   vi.stubGlobal('fetch', fetchMock);
 
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(dptInput(container), { target: { value: '5.999' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '1' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
 
-  await waitFor(() => expect(screen.getByText(/Unknown DPT type: 5\.999/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText(/Unknown DPT type: 5\.999/)).toBeInTheDocument());
 });
 
 test('reset restores the project DPT and drops the override', () => {
   const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Group address/), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(dptInput(container), { target: { value: '5.010' } });
 
   fireEvent.click(screen.getByTitle('Reset to project DPT 5.001'));
   expect(dptInput(container)).toHaveValue('5.001');
   expect(screen.queryByTitle(/Reset to project DPT/)).not.toBeInTheDocument();
+});
+
+test('a free send value shows the DPT unit beside the value when known', () => {
+  const { container } = render(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Temp', main: 9, sub: 1 }]}
+      onClose={() => {}}
+    />,
+  );
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  expect(dptInput(container)).toHaveValue('9.001');
+  expect(screen.queryByText('°C')).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '21.5' } });
+  const valueField = container.querySelector('[data-value-field]') as HTMLElement;
+  const unit = screen.getByText('°C');
+  expect(valueField).toContainElement(unit);
+  // Unit is a flex sibling after the input, not absolutely pinned to the field edge.
+  const valueInput = valueField.querySelector('input') as HTMLInputElement;
+  expect(valueInput.nextElementSibling).toBe(unit);
+  expect(valueInput).toHaveStyle({ textAlign: 'right' });
+  expect(valueField).toHaveStyle({ width: '100%' });
 });

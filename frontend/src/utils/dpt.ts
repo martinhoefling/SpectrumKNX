@@ -85,3 +85,10 @@ export function dptDesignation(key: string, label?: string | null): string {
   }
   return DPT_DESIGNATIONS[key] ?? '';
 }
+
+/** Unit in parentheses at the end of a designation, e.g. "Temperature (°C)" → "°C". */
+export function dptUnit(key: string, label?: string | null): string {
+  const name = dptDesignation(key, label);
+  const match = name.match(/\(([^)]+)\)\s*$/);
+  return match ? match[1] : '';
+}

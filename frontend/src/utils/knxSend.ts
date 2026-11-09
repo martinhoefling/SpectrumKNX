@@ -56,7 +56,7 @@ export function readTelegram(address: string): Promise<unknown> {
   return post('/api/knx/read', { address });
 }
 
-/** Status of the (single) delayed/cyclic send job, as returned by the backend. */
+/** Status of one delayed/cyclic send job, as returned by the backend. */
 export interface ScheduledSendStatus {
   state: 'idle' | 'waiting' | 'running' | 'done' | 'cancelled' | 'failed';
   id?: string;
@@ -86,12 +86,19 @@ export function startScheduledSend(
   });
 }
 
-export async function getScheduledSendStatus(): Promise<ScheduledSendStatus> {
+/** Active (waiting/running) scheduled jobs. */
+export async function getScheduledSendStatus(): Promise<ScheduledSendStatus[]> {
   const res = await fetch(apiUrl('/api/knx/send/scheduled/status'));
   if (!res.ok) throw new Error(`Request failed (${res.status})`);
-  return res.json() as Promise<ScheduledSendStatus>;
+  const data = await res.json() as { jobs?: ScheduledSendStatus[] };
+  return Array.isArray(data.jobs) ? data.jobs : [];
 }
 
-export function cancelScheduledSend(): Promise<unknown> {
-  return post('/api/knx/send/scheduled/cancel');
+export function cancelScheduledSend(jobId: string): Promise<unknown> {
+  return post('/api/knx/send/scheduled/cancel', { id: jobId });
+}
+
+/** Cancel every waiting/running scheduled send (omit id → cancel-all). */
+export function cancelAllScheduledSends(): Promise<unknown> {
+  return post('/api/knx/send/scheduled/cancel', {});
 }

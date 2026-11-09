@@ -9,6 +9,7 @@ export function boolBtn(disabled: boolean): React.CSSProperties {
     padding: '0.35rem 0.7rem', fontSize: '0.78rem', fontWeight: 600,
     background: 'var(--accent-primary)', color: 'white',
     border: 'none', borderRadius: '6px',
+    whiteSpace: 'nowrap',
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
   };
 }
@@ -19,6 +20,7 @@ export function primaryBtn(disabled: boolean): React.CSSProperties {
     padding: '0.35rem 0.8rem', fontSize: '0.78rem', fontWeight: 600,
     background: 'var(--accent-primary)', color: 'white',
     border: 'none', borderRadius: '6px',
+    whiteSpace: 'nowrap',
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
   };
 }
@@ -29,6 +31,7 @@ export function secondaryBtn(disabled: boolean): React.CSSProperties {
     padding: '0.35rem 0.8rem', fontSize: '0.78rem', fontWeight: 600,
     background: 'transparent', color: 'var(--accent-primary)',
     border: '1px solid var(--accent-primary)', borderRadius: '6px',
+    whiteSpace: 'nowrap',
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
   };
 }

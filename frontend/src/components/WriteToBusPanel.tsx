@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent as ReactUIEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Radio, Plus, Trash2, AlertTriangle, CheckCircle2, Timer, RotateCcw, Clock } from 'lucide-react';
+import { Radio, Plus, Minus, AlertTriangle, CheckCircle2, Timer, RotateCcw, ChevronDown, X, Send } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -13,14 +13,18 @@ import {
   startScheduledSend,
   getScheduledSendStatus,
   cancelScheduledSend,
+  cancelAllScheduledSends,
   type ScheduledSendStatus,
 } from '../utils/knxSend';
 import { GaCombobox } from './GaCombobox';
 import { WriteControls } from './WriteControls';
+import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
-import { dptDesignation } from '../utils/dpt';
-import { describeBusPayload, type BusPayload } from '../utils/dptValues';
+import { dptDesignation, dptUnit } from '../utils/dpt';
+import { describeBusPayload, formatBusValueForDpt, type BusPayload } from '../utils/dptValues';
+import { BusValueText } from './BusValueText';
+import { getPref, setPref } from '../utils/prefs';
 
 interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
@@ -46,12 +50,28 @@ interface Row {
   busy: boolean;
   feedback: { ok: boolean; msg: string } | null;
   /**
-   * Set by Read: the timestamp of the value shown when the request went out
-   * ('' when there was none). The row is "waiting for a response" for as long
-   * as the shown value is still that one. Compared by identity, not by clock,
-   * so browser/server time differences cannot matter.
+   * Set by Read: timestamp of the value shown when the request went out
+   * ('' when none). Waiting itself is driven by statusWatch === 'read'.
    */
   readBaseline: string | null;
+  /**
+   * After a send/read, wait for the matching bus telegram on the live feed.
+   * 'read' keeps the waiting icon until a Response arrives (or Cancel) —
+   * Writes never clear a read wait.
+   */
+  statusWatch: 'write' | 'read' | null;
+  /** Bus telegram currently shown in Status (time + jump). */
+  statusTelegram: Telegram | null;
+  /**
+   * Last Write this row caused on the bus. Survives Read waits / Clear of the
+   * transient wait so Cancel-on-wait can restore the prior write status.
+   */
+  lastSentTelegram: Telegram | null;
+  /**
+   * Server UUID of this row's scheduled job (not the GA). Survives panel toggle
+   * so refreshJobs can reattach by id when several rows share an address.
+   */
+  scheduledJobId: string | null;
 }
 
 const GA_RE = /^\d{1,2}\/\d{1,2}\/\d{1,3}$|^\d{1,2}\/\d{1,4}$|^\d{1,5}$/;
@@ -81,18 +101,383 @@ const COMMON_DPTS = [
 let rowSeq = 0;
 const newRow = (): Row => ({
   id: `row-${rowSeq++}`, address: '', name: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
-  readBaseline: null,
+  readBaseline: null, statusWatch: null, statusTelegram: null, lastSentTelegram: null,
+  scheduledJobId: null,
 });
+
+/** Stable floor so the status track does not jump / overflow into Delete. */
+const STATUS_SHELL_MIN_WIDTH = '9.75rem';
+/** Floor with Clear-only action (no Cancel label). */
+const STATUS_SHELL_MIN_WIDTH_CLEAR = '6.75rem';
+/** Floor without the Cancel/Clear track — keeps empty/idle shells compact. */
+const STATUS_SHELL_MIN_WIDTH_COMPACT = '5.75rem';
+/** Fits the Cancel label + divider; used when any row shows Cancel. */
+const STATUS_ACTION_WIDTH = '4.25rem';
+/** Fits the Clear X / empty spacer when no Cancel is on the panel. */
+const STATUS_CLEAR_WIDTH = '11px';
+
+/** Row has anything that warrants Cancel/Clear or fills the status body. */
+function rowHasStatusChrome(
+  row: Pick<Row, 'feedback' | 'statusWatch' | 'statusTelegram' | 'lastSentTelegram'>,
+  job: ScheduledSendStatus | null | undefined,
+): boolean {
+  return Boolean(
+    isLiveJob(job)
+    || row.feedback
+    || row.statusWatch
+    || row.statusTelegram
+    || row.lastSentTelegram,
+  );
+}
+
+function measureStatusShell(shell: HTMLElement): number {
+  // measureIntrinsicWidth forces minWidth:max-content and would drop the CSS
+  // floor, leaving the track too narrow so the shell paints over Delete.
+  // Error copy is tooltip + ellipsis only — zero it during measure so a long
+  // message cannot widen the status track (tracks only grow).
+  const errorText = shell.querySelector('[data-status-error]') as HTMLElement | null;
+  const prev = {
+    width: shell.style.width,
+    maxWidth: shell.style.maxWidth,
+    errorWidth: errorText?.style.width ?? '',
+    errorMaxWidth: errorText?.style.maxWidth ?? '',
+    errorMinWidth: errorText?.style.minWidth ?? '',
+  };
+  if (errorText) {
+    errorText.style.width = '0';
+    errorText.style.minWidth = '0';
+    errorText.style.maxWidth = '0';
+  }
+  shell.style.width = 'max-content';
+  shell.style.maxWidth = 'none';
+  const w = Math.ceil(shell.getBoundingClientRect().width || shell.scrollWidth);
+  shell.style.width = prev.width;
+  shell.style.maxWidth = prev.maxWidth;
+  if (errorText) {
+    errorText.style.width = prev.errorWidth;
+    errorText.style.minWidth = prev.errorMinWidth;
+    errorText.style.maxWidth = prev.errorMaxWidth;
+  }
+  return w;
+}
+
+/** Clear transient status; keeps lastSentTelegram so the row remembers its last Write. */
+function clearStatusPatch(): Pick<Row, 'feedback' | 'readBaseline' | 'statusWatch' | 'statusTelegram'> {
+  return { feedback: null, readBaseline: null, statusWatch: null, statusTelegram: null };
+}
+
+/** Full status reset including the remembered last Write (Clear button). */
+function clearAllStatusPatch(): Pick<
+  Row,
+  'feedback' | 'readBaseline' | 'statusWatch' | 'statusTelegram' | 'lastSentTelegram'
+> {
+  return { ...clearStatusPatch(), lastSentTelegram: null };
+}
+
+function isWriteTelegram(tg: Telegram | null | undefined): boolean {
+  if (!tg) return false;
+  return tg.simplified_type === 'Write' || Boolean(tg.telegram_type?.includes('Write'));
+}
+
+function telegramValue(tg: Telegram | null | undefined, fallback = '', dpt?: string): string {
+  if (!tg) return fallback;
+  const shown = formatBusValueForDpt(tg, dpt);
+  if (shown.text && shown.text !== '—') {
+    return shown.unit ? `${shown.text} ${shown.unit}` : shown.text;
+  }
+  return fallback;
+}
+
+/** Shared write-panel grid: addr | name | last | event | dpt | value | send | delay | every | read | status | del | add. */
+const WTB_COLS = 13;
+const WTB_NAME_COL = 1;
+const WTB_SEND_COL = 6;
+const WTB_STATUS_COL = 10;
+/** Middle pane scrolls horizontally: name … read (GA + status/del/add stay pinned). */
+const WTB_MID_START = 1;
+const WTB_MID_END = 10; // exclusive
+const WTB_COL_GAP = '0.45rem';
+/** Address, DPT, value, delay, every — measured content + small typing buffer. */
+const WTB_BUFFER_COLS = new Set([0, 4, 5, 7, 8]);
+const WTB_INPUT_BUFFER_PX = 10;
+
+const WTB_FALLBACK_MID_TRACKS =
+  'minmax(0, 1fr) max-content max-content max-content max-content max-content max-content max-content max-content';
+const WTB_FALLBACK_RIGHT_TRACKS = 'max-content max-content max-content';
+
+function midTracksTemplate(colTracks: number[] | null): string {
+  if (!colTracks) return WTB_FALLBACK_MID_TRACKS;
+  return colTracks
+    .slice(WTB_MID_START, WTB_MID_END)
+    .map((w, i) => (WTB_MID_START + i === WTB_NAME_COL ? `minmax(${w}px, 1fr)` : `${w}px`))
+    .join(' ');
+}
+
+function rightTracksTemplate(colTracks: number[] | null): string {
+  if (!colTracks) return WTB_FALLBACK_RIGHT_TRACKS;
+  return colTracks.slice(WTB_STATUS_COL).map(w => `${w}px`).join(' ');
+}
+
+function leftColWidth(colTracks: number[] | null): string {
+  return colTracks ? `${colTracks[0]}px` : 'max-content';
+}
+
+function rightPaneWidth(colTracks: number[] | null): string {
+  if (!colTracks) return 'max-content';
+  const [a, b, c] = colTracks.slice(WTB_STATUS_COL);
+  return `calc(${a}px + ${b}px + ${c}px + 2 * ${WTB_COL_GAP})`;
+}
+
+function measureIntrinsicWidth(el: HTMLElement): number {
+  // Read the CSS floor first — temporarily setting minWidth:max-content would
+  // otherwise drop shells like DPT (5.75rem) and let them paint over Value.
+  const minRaw = getComputedStyle(el).minWidth;
+  const floor = (() => {
+    if (!minRaw || minRaw === '0px' || minRaw === 'auto' || minRaw === 'none') return 0;
+    const n = parseFloat(minRaw);
+    return Number.isFinite(n) ? n : 0;
+  })();
+  const prev = {
+    width: el.style.width,
+    minWidth: el.style.minWidth,
+    maxWidth: el.style.maxWidth,
+  };
+  el.style.width = 'max-content';
+  el.style.minWidth = 'max-content';
+  el.style.maxWidth = 'none';
+  const w = Math.ceil(el.getBoundingClientRect().width || el.scrollWidth);
+  el.style.width = prev.width;
+  el.style.minWidth = prev.minWidth;
+  el.style.maxWidth = prev.maxWidth;
+  return Math.max(w, Math.ceil(floor));
+}
+
+/** Natural width of send buttons (ignores 1fr stretch) so the column fits every row. */
+function measureSendNatural(cell: HTMLElement): number {
+  const buttons = Array.from(cell.querySelectorAll(':scope > button')) as HTMLElement[];
+  if (buttons.length === 0) return measureIntrinsicWidth(cell);
+  const gap = parseFloat(getComputedStyle(cell).columnGap || getComputedStyle(cell).gap) || 0;
+  let sum = 0;
+  for (const btn of buttons) {
+    sum += measureIntrinsicWidth(btn);
+  }
+  return Math.ceil(sum + gap * Math.max(0, buttons.length - 1));
+}
+
+function measureColumnCell(cell: HTMLElement, col: number): number {
+  if (col === WTB_SEND_COL) return measureSendNatural(cell);
+  // Shells first; then combobox/select glass-input. Never drill into nested
+  // buttons (Event jump / Status cancel) — those would under-size the track
+  // and let label text paint over DPT. Composite cells and Read/Del/Add
+  // (where the cell IS the button) measure as the whole cell.
+  const statusShell = cell.querySelector('[data-status-field]') as HTMLElement | null;
+  if (statusShell) return measureStatusShell(statusShell);
+  const shell = cell.querySelector(
+    '[data-value-field], [data-seconds-field], [data-dpt-field]',
+  ) as HTMLElement | null;
+  if (shell) return measureIntrinsicWidth(shell);
+  const glass = cell.querySelector('.glass-input') as HTMLElement | null;
+  if (glass) return measureIntrinsicWidth(glass);
+  return measureIntrinsicWidth(cell);
+}
+
+const secondsBareInput: CSSProperties = {
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  padding: 0,
+  color: 'var(--text-main)',
+  font: 'inherit',
+  fontSize: 'inherit',
+  minWidth: 0,
+};
+
+/**
+ * Delay/Every: glass shell fills the track; column width comes from text
+ * (value + `s`, or placeholder), not the UA input default.
+ */
+/** delay/every: positive integers only; applied on blur (0 / decimals / junk → clear). */
+function sanitizeSecondsInput(raw: string): string {
+  const t = raw.trim();
+  if (t === '') return '';
+  if (!/^[1-9]\d*$/.test(t)) return '';
+  return t;
+}
+
+function SecondsField({
+  value,
+  onChange,
+  placeholder,
+  title,
+  col,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  title: string;
+  col: string;
+}) {
+  const showUnit = value.trim() !== '';
+  // Floor against placeholder and a typical filled "0" so empty tracks stay usable.
+  const inputCh = Math.max(value.length, placeholder.length, 1) + 1;
+  return (
+    <div data-wtb-col={col} style={{ width: '100%', minWidth: 0 }}>
+      <div
+        data-seconds-field
+        className="glass-input"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          width: '100%',
+          maxWidth: '100%',
+          boxSizing: 'border-box',
+          padding: '0.2rem 0.35rem',
+          gap: showUnit ? '0.3rem' : undefined,
+          fontSize: '0.72rem',
+        }}
+      >
+        <input
+          placeholder={placeholder}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onBlur={() => {
+            const next = sanitizeSecondsInput(value);
+            if (next !== value) onChange(next);
+          }}
+          inputMode="numeric"
+          title={title}
+          style={{
+            ...secondsBareInput,
+            flex: '1 1 auto',
+            width: `${inputCh}ch`,
+            minWidth: `${inputCh}ch`,
+            textAlign: 'right',
+          }}
+        />
+        {showUnit && (
+          <span
+            style={{
+              fontSize: '0.72rem',
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            s
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function sameTracks(a: number[] | null, b: number[]): boolean {
+  return a != null && a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * Merge measured column tracks. While the panel stays open, content-driven
+ * updates only grow tracks; a full replace (shrink allowed) happens on remount
+ * or when the available panel width changes. `noShrinkCols` still floors those
+ * indices even during a shrink pass (e.g. status while an error is showing).
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- unit-tested layout helper
+export function mergeColTracks(
+  prev: number[] | null,
+  next: number[],
+  opts: { allowShrink?: boolean; noShrinkCols?: number[] } = {},
+): number[] {
+  if (prev == null) return next.slice();
+  const protect = new Set(opts.noShrinkCols ?? []);
+  if (!opts.allowShrink) {
+    return next.map((w, i) => Math.max(prev[i] ?? 0, w));
+  }
+  return next.map((w, i) => (protect.has(i) ? Math.max(prev[i] ?? 0, w) : w));
+}
+
+const HEIGHT_PREF_KEY = 'send-panel-height';
+const HEIGHT_HANDLE_PX = 3;
+/** Matches global scrollbar thickness; reserved so H/V bars don't jump layout. */
+const SCROLLBAR_GUTTER_PX = 8;
+/** While ≤ this many send rows, grow the panel with content if it was already at max. */
+const AUTO_GROW_ROW_LIMIT = 8;
+function readHeightPref(): number | null {
+  const n = Number(getPref(HEIGHT_PREF_KEY));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function clampPanelHeight(h: number, min: number, max: number): number {
+  if (!(max > 0)) return h;
+  return Math.min(max, Math.max(min > 0 ? min : 0, h));
+}
+
+/**
+ * Host height: no pref → fit all content; otherwise honor the dragged/remembered
+ * size (clamped). Min is header + first row (+ padding with H-scrollbar gutter).
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- unit-tested layout helper
+export function resolvePanelHeight(
+  panelHeightPx: number | null,
+  bounds: { min: number; max: number },
+): number | undefined {
+  const { min, max } = bounds;
+  if (!(max > 0)) return undefined;
+  if (panelHeightPx == null) return max;
+  return clampPanelHeight(panelHeightPx, min, max);
+}
+
+/** Grow with a new row while ≤8 rows if the panel was already fully expanded. */
+// eslint-disable-next-line react-refresh/only-export-components -- unit-tested layout helper
+export function shouldAutoGrowPanelHeight(opts: {
+  height: number;
+  prevMax: number;
+  nextMax: number;
+  rowCount: number;
+  dragging: boolean;
+}): boolean {
+  const { height, prevMax, nextMax, rowCount, dragging } = opts;
+  return (
+    !dragging
+    && rowCount <= AUTO_GROW_ROW_LIMIT
+    && nextMax > height
+    && prevMax > 0
+    && height >= prevMax - 1
+  );
+}
 
 // ── Row persistence (#254) ───────────────────────────────────────────────────
 // The panel unmounts when toggled off; without this every configured row would
-// be lost. Only the durable inputs are stored — busy/feedback are transient,
-// and scheduled jobs live server-side (re-attached via the status poll).
+// be lost. Inputs and Status (feedback / wait / bus telegram) are stored —
+// busy stays transient; scheduled jobs live server-side (status poll).
 
 const ROWS_STORAGE_KEY = 'spectrumknx-write-panel-rows';
 const MAX_STORED_ROWS = 20;
 
-type StoredRow = Pick<Row, 'address' | 'dpt' | 'value' | 'delay' | 'every'>;
+type StoredRow = Pick<
+  Row,
+  | 'address' | 'dpt' | 'value' | 'delay' | 'every' | 'feedback' | 'readBaseline'
+  | 'statusWatch' | 'statusTelegram' | 'lastSentTelegram' | 'scheduledJobId'
+>;
+
+function parseFeedback(v: unknown): Row['feedback'] {
+  if (!v || typeof v !== 'object') return null;
+  const f = v as { ok?: unknown; msg?: unknown };
+  if (typeof f.ok !== 'boolean' || typeof f.msg !== 'string') return null;
+  return { ok: f.ok, msg: f.msg };
+}
+
+function parseStatusWatch(v: unknown): Row['statusWatch'] {
+  return v === 'write' || v === 'read' ? v : null;
+}
+
+function parseStatusTelegram(v: unknown): Telegram | null {
+  if (!v || typeof v !== 'object') return null;
+  const t = v as Partial<Telegram>;
+  if (typeof t.timestamp !== 'string' || typeof t.target_address !== 'string') return null;
+  if (typeof t.source_address !== 'string' || typeof t.telegram_type !== 'string') return null;
+  return t as Telegram;
+}
 
 function loadStoredRows(): Row[] | null {
   try {
@@ -110,6 +495,14 @@ function loadStoredRows(): Row[] | null {
         value: str(s?.value),
         delay: str(s?.delay),
         every: str(s?.every),
+        feedback: parseFeedback(s?.feedback),
+        readBaseline: typeof s?.readBaseline === 'string' ? s.readBaseline : null,
+        statusWatch: parseStatusWatch(s?.statusWatch),
+        statusTelegram: parseStatusTelegram(s?.statusTelegram),
+        lastSentTelegram: parseStatusTelegram(s?.lastSentTelegram),
+        scheduledJobId: typeof s?.scheduledJobId === 'string' && s.scheduledJobId
+          ? s.scheduledJobId
+          : null,
       };
     });
   } catch {
@@ -119,8 +512,12 @@ function loadStoredRows(): Row[] | null {
 
 function saveRows(rows: Row[]): void {
   try {
-    const stored: StoredRow[] = rows.map(({ address, dpt, value, delay, every }) => ({
-      address, dpt, value, delay, every,
+    const stored: StoredRow[] = rows.map(({
+      address, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
+      scheduledJobId,
+    }) => ({
+      address, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
+      scheduledJobId,
     }));
     localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(stored));
   } catch {
@@ -128,23 +525,66 @@ function saveRows(rows: Row[]): void {
   }
 }
 
+function isLiveJob(j: ScheduledSendStatus | null | undefined): boolean {
+  return j != null && (j.state === 'waiting' || j.state === 'running');
+}
+
+function isPendingJobId(id: string | undefined): boolean {
+  return Boolean(id?.startsWith('pending-'));
+}
+
 /**
  * "Write to bus" panel: send to several group addresses from stacked rows,
  * each with its own GA/DPT/value/Write/Read and optional delay/cyclic
  * scheduling, plus per-row add/remove (#215).
  *
- * The backend runs a single scheduled (delayed/cyclic) job at a time, so at
- * most one row can have an active timer; immediate writes/reads work on any
- * row regardless. Removing the row that owns the active job cancels it first.
+ * Each row can run its own scheduled (delayed/cyclic) job concurrently.
+ * Removing a row that owns an active job cancels that job first.
  *
  * Rows persist to localStorage so toggling the panel keeps its state (#254).
  */
-export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGotoTelegram }: Props) {
+export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onClose, onGotoTelegram }: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
   const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
-  const [job, setJob] = useState<ScheduledSendStatus | null>(null);
+  /** Active scheduled job per row id (optimistic pending-* ids until POST returns). */
+  const [jobsByRowId, setJobsByRowId] = useState<Record<string, ScheduledSendStatus>>({});
+  const [colTracks, setColTracks] = useState<number[] | null>(null);
+  /** null = natural max height (all rows); otherwise a remembered/dragged host height. */
+  const [panelHeightPx, setPanelHeightPx] = useState<number | null>(() => readHeightPref());
+  const [heightBounds, setHeightBounds] = useState({ min: 0, max: 0 });
+  const [heightDragging, setHeightDragging] = useState(false);
+  /** Bump on panel reset so the body grid host remounts and drops orphaned row DOM. */
+  const [bodyEpoch, setBodyEpoch] = useState(0);
+  /** Shared horizontal offset for the mid pane (name … read). */
+  const [midScrollLeft, setMidScrollLeft] = useState(0);
+  const [midContentWidth, setMidContentWidth] = useState(0);
+  const [midViewportWidth, setMidViewportWidth] = useState(0);
+  const hostRef = useRef<HTMLDivElement>(null);
+  /** Padded column host (no full-width H-scroll). */
+  const hScrollRef = useRef<HTMLDivElement>(null);
+  /** Inner: vertical scroll for send rows only. */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const headerGridRef = useRef<HTMLDivElement>(null);
+  /** Rows host: 3-pane grid (GA | mid | status+actions). */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const midClipRef = useRef<HTMLDivElement>(null);
+  const midInnerRef = useRef<HTMLDivElement>(null);
+  const midBarRef = useRef<HTMLDivElement>(null);
+  const hostWidthRef = useRef<number | null>(null);
+  const heightMaxRef = useRef(0);
+  const heightDraggingRef = useRef(heightDragging);
   const pollRef = useRef<number | null>(null);
   const watchingRef = useRef(false);
+  const rowsRef = useRef(rows);
+  const jobsByRowIdRef = useRef(jobsByRowId);
+  /** Row ids whose pending start should be cancelled once the server returns a real UUID. */
+  const cancelWhenStartedRef = useRef<Set<string>>(new Set());
+  // Keep callback/poll closures current without reading refs during render.
+  useLayoutEffect(() => {
+    heightDraggingRef.current = heightDragging;
+    rowsRef.current = rows;
+    jobsByRowIdRef.current = jobsByRowId;
+  });
 
   const byAddress = useMemo(() => {
     const m = new Map<string, FilterOption>();
@@ -199,11 +639,245 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
   );
   const lastValues = useLastSeenValues(rowAddresses, latestTelegram, { ignoreReads: true });
 
-  const jobActive = job != null && (job.state === 'waiting' || job.state === 'running');
+  const anyJobActive = Object.values(jobsByRowId).some(isLiveJob);
+  // Metric / action columns are panel-wide: keep every row's status shell
+  // aligned, but only reserve space while some row actually needs it.
+  // Countdown for delayed wait and cyclic interval gaps; count only once a
+  // cyclic job has actually sent at least once (sends_done > 0).
+  const showCountdownCol = Object.values(jobsByRowId).some(
+    j => isLiveJob(j) && Boolean(j.next_send_at || j.state === 'waiting'),
+  );
+  const showSendCountCol = Object.values(jobsByRowId).some(
+    j => isLiveJob(j)
+      && Boolean(j.interval_seconds)
+      && j.state === 'running'
+      && (j.sends_done ?? 0) > 0,
+  );
+  const showActionCol = anyJobActive || rows.some(r => rowHasStatusChrome(r, jobsByRowId[r.id]));
+  // Action track width follows panel content: Cancel-wide only while some row
+  // actually shows Cancel; otherwise Clear-icon narrow.
+  const anyCancelAction = anyJobActive || rows.some(r => r.statusWatch === 'read');
+  const actionWidth = anyCancelAction ? STATUS_ACTION_WIDTH : STATUS_CLEAR_WIDTH;
+  // Header Cancel only when more than one row shows Cancel (same rule as RowStatus).
+  const cancelRowCount = rows.filter(
+    r => isLiveJob(jobsByRowId[r.id]) || r.statusWatch === 'read',
+  ).length;
+  const showCancelAll = cancelRowCount > 1;
 
-  // Pick up an already-active job (e.g. after a page reload) and clean up the poller.
+  const midTemplateColumns = useMemo(() => midTracksTemplate(colTracks), [colTracks]);
+  const rightTemplateColumns = useMemo(() => rightTracksTemplate(colTracks), [colTracks]);
+  const leftWidth = useMemo(() => leftColWidth(colTracks), [colTracks]);
+  const rightWidth = useMemo(() => rightPaneWidth(colTracks), [colTracks]);
+  const paneTemplateColumns = useMemo(
+    () => `${leftWidth} minmax(0, 1fr) ${rightWidth}`,
+    [leftWidth, rightWidth],
+  );
+  const midMaxScroll = Math.max(0, midContentWidth - midViewportWidth);
+
+  const appliedPanelHeight = useMemo(
+    () => resolvePanelHeight(panelHeightPx, heightBounds),
+    [panelHeightPx, heightBounds],
+  );
+
+  const clampMidScroll = useCallback((next: number) => {
+    const max = Math.max(0, midContentWidth - midViewportWidth);
+    return Math.min(max, Math.max(0, next));
+  }, [midContentWidth, midViewportWidth]);
+
+  const onMidBarScroll = useCallback((e: ReactUIEvent<HTMLDivElement>) => {
+    setMidScrollLeft(e.currentTarget.scrollLeft);
+  }, []);
+
+  // Derive a clamped offset so shrinking the mid pane never needs a setState-in-effect.
+  const midScrollLeftApplied = clampMidScroll(midScrollLeft);
+
+  // Keep the under-mid scrollbar thumb in sync when wheel/programmatic scroll moves.
+  useLayoutEffect(() => {
+    const bar = midBarRef.current;
+    if (bar && Math.abs(bar.scrollLeft - midScrollLeftApplied) > 0.5) {
+      bar.scrollLeft = midScrollLeftApplied;
+    }
+  }, [midScrollLeftApplied]);
+
+  // Non-passive wheel on mid clips so shift/trackpad horizontal scroll can preventDefault.
   useEffect(() => {
-    void refreshJob();
+    const grid = gridRef.current;
+    if (!grid) return;
+    const onWheel = (e: WheelEvent) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.('.wtb-mid-clip')) return;
+      const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
+      if (!horiz) return;
+      const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
+      if (dx === 0) return;
+      e.preventDefault();
+      setMidScrollLeft(prev => clampMidScroll(prev + dx));
+    };
+    grid.addEventListener('wheel', onWheel, { passive: false });
+    return () => grid.removeEventListener('wheel', onWheel);
+  }, [clampMidScroll, bodyEpoch, rows.length]);
+
+  // Measure column tracks + height bounds. Content changes grow tracks only;
+  // a host-width change (or remount) fully reoptimizes.
+  useLayoutEffect(() => {
+    const headerGrid = headerGridRef.current;
+    const grid = gridRef.current;
+    const host = hostRef.current;
+    const hScroll = hScrollRef.current;
+    const scroll = scrollRef.current;
+    // Header row is omitted for a single send row; measurement still runs.
+    if (!grid || !host || !hScroll || !scroll) return;
+
+    const measureCols = (allowShrink: boolean) => {
+      const next = Array.from({ length: WTB_COLS }, () => 0);
+      for (let col = 0; col < WTB_COLS; col++) {
+        host.querySelectorAll(`[data-wtb-col="${col}"]`).forEach(node => {
+          next[col] = Math.max(next[col], measureColumnCell(node as HTMLElement, col));
+        });
+      }
+      for (const c of WTB_BUFFER_COLS) next[c] += WTB_INPUT_BUFFER_PX;
+      // Error text is ellipsized / zeroed in measureStatusShell so it never grows
+      // the track — but once a width is established, do not shrink status while
+      // any row still shows an error (host reoptimize / remount).
+      const statusHasError = Boolean(host.querySelector('[data-status-error]'));
+      setColTracks(prev => {
+        const merged = mergeColTracks(prev, next, {
+          allowShrink,
+          noShrinkCols: statusHasError ? [WTB_STATUS_COL] : undefined,
+        });
+        return sameTracks(prev, merged) ? prev : merged;
+      });
+    };
+
+    const measureMidScroll = () => {
+      const clip = midClipRef.current;
+      const inner = midInnerRef.current;
+      if (clip) setMidViewportWidth(clip.clientWidth);
+      if (inner) setMidContentWidth(Math.ceil(inner.scrollWidth));
+    };
+
+    const measureHeightBounds = () => {
+      const addrCells = grid.querySelectorAll('[data-wtb-col="0"]');
+      if (addrCells.length === 0) return;
+      const first = addrCells[0] as HTMLElement;
+      // Status (and mid) can be taller than GA — measure full first-row panes / grid
+      // scrollHeight so the last row's status border is not clipped by the scrollport.
+      const panes = Array.from(grid.children) as HTMLElement[];
+      const firstRowPanes = panes.slice(0, 3);
+      const oneRowH = addrCells.length > 1
+        ? Math.max(1, (addrCells[1] as HTMLElement).offsetTop - first.offsetTop)
+        : Math.max(1, ...firstRowPanes.map(c => c.offsetHeight));
+      const rowsH = Math.max(oneRowH, grid.scrollHeight);
+      // Header wrapper includes the gap under the header row (absent with one send row).
+      const headerWrap = headerGrid?.parentElement as HTMLElement | null;
+      const headerBlockH = headerWrap?.offsetHeight ?? headerGrid?.offsetHeight ?? 0;
+      const hCs = getComputedStyle(hScroll);
+      const padTop = parseFloat(hCs.paddingTop) || 0;
+      // Gap below the V-scrollport (not inside it) + mid H-scrollbar gutter + resize handle.
+      const belowRowsGap = parseFloat(getComputedStyle(scroll).marginBottom) || 0;
+      const chrome = padTop + headerBlockH + belowRowsGap + SCROLLBAR_GUTTER_PX + HEIGHT_HANDLE_PX;
+      const min = Math.ceil(chrome + oneRowH);
+      const max = Math.ceil(chrome + rowsH);
+      const prevMax = heightMaxRef.current;
+      heightMaxRef.current = max;
+      setHeightBounds(prev => (prev.min === min && prev.max === max ? prev : { min, max }));
+      setPanelHeightPx(h => {
+        if (h == null) return null;
+        if (shouldAutoGrowPanelHeight({
+          height: h,
+          prevMax,
+          nextMax: max,
+          rowCount: addrCells.length,
+          dragging: heightDraggingRef.current,
+        })) {
+          setPref(HEIGHT_PREF_KEY, String(max));
+          return max;
+        }
+        const clamped = clampPanelHeight(h, min, max);
+        return clamped === h ? h : clamped;
+      });
+    };
+
+    const measureContent = () => {
+      measureCols(false);
+      measureMidScroll();
+      measureHeightBounds();
+    };
+
+    measureContent();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    hostWidthRef.current = host.clientWidth;
+
+    const contentRo = new ResizeObserver(() => measureContent());
+    if (headerGrid) contentRo.observe(headerGrid);
+    contentRo.observe(grid);
+    const midClip = midClipRef.current;
+    const midInner = midInnerRef.current;
+    if (midClip) contentRo.observe(midClip);
+    if (midInner) contentRo.observe(midInner);
+    host.querySelectorAll('[data-wtb-col]').forEach(el => contentRo.observe(el));
+
+    // Observe the outer host — not the scrollport — so a vertical scrollbar
+    // inside the scrollport cannot look like a width change / reoptimize.
+    const widthRo = new ResizeObserver(() => {
+      const w = host.clientWidth;
+      if (hostWidthRef.current === w) return;
+      hostWidthRef.current = w;
+      measureCols(true);
+      measureMidScroll();
+      measureHeightBounds();
+    });
+    widthRo.observe(host);
+
+    return () => {
+      contentRo.disconnect();
+      widthRo.disconnect();
+    };
+  }, [
+    rows, bodyEpoch, lastValues, dptOptions, anyJobActive, jobsByRowId,
+    showCountdownCol, showSendCountCol, showActionCol, anyCancelAction, actionWidth,
+  ]);
+
+  const onHeightResizeStart = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = hostRef.current?.getBoundingClientRect().height
+      ?? appliedPanelHeight
+      ?? heightBounds.max
+      ?? 0;
+    let latest = startH;
+    const onMove = (ev: MouseEvent) => {
+      latest = clampPanelHeight(
+        startH + (ev.clientY - startY),
+        heightBounds.min,
+        heightBounds.max,
+      );
+      setPanelHeightPx(latest);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      setHeightDragging(false);
+      if (latest !== startH) setPref(HEIGHT_PREF_KEY, String(latest));
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+    setHeightDragging(true);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [appliedPanelHeight, heightBounds.min, heightBounds.max]);
+
+  const onHeightResizeReset = useCallback(() => {
+    setPanelHeightPx(null);
+    setPref(HEIGHT_PREF_KEY, '');
+  }, []);
+
+  // Pick up already-active jobs (e.g. after a page reload) and clean up the poller.
+  useEffect(() => {
+    void refreshJobs();
     return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -215,32 +889,75 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
   const updateRow = (id: string, patch: Partial<Row>) =>
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
 
-  const addRowAfter = (id: string) => {
+  /**
+   * Detach this row from any scheduled job in local state. Returns the prior
+   * job so the caller can cancel it on the server without deferring the UI
+   * update behind an `await` (tests and clicks expect sync row changes).
+   */
+  const detachRowJob = (id: string): ScheduledSendStatus | undefined => {
+    const owned = jobsByRowId[id];
+    setJobsByRowId(prev => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    return owned;
+  };
+
+  const cancelDetachedJob = async (rowId: string, owned: ScheduledSendStatus | undefined) => {
+    if (!owned) return;
+    // Optimistic pending-* has no server UUID yet — cancel when startScheduled returns.
+    if (isPendingJobId(owned.id)) {
+      cancelWhenStartedRef.current.add(rowId);
+      return;
+    }
+    if (isLiveJob(owned) && owned.id) {
+      await cancelScheduledSend(owned.id).catch(() => {});
+      await refreshJobs();
+    }
+  };
+
+  const addRowAfter = (id: string, opts?: { copy?: boolean }) => {
     setRows(rs => {
       const index = rs.findIndex(r => r.id === id);
-      const next = newRow();
+      const source = index >= 0 ? rs[index] : undefined;
+      // Ctrl/cmd-click duplicates field values without status or a live job.
+      const next = opts?.copy && source
+        ? {
+            ...newRow(),
+            address: source.address,
+            name: source.name,
+            dpt: source.dpt,
+            value: source.value,
+            delay: source.delay,
+            every: source.every,
+          }
+        : newRow();
       if (index < 0) return [...rs, next];
       return [...rs.slice(0, index + 1), next, ...rs.slice(index + 1)];
     });
   };
 
-  const removeRow = async (id: string) => {
-    const row = rows.find(r => r.id === id);
-    // Removing the row that owns the running timer must cancel it, so we don't
+  const resetRow = (id: string) => {
+    const owned = detachRowJob(id);
+    setRows(rs => rs.map(r => (r.id === id ? { ...newRow(), id: r.id } : r)));
+    void cancelDetachedJob(id, owned);
+  };
+
+  const removeRow = (id: string) => {
+    // Removing the row that owns a running timer must cancel it, so we don't
     // leave an untracked cyclic send firing (TabSel, forum post #130).
-    if (row && jobActive && job?.address === row.address.trim()) {
-      await cancelScheduledSend().catch(() => {});
-      await refreshJob();
-    }
+    const owned = detachRowJob(id);
     setRows(rs => (rs.length > 1 ? rs.filter(r => r.id !== id) : rs));
+    void cancelDetachedJob(id, owned);
   };
 
   const applyResolved = (id: string, option: FilterOption) => {
     updateRow(id, {
       address: option.address ?? '',
       name: option.name ?? '',
-      feedback: null,
-      readBaseline: null,
+      ...clearStatusPatch(),
       dpt: option.main != null ? formatDpt(option.main, option.sub) : '',
     });
   };
@@ -255,8 +972,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
     const match = byAddress.get(next.trim());
     updateRow(id, {
       address: next,
-      feedback: null,
-      readBaseline: null,
+      ...clearStatusPatch(),
       dpt: match && match.main != null ? formatDpt(match.main, match.sub) : '',
     });
   };
@@ -271,7 +987,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
       applyResolved(id, option);
       return;
     }
-    updateRow(id, { name: next, feedback: null });
+    updateRow(id, { name: next, ...clearStatusPatch() });
   };
 
   const onNameCommit = (id: string, text: string) => {
@@ -289,7 +1005,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
       applyResolved(id, match);
       return;
     }
-    updateRow(id, { name: text, address: '', dpt: '', feedback: null, readBaseline: null });
+    updateRow(id, { name: text, address: '', dpt: '', ...clearStatusPatch() });
   };
 
   // Editable DPT (#342): overriding the project default. When the DPT *main*
@@ -298,268 +1014,955 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
   const onDptChange = (id: string, next: string) => {
     const row = rows.find(r => r.id === id);
     const mainChanged = row && parseDptMain(row.dpt) !== parseDptMain(next);
-    updateRow(id, { dpt: next, feedback: null, ...(mainChanged ? { value: '' } : {}) });
+    updateRow(id, { dpt: next, ...clearStatusPatch(), ...(mainChanged ? { value: '' } : {}) });
   };
+
+  // Bind Status time/jump when the matching Read/Write appears on the live feed.
+  const [seenLatest, setSeenLatest] = useState(latestTelegram);
+  if (latestTelegram !== seenLatest) {
+    setSeenLatest(latestTelegram);
+    if (latestTelegram) {
+      const addr = latestTelegram.target_address;
+      const kind = latestTelegram.simplified_type;
+      setRows(rs => {
+        let changed = false;
+        const next = rs.map(r => {
+          if (r.address.trim() !== addr) return r;
+          // Job binding is per owning row — never share send/wait across rows.
+          const jobOwns = isLiveJob(jobsByRowId[r.id]);
+          const wantWrite = r.statusWatch === 'write' || jobOwns;
+          const wantRead = r.statusWatch === 'read';
+          const isWrite = kind === 'Write' || latestTelegram.telegram_type?.includes('Write');
+          const isRead = kind === 'Read' || latestTelegram.telegram_type?.includes('Read');
+          const isResponse = kind === 'Response' || latestTelegram.telegram_type?.includes('Response');
+          if (isWrite) {
+            if (wantWrite && wantRead) {
+              // Cyclic Write during an open Read wait: remember the send, keep waiting.
+              changed = true;
+              return { ...r, lastSentTelegram: latestTelegram };
+            }
+            if (wantWrite) {
+              changed = true;
+              return { ...r, statusTelegram: latestTelegram, lastSentTelegram: latestTelegram };
+            }
+            // Read wait alone: Writes never end it — only Response (or Cancel) does.
+          }
+          if (wantRead && isRead) {
+            changed = true;
+            return { ...r, statusTelegram: latestTelegram };
+          }
+          if (wantRead && isResponse) {
+            // Only Response ends the wait (even if a Read request already filled Status).
+            changed = true;
+            return {
+              ...r,
+              statusTelegram: latestTelegram,
+              readBaseline: null,
+              statusWatch: null,
+              feedback: null,
+            };
+          }
+          return r;
+        });
+        return changed ? next : rs;
+      });
+    }
+  }
 
   const write = async (row: Row, payload: BusPayload) => {
     const delaySeconds = parseFloat(row.delay) || 0;
     const intervalSeconds = parseFloat(row.every) || 0;
     const scheduled = delaySeconds > 0 || intervalSeconds > 0;
-    updateRow(row.id, { busy: true, feedback: null });
+    // Keep lastSentTelegram. For delayed send, also keep statusTelegram so a prior
+    // Read (time+jump) stays visible beside the countdown until the Write binds.
+    // Display suppresses lastSentTelegram while busy so it cannot flash before an error.
+    updateRow(row.id, {
+      busy: true,
+      feedback: null,
+      readBaseline: null,
+      statusWatch: null,
+      ...(scheduled ? {} : { statusTelegram: null }),
+    });
     try {
       if (scheduled) {
-        await startScheduled(row, payload, delaySeconds, intervalSeconds);
+        if (intervalSeconds > 0 && intervalSeconds < 1) {
+          updateRow(row.id, { feedback: { ok: false, msg: 'Interval must be at least 1 second' } });
+          return;
+        }
+        // Same-row re-click cancels and restarts that row's job only.
+        const existing = jobsByRowId[row.id];
+        if (isLiveJob(existing) && existing.id && !isPendingJobId(existing.id)) {
+          try { await cancelScheduledSend(existing.id); } catch { /* start below */ }
+        }
+        const nextAt = delaySeconds > 0
+          ? new Date(Date.now() + delaySeconds * 1000).toISOString()
+          : null;
+        // Arm countdown/count before the network round-trip so Write feels instant.
+        watchingRef.current = true;
+        updateRow(row.id, { scheduledJobId: null });
+        setJobsByRowId(prev => ({
+          ...prev,
+          [row.id]: {
+            state: delaySeconds > 0 ? 'waiting' : 'running',
+            id: `pending-${row.id}`,
+            address: row.address.trim(),
+            delay_seconds: delaySeconds > 0 ? delaySeconds : undefined,
+            interval_seconds: intervalSeconds > 0 ? intervalSeconds : null,
+            sends_done: 0,
+            next_send_at: nextAt,
+          },
+        }));
+        const started = await startScheduled(row, payload, delaySeconds, intervalSeconds, nextAt);
+        if (started) updateRow(row.id, { statusWatch: 'write' });
       } else {
         await sendTelegram(row.address.trim(), payload, row.dpt.trim() || undefined);
         const shown = describeBusPayload(payload, row.dpt) || row.value || '(raw)';
-        updateRow(row.id, { feedback: { ok: true, msg: `Sent ${shown} to ${row.address.trim()}` } });
+        updateRow(row.id, {
+          feedback: { ok: true, msg: `Sent ${shown} to ${row.address.trim()}` },
+          statusWatch: 'write',
+          statusTelegram: null,
+        });
       }
       setRecentGas(pushRecentGa(row.address.trim()));
     } catch (err) {
-      updateRow(row.id, { feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' } });
+      updateRow(row.id, {
+        feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' },
+        statusWatch: null,
+        statusTelegram: null,
+        scheduledJobId: null,
+      });
     } finally {
       updateRow(row.id, { busy: false });
     }
   };
 
   const read = async (row: Row) => {
-    updateRow(row.id, { busy: true, feedback: null });
+    // Arm statusWatch before the API returns so a fast bus Read still binds.
+    updateRow(row.id, {
+      busy: true,
+      ...clearStatusPatch(),
+      readBaseline: lastValues[row.address.trim()]?.timestamp ?? '',
+      statusWatch: 'read',
+    });
     try {
       await readTelegram(row.address.trim());
       updateRow(row.id, {
         feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` },
-        readBaseline: lastValues[row.address.trim()]?.timestamp ?? '',
       });
       setRecentGas(pushRecentGa(row.address.trim()));
     } catch (err) {
-      updateRow(row.id, { feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' } });
+      updateRow(row.id, {
+        feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' },
+        statusWatch: null,
+        statusTelegram: null,
+        readBaseline: null,
+      });
     } finally {
       updateRow(row.id, { busy: false });
     }
   };
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: '0.5rem',
-      padding: '0.6rem 0.85rem', flexShrink: 0, width: '100%',
-      background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-color)',
-    }}>
-      {rows.map(row => {
-        const known = byAddress.get(row.address.trim());
-        // The write widget follows the row's *effective* (possibly overridden)
-        // DPT, not the project default (#342).
-        const dptMain = parseDptMain(row.dpt);
-        const projectDpt = known && known.main != null ? formatDpt(known.main, known.sub) : '';
-        const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
-        const addressValid = GA_RE.test(row.address.trim());
-        const lastTelegram = addressValid ? lastValues[row.address.trim()] : undefined;
-        const lastHasValue = lastTelegram != null && lastTelegram.simplified_type !== 'Read';
-        const scheduledDisabled = row.busy || !addressValid;
-        // A GA's telegram length is fixed by its project DPT main, so the hint
-        // lists only that main's subtypes (5.001 may become 5.010, not 9.001).
-        const allowedDpts = known?.main == null
-          ? []
-          : dptOptions.filter(o => Number(o.key.split('.')[0]) === known.main);
-        return (
-          <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', width: '100%' }}>
-              {/* Left Group: address and name, each with the same suggestion list */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 auto', minWidth: '180px' }}>
+    <div
+      ref={hostRef}
+      className="wtb-panel-host"
+      style={{
+        position: 'relative',
+        flexShrink: 0,
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        height: appliedPanelHeight != null ? `${appliedPanelHeight}px` : undefined,
+        background: 'var(--bg-subtle)',
+        borderBottom: '1px solid var(--border-color)',
+      }}
+    >
+      {/* Header band above the grid (title + close); not the Cancel/Reset row. */}
+      <div className="wtb-panel-chrome" aria-hidden />
+      <div className="wtb-panel-title">
+        <Send size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} aria-hidden />
+        Write to bus
+      </div>
+      <button
+        type="button"
+        className="wtb-close-button"
+        onClick={onClose}
+        title="Close send panel"
+        aria-label="Close send panel"
+      >
+        <X size={16} />
+      </button>
+      {/* H-scroll wraps header + rows so columns stay aligned; only rows V-scroll.
+          No right padding — the V-scrollbar sits on the panel's right edge. */}
+      <div
+        ref={hScrollRef}
+        className="wtb-h-scroll"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflowX: 'hidden',
+          overflowY: 'hidden',
+          padding: 'calc(var(--wtb-header-h) + 0.45rem) 0 0 0.85rem',
+          boxSizing: 'border-box',
+          // Mid-pane horizontal offset (name … read).
+          ['--wtb-mid-x' as string]: `-${midScrollLeftApplied}px`,
+        }}
+      >
+        <div
+          className="wtb-h-content"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+            minWidth: 0,
+            width: '100%',
+          }}
+        >
+        {rows.length > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            flexShrink: 0,
+            alignItems: 'center',
+            paddingBottom: '0.35rem',
+            width: '100%',
+            minWidth: 0,
+          }}
+        >
+          <div
+            ref={headerGridRef}
+            className="wtb-header-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: paneTemplateColumns,
+              columnGap: WTB_COL_GAP,
+              alignItems: 'center',
+              flex: 1,
+              minWidth: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <div aria-hidden style={{ minWidth: 0 }} />
+            <div aria-hidden style={{ minWidth: 0 }} />
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: rightTemplateColumns,
+                columnGap: WTB_COL_GAP,
+                alignItems: 'center',
+                minWidth: 0,
+              }}
+            >
+              <div data-wtb-col="10" style={{ minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
+                {/* Always mounted so show/hide never reflows status / header tracks. */}
+                <button
+                  type="button"
+                  onClick={() => { void cancelAllRows(); }}
+                  title={showCancelAll ? 'Cancel all jobs and read waits' : undefined}
+                  aria-label="Cancel all"
+                  aria-hidden={showCancelAll ? undefined : true}
+                  tabIndex={showCancelAll ? undefined : -1}
+                  style={{
+                    ...secondaryBtn(false),
+                    visibility: showCancelAll ? 'visible' : 'hidden',
+                    pointerEvents: showCancelAll ? 'auto' : 'none',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                data-wtb-col="11"
+                onClick={() => { void resetPanel(); }}
+                title="Reset panel · cancel all jobs and clear rows"
+                aria-label="Reset panel"
+                style={{
+                  color: 'var(--text-dim)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  padding: '0.2rem',
+                  display: 'flex',
+                }}
+              >
+                <RotateCcw size={15} />
+              </button>
+              <span data-wtb-col="12" aria-hidden style={{ display: 'inline-block', width: 15, height: 15 }} />
+            </div>
+          </div>
+          {/* Match body content inset + V-scrollbar gutter so header/body columns align. */}
+          <span aria-hidden style={{ flexShrink: 0, width: '0.85rem' }} />
+          <span aria-hidden style={{ flexShrink: 0, width: SCROLLBAR_GUTTER_PX }} />
+        </div>
+        )}
+        <div
+          ref={scrollRef}
+          className="wtb-scrollport"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowX: 'hidden',
+            overflowY: 'auto',
+            scrollbarGutter: 'stable',
+            boxSizing: 'border-box',
+            // Space under the grid, outside the scrolling content.
+            marginBottom: '0.45rem',
+          }}
+        >
+      <div
+        key={bodyEpoch}
+        ref={gridRef}
+        className="wtb-rows-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: paneTemplateColumns,
+          columnGap: WTB_COL_GAP,
+          rowGap: '0.35rem',
+          alignItems: 'center',
+          width: '100%',
+          minWidth: 0,
+          whiteSpace: 'nowrap',
+          paddingRight: '0.85rem',
+          boxSizing: 'border-box',
+        }}
+      >
+        {rows.map((row, rowIndex) => {
+          const known = byAddress.get(row.address.trim());
+          // The write widget follows the row's *effective* (possibly overridden)
+          // DPT, not the project default (#342).
+          const dptMain = parseDptMain(row.dpt);
+          const projectDpt = known && known.main != null ? formatDpt(known.main, known.sub) : '';
+          const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
+          const addressValid = GA_RE.test(row.address.trim());
+          const lastTelegram = addressValid ? lastValues[row.address.trim()] : undefined;
+          const lastHasValue = lastTelegram != null && lastTelegram.simplified_type !== 'Read';
+          // Stay "waiting" until a Response clears statusWatch (or Cancel).
+          const awaiting = row.statusWatch === 'read';
+          const scheduledDisabled = row.busy || !addressValid;
+          const rowJob = jobsByRowId[row.id] ?? null;
+          const showJob = isLiveJob(rowJob);
+          // Errors own the status body. While a send is in flight, suppress the
+          // last-Write fallback so time/jump cannot flash before success or error.
+          // Otherwise: bound telegram, else (when not mid-read-wait) this row's
+          // last Write, else idle GA Write fallback.
+          const statusTelegram = (row.feedback && !row.feedback.ok) || row.busy
+            ? null
+            : (row.statusTelegram
+              ?? (!awaiting ? row.lastSentTelegram : null)
+              ?? (!showJob
+                && !awaiting
+                && row.statusWatch === 'write'
+                && lastTelegram
+                && isWriteTelegram(lastTelegram)
+                ? lastTelegram
+                : null));
+          // When the project names a DPT main, the hint stays within that main —
+          // telegram length is fixed (5.001 → 5.010 ok, not 9.001). With no
+          // project DPT the user may pick any known type.
+          const allowedDpts = known?.main == null
+            ? dptOptions
+            : dptOptions.filter(o => Number(o.key.split('.')[0]) === known.main);
+          const delayPlaceholder = 'delay';
+          const everyPlaceholder = 'every';
+          const gridRow = rowIndex + 1;
+          return (
+            <Fragment key={row.id}>
+              <div
+                data-wtb-col="0"
+                style={{ gridColumn: 1, gridRow, width: '100%', minWidth: 0 }}
+              >
                 <GaCombobox
                   value={row.address}
                   onChange={(next, option) => onAddressChange(row.id, next, option)}
                   onCommit={text => onAddressCommit(row.id, text)}
                   options={targets}
                   recentAddresses={recentGas}
-                  placeholder="Group address (e.g. 1/2/3)"
-                  width={150}
+                  placeholder="GA"
+                  width="100%"
                 />
-                <div style={{ flex: '1 1 200px', minWidth: 160 }}>
-                  <GaCombobox
-                    display="name"
-                    value={row.name}
-                    onChange={(next, option) => onNameChange(row.id, next, option)}
-                    onCommit={text => onNameCommit(row.id, text)}
-                    options={targets}
-                    recentAddresses={recentGas}
-                    placeholder="Group name"
-                    width="100%"
-                  />
-                </div>
-                {addressValid && (
-                  <LastValue
-                    telegram={lastTelegram}
-                    awaiting={row.readBaseline != null && (lastTelegram?.timestamp ?? '') === row.readBaseline}
-                  />
-                )}
-                {lastHasValue && lastTelegram && (
-                  <button
-                    type="button"
-                    className="quick-filter-bar-toggle"
-                    title="Go to telegram"
-                    aria-label="Go to telegram"
-                    onClick={() => onGotoTelegram?.(lastTelegram)}
-                  >
-                    <Clock size={13} />
-                  </button>
-                )}
               </div>
-
-              {/* Right Group: Action controls */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', flexShrink: 0 }}>
-                <WriteControls
-                  dptMain={dptMain}
-                  dptKey={row.dpt || null}
-                  address={row.address || null}
-                  value={row.value}
-                  onValueChange={v => updateRow(row.id, { value: v, feedback: null })}
-                  onWrite={payload => void write(row, payload)}
-                  disabled={scheduledDisabled}
-                />
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>DPT</span>
-                  <DptField
-                    value={row.dpt}
-                    options={allowedDpts}
-                    disabled={!addressValid}
-                    overridden={overridden}
-                    title={
-                      !addressValid
-                        ? 'Enter a group address first'
-                        : overridden
-                          ? `Overriding project DPT ${projectDpt}`
-                          : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
-                    }
-                    onChange={next => onDptChange(row.id, next)}
-                  />
-                  {overridden && (
-                    <button
-                      className="icon-button"
-                      onClick={() => updateRow(row.id, { dpt: projectDpt, value: '', feedback: null })}
-                      title={`Reset to project DPT ${projectDpt}`}
-                      style={{ color: 'var(--text-dim)', padding: '0.1rem' }}
-                    >
-                      <RotateCcw size={13} />
-                    </button>
-                  )}
-                </div>
-
-                <input
-                  className="glass-input"
-                  placeholder="Delay s"
-                  value={row.delay}
-                  onChange={e => updateRow(row.id, { delay: e.target.value, feedback: null })}
-                  title="Wait this many seconds before sending"
-                  style={{ width: 70 }}
-                />
-
-                <input
-                  className="glass-input"
-                  placeholder="Every s"
-                  value={row.every}
-                  onChange={e => updateRow(row.id, { every: e.target.value, feedback: null })}
-                  title="Repeat the send at this interval in seconds (min 1) until cancelled"
-                  style={{ width: 70 }}
-                />
-
-                <button
-                  onClick={() => void read(row)}
-                  disabled={row.busy || !addressValid}
-                  style={secondaryBtn(row.busy || !addressValid)}
-                  title="Send a GroupValueRead; the response shows up as this row's last value"
+              <div
+                ref={rowIndex === 0 ? midClipRef : undefined}
+                className="wtb-mid-clip"
+                style={{ gridColumn: 2, gridRow, minWidth: 0, overflow: 'hidden' }}
+              >
+                <div
+                  ref={rowIndex === 0 ? midInnerRef : undefined}
+                  className="wtb-mid-inner"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: midTemplateColumns,
+                    columnGap: WTB_COL_GAP,
+                    alignItems: 'center',
+                    width: 'max-content',
+                    minWidth: '100%',
+                  }}
                 >
-                  <Radio size={14} /> Read
-                </button>
-
+                  <div data-wtb-col="1" style={{ minWidth: 0, width: '100%' }}>
+                    <GaCombobox
+                      display="name"
+                      value={row.name}
+                      onChange={(next, option) => onNameChange(row.id, next, option)}
+                      onCommit={text => onNameCommit(row.id, text)}
+                      options={targets}
+                      recentAddresses={recentGas}
+                      placeholder="Group name"
+                      width="100%"
+                    />
+                  </div>
+                  <div data-wtb-col="2">
+                    {addressValid ? (
+                      <LastValue telegram={lastTelegram} dpt={row.dpt} />
+                    ) : (
+                      <span aria-hidden style={{ display: 'inline-block', height: 18 }} />
+                    )}
+                  </div>
+                  <div data-wtb-col="3" style={{ minWidth: 0, width: '100%', overflow: 'hidden' }}>
+                    <EventCell
+                      telegram={addressValid ? lastTelegram : undefined}
+                      canJump={Boolean(lastHasValue && lastTelegram)}
+                      onJump={() => lastTelegram && onGotoTelegram?.(lastTelegram)}
+                    />
+                  </div>
+                  <div data-wtb-col="4" style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
+                    <DptField
+                      value={row.dpt}
+                      options={allowedDpts}
+                      disabled={!addressValid}
+                      overridden={overridden}
+                      title={
+                        !addressValid
+                          ? 'Enter a group address first'
+                          : overridden
+                            ? `Overriding project DPT ${projectDpt}`
+                            : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
+                      }
+                      onChange={next => onDptChange(row.id, next)}
+                      onReset={() => updateRow(row.id, { dpt: projectDpt, value: '', ...clearStatusPatch() })}
+                      resetTitle={`Reset to project DPT ${projectDpt}`}
+                    />
+                  </div>
+                  {/* WriteControls emits value + send siblings for columns 5 and 6. */}
+                  <WriteControls
+                    dptMain={dptMain}
+                    dptKey={row.dpt || null}
+                    address={row.address || null}
+                    value={row.value}
+                    onValueChange={v => updateRow(row.id, { value: v })}
+                    onWrite={payload => void write(row, payload)}
+                    disabled={scheduledDisabled}
+                    unit={
+                      lastTelegram?.unit
+                      || (row.dpt.trim()
+                        ? dptUnit(row.dpt.trim(), dptOptions.find(o => o.key === row.dpt.trim())?.name || null)
+                        : '')
+                    }
+                    valueColProps={{ 'data-wtb-col': '5', style: { width: '100%', minWidth: 0, overflow: 'hidden' } }}
+                    sendColProps={{ 'data-wtb-col': '6' }}
+                  />
+                  <SecondsField
+                    col="7"
+                    placeholder={delayPlaceholder}
+                    value={row.delay}
+                    onChange={v => updateRow(row.id, { delay: v })}
+                    title="delay"
+                  />
+                  <SecondsField
+                    col="8"
+                    placeholder={everyPlaceholder}
+                    value={row.every}
+                    onChange={v => updateRow(row.id, { every: v })}
+                    title="every"
+                  />
+                  <button
+                    data-wtb-col="9"
+                    onClick={() => void read(row)}
+                    disabled={row.busy || !addressValid}
+                    style={secondaryBtn(row.busy || !addressValid)}
+                    title="Send a GroupValueRead; the response shows up as this row's last value"
+                  >
+                    <Radio size={14} /> Read
+                  </button>
+                </div>
+              </div>
+              <div
+                style={{
+                  gridColumn: 3,
+                  gridRow,
+                  display: 'grid',
+                  gridTemplateColumns: rightTemplateColumns,
+                  columnGap: WTB_COL_GAP,
+                  alignItems: 'center',
+                  minWidth: 0,
+                }}
+              >
+                <div data-wtb-col="10" style={{ minWidth: 0 }}>
+                  <RowStatus
+                    feedback={row.feedback}
+                    awaiting={awaiting}
+                    job={showJob ? rowJob : null}
+                    showCountdownCol={showCountdownCol}
+                    showSendCountCol={showSendCountCol}
+                    showActionCol={showActionCol}
+                    actionWidth={actionWidth}
+                    statusTelegram={statusTelegram}
+                    address={row.address}
+                    groupName={row.name}
+                    value={row.value}
+                    dpt={row.dpt}
+                    onCancel={() => {
+                      void cancelJob(row.id);
+                    }}
+                    onStopAwait={() => {
+                      const last = row.lastSentTelegram;
+                      if (isWriteTelegram(last)) {
+                        const val = telegramValue(last, row.value, row.dpt);
+                        updateRow(row.id, {
+                          readBaseline: null,
+                          statusWatch: 'write',
+                          statusTelegram: last,
+                          feedback: { ok: true, msg: `written '${val}' to ${row.address.trim()}` },
+                        });
+                        return;
+                      }
+                      updateRow(row.id, { readBaseline: null, statusWatch: null });
+                    }}
+                    onClear={() => {
+                      updateRow(row.id, clearAllStatusPatch());
+                    }}
+                    onJump={() => statusTelegram && onGotoTelegram?.(statusTelegram)}
+                  />
+                </div>
                 <button
+                  data-wtb-col="11"
                   className="icon-button"
-                  onClick={() => void removeRow(row.id)}
-                  disabled={rows.length === 1}
-                  title={rows.length === 1 ? 'At least one row is required' : 'Delete this row'}
+                  onClick={(e: ReactMouseEvent<HTMLButtonElement>) => {
+                    if (e.ctrlKey || e.metaKey) {
+                      resetRow(row.id);
+                      return;
+                    }
+                    if (rows.length === 1) return;
+                    removeRow(row.id);
+                  }}
+                  aria-disabled={rows.length === 1 ? true : undefined}
+                  title={
+                    rows.length === 1
+                      ? 'At least one row is required · ctrl/cmd-click to reset'
+                      : 'Delete this row · ctrl/cmd-click to reset'
+                  }
                   style={{ color: 'var(--text-dim)', opacity: rows.length === 1 ? 0.4 : 1 }}
                 >
-                  <Trash2 size={15} />
+                  <Minus size={15} />
                 </button>
                 <button
+                  data-wtb-col="12"
                   className="icon-button"
-                  onClick={() => addRowAfter(row.id)}
-                  title="Add a row below"
-                  style={{ color: 'var(--accent-primary)' }}
+                  onClick={(e: ReactMouseEvent<HTMLButtonElement>) =>
+                    addRowAfter(row.id, { copy: e.ctrlKey || e.metaKey })
+                  }
+                  title="Add a row below · ctrl/cmd-click to duplicate"
+                  style={{ color: 'var(--text-dim)' }}
                 >
                   <Plus size={15} />
                 </button>
               </div>
-            </div>
-
-            {row.feedback && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: row.feedback.ok ? 'var(--success)' : 'var(--error)' }}>
-                {row.feedback.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {row.feedback.msg}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {jobActive && job && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--accent-primary)' }}>
-          <Timer size={13} />
-          <span>{describeJob(job)}</span>
-          <button onClick={() => void cancelJob()} style={secondaryBtn(false)}>
-            Cancel
-          </button>
+            </Fragment>
+          );
+        })}
+      </div>
         </div>
-      )}
+        {/* H-scrollbar only under the mid pane (name … read). */}
+        <div
+          style={{
+            display: 'flex',
+            flexShrink: 0,
+            width: '100%',
+            minWidth: 0,
+            alignItems: 'stretch',
+          }}
+        >
+          <div
+            className="wtb-mid-h-bar-row"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: paneTemplateColumns,
+              columnGap: WTB_COL_GAP,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            <div aria-hidden />
+            <div
+              ref={midBarRef}
+              className="wtb-mid-h-scroll"
+              onScroll={onMidBarScroll}
+              style={{
+                overflowX: 'auto',
+                overflowY: 'hidden',
+                minWidth: 0,
+                height: SCROLLBAR_GUTTER_PX,
+                visibility: midMaxScroll > 0 ? 'visible' : 'hidden',
+              }}
+            >
+              <div style={{ width: Math.max(midContentWidth, midViewportWidth), height: 1 }} aria-hidden />
+            </div>
+            <div aria-hidden />
+          </div>
+          <span aria-hidden style={{ flexShrink: 0, width: '0.85rem' }} />
+          <span aria-hidden style={{ flexShrink: 0, width: SCROLLBAR_GUTTER_PX }} />
+        </div>
+        </div>
+      </div>
+      {/* In-flow under the H-scroll so it sits below the H-scrollbar, not over it. */}
+      <div
+        className={`wtb-height-resize-handle${heightDragging ? ' dragging' : ''}`}
+        onMouseDown={onHeightResizeStart}
+        onDoubleClick={onHeightResizeReset}
+        title="Drag to resize · double-click to reset"
+      />
+      <style>{`
+        .wtb-panel-host {
+          /* Fixed header band; grid padding clears below it separately. */
+          --wtb-header-h: calc(1.05rem + 16px);
+        }
+        .wtb-h-scroll::-webkit-scrollbar,
+        .wtb-scrollport::-webkit-scrollbar,
+        .wtb-mid-h-scroll::-webkit-scrollbar {
+          width: ${SCROLLBAR_GUTTER_PX}px;
+          height: ${SCROLLBAR_GUTTER_PX}px;
+        }
+        .wtb-mid-clip {
+          background: var(--bg-subtle);
+        }
+        .wtb-mid-inner {
+          transform: translateX(var(--wtb-mid-x, 0px));
+        }
+        .wtb-panel-chrome {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: var(--wtb-header-h);
+          background: color-mix(in srgb, var(--bg-tag) 55%, transparent);
+          border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+          pointer-events: none;
+          z-index: 5;
+        }
+        .wtb-panel-title {
+          position: absolute;
+          top: 0.2rem;
+          left: 0.25rem;
+          z-index: 6;
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          padding: 0.2rem;
+          font-size: 0.82rem;
+          font-weight: 600;
+          color: var(--text-main);
+          pointer-events: none;
+        }
+        .wtb-close-button {
+          position: absolute;
+          top: 0.2rem;
+          right: 0.25rem;
+          z-index: 6;
+          display: flex;
+          padding: 0.2rem;
+          cursor: pointer;
+          color: var(--text-dim);
+          background: transparent;
+          border: 1px solid var(--border-color);
+          border-radius: 6px;
+          transition: color 0.15s, background 0.15s;
+        }
+        .wtb-close-button:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+        .wtb-height-resize-handle {
+          flex-shrink: 0;
+          position: relative;
+          height: ${HEIGHT_HANDLE_PX}px;
+          cursor: row-resize;
+          user-select: none;
+        }
+        .wtb-height-resize-handle::after {
+          content: '';
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 2px;
+          background: var(--accent-primary);
+          opacity: 0;
+          transition: opacity 0.15s;
+        }
+        .wtb-height-resize-handle:hover::after,
+        .wtb-height-resize-handle.dragging::after {
+          opacity: 0.7;
+        }
+      `}</style>
     </div>
   );
 
-  async function startScheduled(row: Row, payload: unknown, delaySeconds: number, intervalSeconds: number) {
-    if (jobActive) {
-      updateRow(row.id, { feedback: { ok: false, msg: 'A scheduled send is already active — cancel it first' } });
-      return;
+  async function startScheduled(
+    row: Row,
+    payload: unknown,
+    delaySeconds: number,
+    intervalSeconds: number,
+    optimisticNextAt: string | null,
+  ): Promise<boolean> {
+    // Caller already armed an optimistic job + validated delay/interval.
+    // Poll only after the server accepts; an early idle poll would clear it.
+    try {
+      const status = await startScheduledSend(row.address.trim(), payload, row.dpt.trim() || undefined, {
+        delaySeconds: delaySeconds > 0 ? delaySeconds : undefined,
+        intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
+      });
+      // Row removed/reset/cancelled while POST was in flight — drop the new server job.
+      const abandoned = cancelWhenStartedRef.current.has(row.id)
+        || !rowsRef.current.some(r => r.id === row.id);
+      cancelWhenStartedRef.current.delete(row.id);
+      if (abandoned) {
+        if (status.id && !isPendingJobId(status.id)) {
+          await cancelScheduledSend(status.id).catch(() => {});
+        }
+        setJobsByRowId(prev => {
+          const next = { ...prev };
+          delete next[row.id];
+          if (!Object.values(next).some(isLiveJob)) watchingRef.current = false;
+          return next;
+        });
+        return false;
+      }
+      // Keep the optimistic next_send_at when the server omits it — otherwise the
+      // countdown vanishes and only date/time+jump remains.
+      setJobsByRowId(prev => ({
+        ...prev,
+        [row.id]: {
+          ...status,
+          next_send_at: status.next_send_at ?? optimisticNextAt,
+          delay_seconds: status.delay_seconds ?? (delaySeconds > 0 ? delaySeconds : undefined),
+          interval_seconds: status.interval_seconds ?? (intervalSeconds > 0 ? intervalSeconds : null),
+        },
+      }));
+      // Bind this row to the server UUID (not the GA) for remount / poll remap.
+      updateRow(row.id, { scheduledJobId: status.id ?? null });
+      startPolling();
+      return true;
+    } catch (err) {
+      cancelWhenStartedRef.current.delete(row.id);
+      setJobsByRowId(prev => {
+        const next = { ...prev };
+        delete next[row.id];
+        if (!Object.values(next).some(isLiveJob)) watchingRef.current = false;
+        return next;
+      });
+      updateRow(row.id, { scheduledJobId: null });
+      throw err;
     }
-    if (intervalSeconds > 0 && intervalSeconds < 1) {
-      updateRow(row.id, { feedback: { ok: false, msg: 'Interval must be at least 1 second' } });
-      return;
-    }
-    const status = await startScheduledSend(row.address.trim(), payload, row.dpt.trim() || undefined, {
-      delaySeconds: delaySeconds > 0 ? delaySeconds : undefined,
-      intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
-    });
-    watchingRef.current = true;
-    setJob(status);
-    startPolling();
   }
 
-  async function refreshJob() {
-    let status: ScheduledSendStatus;
+  async function refreshJobs() {
+    let list: ScheduledSendStatus[];
     try {
-      status = await getScheduledSendStatus();
+      list = await getScheduledSendStatus();
     } catch {
       return; // transient fetch error — keep polling
     }
-    if (status.state === 'waiting' || status.state === 'running') {
+    const active = list.filter(isLiveJob);
+    const byId = new Map(
+      active.filter((j): j is ScheduledSendStatus & { id: string } => Boolean(j.id))
+        .map(j => [j.id, j]),
+    );
+
+    if (active.length > 0) {
       watchingRef.current = true;
-      setJob(status);
+      setJobsByRowId(prev => {
+        const next: Record<string, ScheduledSendStatus> = {};
+        const used = new Set<string>();
+        // Keep optimistic pending until POST assigns a real UUID — never claim by GA.
+        for (const [rowId, job] of Object.entries(prev)) {
+          if (isPendingJobId(job.id)) {
+            next[rowId] = job;
+            continue;
+          }
+          const live = job.id ? byId.get(job.id) : undefined;
+          if (live) {
+            next[rowId] = {
+              ...live,
+              next_send_at: live.next_send_at ?? job.next_send_at ?? null,
+            };
+            used.add(live.id);
+          }
+        }
+        // Remount / cold start: reattach via persisted row.scheduledJobId only.
+        for (const row of rowsRef.current) {
+          if (next[row.id] || !row.scheduledJobId || used.has(row.scheduledJobId)) continue;
+          const live = byId.get(row.scheduledJobId);
+          if (!live) continue;
+          next[row.id] = live;
+          used.add(live.id);
+        }
+        return next;
+      });
+      // Drop stale bindings when the server job is gone (and not mid-POST).
+      setRows(rs => {
+        let changed = false;
+        const mapped = rs.map(r => {
+          if (!r.scheduledJobId) return r;
+          if (byId.has(r.scheduledJobId)) return r;
+          const local = jobsByRowIdRef.current[r.id];
+          if (local && isPendingJobId(local.id)) return r;
+          changed = true;
+          return { ...r, scheduledJobId: null };
+        });
+        return changed ? mapped : rs;
+      });
       if (pollRef.current == null) startPolling();
       return;
     }
+    // Keep locally armed optimistic jobs until startScheduledSend finishes.
+    if (watchingRef.current && pollRef.current == null) return;
+    const hasPending = Object.values(jobsByRowIdRef.current).some(j => isPendingJobId(j.id));
+    if (hasPending) return;
     stopPolling();
-    setJob(null);
+    watchingRef.current = false;
+    setJobsByRowId({});
+    setRows(rs => {
+      if (!rs.some(r => r.scheduledJobId)) return rs;
+      return rs.map(r => (r.scheduledJobId ? { ...r, scheduledJobId: null } : r));
+    });
   }
 
-  async function cancelJob() {
-    try {
-      await cancelScheduledSend();
-    } catch {
-      // ignore — refreshJob reflects the real state
+  async function cancelJob(rowId: string) {
+    const cancelled = jobsByRowIdRef.current[rowId];
+    // End this row's job immediately and zero its cyclic count so the panel-wide
+    // count column collapses without waiting for the status poll.
+    setJobsByRowId(prev => {
+      const job = prev[rowId];
+      if (!job) return prev;
+      const next = { ...prev };
+      if (isLiveJob(job)) {
+        delete next[rowId];
+      } else {
+        next[rowId] = { ...job, sends_done: 0 };
+      }
+      if (!Object.values(next).some(isLiveJob)) watchingRef.current = false;
+      return next;
+    });
+    if (cancelled?.id && isPendingJobId(cancelled.id)) {
+      cancelWhenStartedRef.current.add(rowId);
+    } else if (cancelled?.id) {
+      try {
+        await cancelScheduledSend(cancelled.id);
+      } catch {
+        // ignore — refreshJobs reflects the real state
+      }
     }
-    await refreshJob();
+    await refreshJobs();
+    // Restore status chrome on this row when a Write already went out.
+    if (!cancelled?.address) {
+      updateRow(rowId, { scheduledJobId: null });
+      return;
+    }
+    const addr = cancelled.address.trim();
+    setRows(rs => rs.map(r => {
+      if (r.id !== rowId) return r;
+      const base = { ...r, scheduledJobId: null as string | null };
+      const tg = r.lastSentTelegram ?? r.statusTelegram;
+      if (!isWriteTelegram(tg) && !(cancelled.sends_done && cancelled.sends_done > 0)) return base;
+      const val = telegramValue(tg, r.value, r.dpt);
+      return {
+        ...base,
+        statusTelegram: tg,
+        lastSentTelegram: tg ?? r.lastSentTelegram,
+        feedback: { ok: true, msg: `written '${val}' to ${addr}` },
+        statusWatch: 'write' as const,
+      };
+    }));
   }
 
   function startPolling() {
     stopPolling();
-    pollRef.current = window.setInterval(() => void refreshJob(), POLL_INTERVAL_MS);
+    pollRef.current = window.setInterval(() => void refreshJobs(), POLL_INTERVAL_MS);
+  }
+
+  /** End every job + read-wait; keep row inputs (header Cancel). */
+  async function cancelAllRows() {
+    const snapshot = jobsByRowIdRef.current;
+    for (const [rowId, job] of Object.entries(snapshot)) {
+      if (isPendingJobId(job.id)) cancelWhenStartedRef.current.add(rowId);
+    }
+    stopPolling();
+    watchingRef.current = false;
+    setJobsByRowId({});
+    try {
+      await cancelAllScheduledSends();
+    } catch {
+      // Local UI already cleared; status poll would disagree briefly if this fails.
+    }
+    setRows(rs => rs.map(r => {
+      const cancelled = snapshot[r.id];
+      let next: Row = { ...r, scheduledJobId: null };
+      if (r.statusWatch === 'read') {
+        const last = r.lastSentTelegram;
+        if (isWriteTelegram(last)) {
+          const val = telegramValue(last, r.value, r.dpt);
+          next = {
+            ...next,
+            readBaseline: null,
+            statusWatch: 'write',
+            statusTelegram: last,
+            feedback: { ok: true, msg: `written '${val}' to ${r.address.trim()}` },
+          };
+        } else {
+          next = { ...next, readBaseline: null, statusWatch: null };
+        }
+      }
+      if (isLiveJob(cancelled)) {
+        const tg = next.lastSentTelegram ?? next.statusTelegram;
+        const addr = (cancelled.address ?? r.address).trim();
+        if (isWriteTelegram(tg) || (cancelled.sends_done && cancelled.sends_done > 0)) {
+          const val = telegramValue(tg, r.value, r.dpt);
+          next = {
+            ...next,
+            statusTelegram: tg,
+            lastSentTelegram: tg ?? next.lastSentTelegram,
+            feedback: { ok: true, msg: `written '${val}' to ${addr}` },
+            statusWatch: 'write',
+            readBaseline: null,
+          };
+        }
+      }
+      return next;
+    }));
+  }
+
+  /** Cancel every job and wipe the panel back to one empty row. */
+  async function resetPanel() {
+    for (const [rowId, job] of Object.entries(jobsByRowIdRef.current)) {
+      if (isPendingJobId(job.id)) cancelWhenStartedRef.current.add(rowId);
+    }
+    stopPolling();
+    watchingRef.current = false;
+    setJobsByRowId({});
+    setRows([newRow()]);
+    // Remount the body grid host — avoids leftover row nodes if the previous
+    // grid DOM got out of sync with React state (e.g. after Fast Refresh).
+    setBodyEpoch(e => e + 1);
+    try {
+      await cancelAllScheduledSends();
+    } catch {
+      // Rows already reset locally.
+    }
   }
 
   function stopPolling() {
@@ -571,44 +1974,22 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onGo
 }
 
 /**
- * The row's group address as last seen on the bus (#439): value, what kind of
- * telegram carried it, and when. Flashes briefly whenever it changes, so the
- * answer to a read is hard to miss.
+ * Last bus value for the row's GA: "Last value:" + value (+ unit).
+ * Text follows the row's effective DPT (same vocabulary as the send buttons).
+ * Click the value to toggle decoded ↔ raw hex. Date/time/kind live in Event.
  */
-function LastValue({ telegram, awaiting }: { telegram: Telegram | undefined; awaiting: boolean }) {
+function LastValue({ telegram, dpt }: { telegram: Telegram | undefined; dpt: string }) {
   const hasValue = telegram != null && telegram.simplified_type !== 'Read';
-  const at = telegram ? new Date(telegram.timestamp) : null;
-  const sameDay = at != null && at.toDateString() === new Date().toDateString();
-  const when = at == null
-    ? ''
-    : at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-      + (sameDay ? '' : ` · ${at.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' })}`);
+  if (!hasValue) return <span aria-hidden style={{ display: 'inline-block', height: 18 }} />;
   return (
     <span
       // Remounting on a new telegram restarts the highlight animation.
-      key={telegram?.timestamp ?? 'none'}
-      className={hasValue ? 'wtb-last-value wtb-last-value-flash' : 'wtb-last-value'}
-      title={telegram
-        ? `Last telegram on this group address: ${telegram.simplified_type ?? telegram.telegram_type} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${at!.toLocaleString()}`
-        : 'No telegram recorded for this group address yet'}
+      key={telegram.timestamp}
+      className="wtb-last-value wtb-last-value-flash"
+      title={`Last telegram on this group address: ${telegram.simplified_type ?? telegram.telegram_type} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${new Date(telegram.timestamp).toLocaleString()}`}
     >
-      <span style={{ color: 'var(--text-dim)' }}>Last:</span>
-      {hasValue ? (
-        <>
-          <strong style={{ color: 'var(--text-main)', fontFamily: "'JetBrains Mono', monospace" }}>
-            {telegram.value_formatted ?? telegram.value_numeric ?? telegram.raw_hex ?? '—'}
-            {telegram.unit ? ` ${telegram.unit}` : ''}
-          </strong>
-          <span style={{ color: 'var(--text-dim)' }}>
-            {telegram.simplified_type ?? telegram.telegram_type} · {when}
-          </span>
-        </>
-      ) : (
-        <span style={{ color: 'var(--text-dim)' }}>
-          {telegram ? `no value yet (read request ${when})` : 'no value yet'}
-        </span>
-      )}
-      {awaiting && <span style={{ color: 'var(--warning-text)' }}>· waiting for response…</span>}
+      <span style={{ color: 'var(--text-dim)' }}>Last value:</span>
+      <BusValueText value={telegram} dpt={dpt} />
       <style>{`
         .wtb-last-value {
           display: inline-flex; align-items: baseline; gap: 0.35rem;
@@ -624,6 +2005,403 @@ function LastValue({ telegram, awaiting }: { telegram: Telegram | undefined; awa
   );
 }
 
+/** Time + jump + event kind for the last-value Event column. */
+function EventCell({
+  telegram,
+  canJump,
+  onJump,
+}: {
+  telegram: Telegram | undefined;
+  canJump: boolean;
+  onJump: () => void;
+}) {
+  if (!telegram) {
+    return <TelegramWhenJump empty reserveJump />;
+  }
+  return (
+    <TelegramWhenJump
+      timestamp={telegram.timestamp}
+      eventType={telegramEventType(telegram)}
+      onJump={canJump ? onJump : undefined}
+      reserveJump={!canJump}
+      style={{ width: '100%' }}
+    />
+  );
+}
+
+/** Seconds remaining until `targetIso`; ticks while `active`. */
+function useCountdownSeconds(targetIso: string | null | undefined, active: boolean): number | null {
+  const [left, setLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!active || !targetIso) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear when countdown becomes inactive
+      setLeft(null);
+      return;
+    }
+    const tick = () => {
+      const ms = new Date(targetIso).getTime() - Date.now();
+      setLeft(Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / 1000)) : null);
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [active, targetIso]);
+  return left;
+}
+
+function formatCountdown(seconds: number): string {
+  if (seconds >= 60) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  return `${seconds}s`;
+}
+
+function formatGaLabel(address: string | undefined, name: string | undefined): string {
+  const addr = (address ?? '').trim();
+  const n = (name ?? '').trim();
+  if (addr && n) return `${addr} (${n})`;
+  return addr || n || 'group address';
+}
+
+/**
+ * Status shell: icon | [countdown?] | [count?] | event(when+jump+type) | [Cancel/Clear?].
+ * Countdown/count/action columns are panel-wide so rows stay aligned; values
+ * remain per-row. Tooltips stay static (no tip flicker).
+ */
+function RowStatus({
+  feedback,
+  awaiting,
+  job,
+  showCountdownCol,
+  showSendCountCol,
+  showActionCol,
+  actionWidth,
+  statusTelegram,
+  address,
+  groupName,
+  value,
+  dpt,
+  onCancel,
+  onStopAwait,
+  onClear,
+  onJump,
+}: {
+  feedback: Row['feedback'];
+  awaiting: boolean;
+  job: ScheduledSendStatus | null;
+  showCountdownCol: boolean;
+  showSendCountCol: boolean;
+  showActionCol: boolean;
+  /** Panel-wide Cancel or Clear track width. */
+  actionWidth: string;
+  statusTelegram: Telegram | null;
+  address: string;
+  groupName: string;
+  value: string;
+  dpt: string;
+  onCancel: () => void;
+  onStopAwait: () => void;
+  onClear: () => void;
+  onJump: () => void;
+}) {
+  const jobLive = job != null && (job.state === 'waiting' || job.state === 'running');
+  const jobWaiting = job != null && job.state === 'waiting';
+  const jobCyclic = jobLive && Boolean(job.interval_seconds);
+  // Countdown for delayed wait and cyclic interval gaps (next_send_at).
+  const countdown = useCountdownSeconds(job?.next_send_at, Boolean(jobLive && job?.next_send_at));
+  const writtenOk = Boolean(feedback?.ok && /^written '/i.test(feedback.msg));
+  const sentOk = Boolean(feedback?.ok && /^Sent /i.test(feedback.msg));
+  const isReadRequestFeedback = Boolean(feedback?.ok && /^Read request/i.test(feedback.msg));
+  const isWriteTg = Boolean(
+    statusTelegram
+    && (statusTelegram.simplified_type === 'Write' || statusTelegram.telegram_type?.includes('Write')),
+  );
+  const isResponseTg = Boolean(
+    statusTelegram
+    && (
+      statusTelegram.simplified_type === 'Response'
+      || statusTelegram.telegram_type?.includes('Response')
+    ),
+  );
+  const isReadTg = Boolean(
+    statusTelegram
+    && (
+      statusTelegram.simplified_type === 'Read'
+      || (
+        Boolean(statusTelegram.telegram_type?.includes('Read'))
+        && !statusTelegram.telegram_type?.includes('Response')
+      )
+    ),
+  );
+  // Orange Radio while Status shows Read / pending wait; green once Status shows Response.
+  const pendingReadIcon = awaiting || isReadRequestFeedback || isReadTg;
+  const ga = formatGaLabel(address || job?.address, groupName);
+  const writtenValue = statusTelegram
+    ? telegramValue(statusTelegram, value, dpt)
+    : (value ?? '').trim();
+
+  // Job metric stays visible even while awaiting a Read.
+  // Await owns the waiting icon/tooltip; Cancel ends wait and job together.
+  const tooltip = (() => {
+    // Pending Read (no Response yet): same tip for live wait and leftover feedback.
+    if (awaiting || isReadRequestFeedback) {
+      return `read request sent to ${ga} without response`;
+    }
+    if (jobLive) return describeJob(job, groupName);
+    if (feedback && !feedback.ok) return feedback.msg;
+    if (isWriteTg || writtenOk || sentOk) {
+      let val = writtenValue;
+      if (!val && feedback?.msg) {
+        const m = feedback.msg.match(/^Sent\s+(.+?)\s+to\s+/i)
+          ?? feedback.msg.match(/^written '([^']*)'/i);
+        if (m) val = m[1];
+      }
+      return `written '${val}' to ${ga}`;
+    }
+    if (statusTelegram) {
+      const kind = statusTelegram.simplified_type ?? statusTelegram.telegram_type ?? 'Telegram';
+      return `${kind} on ${ga}`;
+    }
+    if (feedback?.ok) return feedback.msg;
+    return '';
+  })();
+
+  let icon: ReactNode = null;
+  if (feedback && !feedback.ok) {
+    icon = <AlertTriangle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />;
+  } else if (pendingReadIcon) {
+    icon = <Radio size={14} style={{ color: 'var(--warning)', flexShrink: 0 }} />;
+  } else if (isResponseTg) {
+    icon = <Radio size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />;
+  } else if (jobLive) {
+    icon = <Timer size={14} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />;
+  } else if (sentOk || writtenOk || isWriteTg) {
+    icon = <Send size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />;
+  } else if (feedback?.ok) {
+    icon = <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />;
+  }
+
+  const showCountdown = showCountdownCol && countdown != null;
+  const showSendCount = Boolean(
+    showSendCountCol && jobCyclic && !jobWaiting && (job.sends_done ?? 0) > 0,
+  );
+  const hasContent = Boolean(
+    icon || statusTelegram || showCountdown || showSendCount || awaiting || feedback || jobLive,
+  );
+  const showCancel = jobLive || awaiting;
+
+  const metricStyle: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minWidth: '3.25ch',
+    fontSize: '0.72rem',
+    fontWeight: 400,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  };
+
+  // Action track width is panel-wide (Cancel-wide vs Clear-narrow) so rows stay
+  // aligned. key= forces remount Cancel↔Clear so Cancel's borderLeft/margin
+  // cannot leak through React's incomplete inline-style updates.
+  // Omit the track entirely when no row has a job or status.
+  const actionSlot = showActionCol ? (
+    <div
+      data-status-action
+      style={{
+        width: actionWidth,
+        minWidth: actionWidth,
+        flexShrink: 0,
+        display: 'flex',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        alignSelf: 'stretch',
+      }}
+    >
+      {showCancel ? (
+        <button
+          key="status-cancel"
+          type="button"
+          // Ends Read-wait and/or scheduled job — whichever is active.
+          onClick={() => {
+            if (awaiting) onStopAwait();
+            if (jobLive) onCancel();
+          }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            alignSelf: 'stretch',
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            borderLeft: '1px solid var(--border-color)',
+            borderRadius: 0,
+            cursor: 'pointer',
+            padding: 0,
+            margin: '-0.35rem -0.65rem -0.35rem 0',
+            color: 'var(--accent-primary)',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Cancel
+        </button>
+      ) : hasContent ? (
+        <button
+          key="status-clear"
+          type="button"
+          onClick={onClear}
+          title="Clear status"
+          aria-label="Clear status"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            borderLeft: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            margin: 0,
+            color: 'var(--text-dim)',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          <X size={11} />
+        </button>
+      ) : (
+        <span key="status-action-spacer" aria-hidden style={{ display: 'inline-block', width: 11, height: 11 }} />
+      )}
+    </div>
+  ) : null;
+
+  const gridCols = [
+    'auto',
+    ...(showCountdownCol ? ['auto'] : []),
+    ...(showSendCountCol ? ['auto'] : []),
+    'minmax(0, 1fr)',
+    ...(showActionCol ? ['auto'] : []),
+  ].join(' ');
+
+  return (
+    <div
+      data-status-field
+      title={tooltip || undefined}
+      aria-label={tooltip || undefined}
+      style={{
+        display: 'grid',
+        // icon | [countdown?] | [count?] | event(when+jump+type) | [Cancel/Clear?]
+        gridTemplateColumns: gridCols,
+        alignItems: 'center',
+        columnGap: '0.55rem',
+        width: '100%',
+        minWidth: !showActionCol
+          ? STATUS_SHELL_MIN_WIDTH_COMPACT
+          : actionWidth === STATUS_ACTION_WIDTH
+            ? STATUS_SHELL_MIN_WIDTH
+            : STATUS_SHELL_MIN_WIDTH_CLEAR,
+        boxSizing: 'border-box',
+        // Same vertical chrome as secondaryBtn (Read): 0.35rem pad + 1px border + 14px/1.2em content.
+        padding: '0.35rem 0.65rem',
+        fontSize: '0.78rem',
+        fontWeight: 600,
+        lineHeight: 1.2,
+        minHeight: 'calc(0.7rem + 2px + max(14px, 1.2em))',
+        background: 'transparent',
+        border: '1px solid var(--border-color)',
+        borderRadius: 6,
+        overflow: 'hidden',
+      }}
+    >
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 14,
+          height: 14,
+          flexShrink: 0,
+          lineHeight: 0,
+        }}
+      >
+        {icon ?? <span aria-hidden style={{ display: 'inline-block', width: 14, height: 14 }} />}
+      </span>
+      {showCountdownCol ? (
+        <span
+          data-status-metric="countdown"
+          style={{ ...metricStyle, justifyContent: 'flex-end' }}
+        >
+          {showCountdown ? (
+            <span style={{ color: 'var(--warning)' }}>-{formatCountdown(countdown)}</span>
+          ) : (
+            <span aria-hidden>{'\u00a0'}</span>
+          )}
+        </span>
+      ) : null}
+      {showSendCountCol ? (
+        <span
+          data-status-metric="count"
+          style={{ ...metricStyle, justifyContent: 'flex-start' }}
+        >
+          {showSendCount ? (
+            <span aria-label={`Sends done ${job?.sends_done}`} style={{ color: 'var(--success)' }}>
+              {job!.sends_done}
+            </span>
+          ) : (
+            <span aria-hidden>{'\u00a0'}</span>
+          )}
+        </span>
+      ) : null}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          minWidth: 0,
+          overflow: 'hidden',
+          fontSize: '0.72rem',
+          fontWeight: 400,
+          lineHeight: 1,
+          color: 'var(--text-dim)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {statusTelegram ? (
+          <TelegramWhenJump
+            timestamp={statusTelegram.timestamp}
+            eventType={telegramEventType(statusTelegram)}
+            onJump={onJump}
+            jumpLabel="Go to status telegram"
+          />
+        ) : feedback && !feedback.ok ? (
+          // width:0 + minWidth:100% fills the event track for ellipsis without
+          // contributing the full message to intrinsic / max-content width.
+          <span
+            data-status-error
+            style={{
+              width: 0,
+              minWidth: '100%',
+              flex: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: 'var(--error)',
+            }}
+          >
+            {feedback.msg}
+          </span>
+        ) : (
+          <span aria-hidden style={{ display: 'inline-block', minWidth: '8ch' }}>{'\u00a0'}</span>
+        )}
+      </div>
+      {actionSlot}
+    </div>
+  );
+}
+
 interface DptChoice {
   key: string;
   name: string;
@@ -631,17 +2409,18 @@ interface DptChoice {
 
 /**
  * DPT entry for one row. Editable only once that row has a group address.
- * The suggestion list is portaled and pinned under this input, because the
- * panel sits in an overflow-hidden column; each row shows the DPT number
- * with its designation beside it.
+ * The suggestion list is portaled and pinned under this field. Reset and the
+ * chevron live inside the field so showing the reset does not shift the row.
  */
-function DptField({ value, options, disabled, overridden, title, onChange }: {
+function DptField({ value, options, disabled, overridden, title, onChange, onReset, resetTitle }: {
   value: string;
   options: DptChoice[];
   disabled: boolean;
   overridden: boolean;
   title: string;
   onChange: (next: string) => void;
+  onReset: () => void;
+  resetTitle: string;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -653,6 +2432,7 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
     setPrevDisabled(disabled);
     if (disabled) setOpen(false);
   }
+  const shellRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -663,10 +2443,18 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
     return options.filter(o => o.key.toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
   }, [value, options]);
 
+  // Designation beside the key (catalog/common name); not part of the editable value.
+  const designation = useMemo(() => {
+    const key = value.trim();
+    if (!key) return '';
+    const fromOptions = options.find(o => o.key === key)?.name;
+    return fromOptions || dptDesignation(key);
+  }, [value, options]);
+
   const active = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1);
 
   const place = () => {
-    const el = inputRef.current;
+    const el = shellRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const width = Math.max(r.width, 240);
@@ -690,7 +2478,7 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (inputRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      if (shellRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
@@ -700,6 +2488,9 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
   const pick = (choice: DptChoice) => {
     onChange(choice.key);
     setOpen(false);
+    // Drop focus so the next click opens the list again instead of only
+    // placing a caret in an already-focused field.
+    inputRef.current?.blur();
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -722,27 +2513,105 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
 
   return (
     <>
-      <input
-        ref={inputRef}
+      <div
+        ref={shellRef}
         className="glass-input"
-        aria-label="Datapoint type"
-        value={value}
-        disabled={disabled}
-        placeholder="—"
-        title={title}
-        onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(0); }}
-        onFocus={() => { if (!disabled) { setOpen(true); setHighlight(0); } }}
-        onBlur={() => setOpen(false)}
-        onKeyDown={onKeyDown}
+        data-dpt-field
         style={{
-          width: 78,
-          padding: '0.2rem 0.35rem',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '0.72rem',
+          position: 'relative',
+          display: 'inline-flex',
+          alignItems: 'center',
+          width: '100%',
+          minWidth: '5.75rem',
+          maxWidth: '100%',
+          boxSizing: 'border-box',
+          padding: '0.2rem 0.3rem 0.2rem 0.35rem',
+          gap: '0.25rem',
           borderColor: overridden ? 'var(--accent-primary)' : undefined,
           opacity: disabled ? 0.45 : 1,
         }}
-      />
+      >
+        <input
+          ref={inputRef}
+          aria-label="Datapoint type"
+          value={value}
+          disabled={disabled}
+          placeholder="—"
+          title={title}
+          onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(0); }}
+          onFocus={() => { if (!disabled) { setOpen(true); setHighlight(0); } }}
+          onBlur={() => setOpen(false)}
+          onKeyDown={onKeyDown}
+          style={{
+            width: `${Math.max(value.length, 1)}ch`,
+            flex: 'none',
+            minWidth: 0,
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            padding: 0,
+            color: 'var(--text-main)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '0.72rem',
+          }}
+        />
+        {designation ? (
+          <span
+            aria-hidden
+            style={{
+              fontSize: '0.72rem',
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              minWidth: 0,
+              flex: '1 1 auto',
+              pointerEvents: 'none',
+            }}
+          >
+            {designation}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className="icon-button"
+          tabIndex={overridden && !disabled ? 0 : -1}
+          aria-hidden={!overridden}
+          disabled={disabled || !overridden}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => { if (overridden) onReset(); }}
+          title={overridden ? resetTitle : undefined}
+          style={{
+            color: 'var(--text-dim)',
+            padding: '0.05rem',
+            visibility: overridden ? 'visible' : 'hidden',
+            pointerEvents: overridden ? 'auto' : 'none',
+            flexShrink: 0,
+            marginLeft: 'auto',
+          }}
+        >
+          <RotateCcw size={12} />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Toggle datapoint type list"
+          disabled={disabled}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => {
+            if (disabled) return;
+            if (open) {
+              setOpen(false);
+              inputRef.current?.blur();
+            } else {
+              inputRef.current?.focus();
+            }
+          }}
+          style={{ color: 'var(--text-dim)', padding: '0.05rem', flexShrink: 0 }}
+        >
+          <ChevronDown size={13} />
+        </button>
+      </div>
       {open && !disabled && matches.length > 0 && box && createPortal(
         <div
           ref={menuRef}
@@ -781,14 +2650,14 @@ function DptField({ value, options, disabled, overridden, title, onChange }: {
   );
 }
 
-function describeJob(job: ScheduledSendStatus): string {
+/** Static job tooltip — no ticking countdown or next-send clock (avoids native tip flicker). */
+function describeJob(job: ScheduledSendStatus, groupName?: string): string {
+  const ga = formatGaLabel(job.address, groupName);
   if (job.state === 'waiting') {
-    const at = job.next_send_at ? ` at ${new Date(job.next_send_at).toLocaleTimeString()}` : '';
-    return `Delayed send to ${job.address} — first send${at}`;
+    return `delayed send to ${ga}`;
   }
   if (job.interval_seconds) {
-    const skipped = job.sends_skipped ? ` (${job.sends_skipped} skipped)` : '';
-    return `Cyclic send to ${job.address} every ${job.interval_seconds}s — ${job.sends_done ?? 0} sent${skipped}`;
+    return `cyclic send to ${ga} every ${job.interval_seconds}s`;
   }
-  return `Sending to ${job.address}…`;
+  return `delayed send to ${ga}`;
 }
