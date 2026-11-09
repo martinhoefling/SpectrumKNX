@@ -36,7 +36,7 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
 
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
 
-  // Last value loads and DPT-1 renders On/Off (no free-text field).
+  // Last value loads. DPT 1.011 (state) offers inactive/active, not On/Off.
   await waitFor(() => expect(screen.getByText('Off')).toBeInTheDocument());
 
   // Verify that the timestamp is also formatted and displayed.
@@ -45,7 +45,7 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
 
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: /^On$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^Active$/ }));
 
   await waitFor(() => {
     const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/knx/send'));

@@ -302,6 +302,14 @@ def test_format_value_nicely_ha_enum_strings_not_truth_tested():
     assert format_value_nicely("on", 1, 1) == "on"
     assert format_value_nicely("up", 1, 8) == "up"
     assert format_value_nicely("down", 1, 8) == "down"
+    # A generic boolean word takes the subtype's own name.
+    assert format_value_nicely("on", 1, 2) == "true"
+    assert format_value_nicely("off", 1, 8) == "up"
+    assert format_value_nicely(False, 1, 5) == "no alarm"
+    # 2-bit and 4-bit controls use the same vocabulary.
+    assert format_value_nicely({"control": True, "value": "on"}, 2, 2) == "true (control)"
+    assert format_value_nicely({"control": "increase", "step_code": 3}, 3, 7) == "increase 3"
+    assert format_value_nicely({"control": "up", "step_code": 0}, 3, 8) == "up 0"
 
 
 def test_format_value_nicely_other_types():
@@ -355,7 +363,7 @@ def test_convert_value_for_db_composite_dpts_are_dicts():
     from xknx.dpt import DPTArray, DPTBase, DPTBinary
 
     cases = [
-        ("3.007", DPTBinary(0b1011), {"control": "increase", "step_code": 3}, "control increase, step_code 3"),
+        ("3.007", DPTBinary(0b1011), {"control": "increase", "step_code": 3}, "increase 3"),
         ("18.001", DPTArray((0x81,)), {"scene_number": 2, "learn": True}, "scene_number 2, learn true"),
         ("232.600", DPTArray((1, 2, 3)), {"red": 1, "green": 2, "blue": 3}, "red 1, green 2, blue 3"),
     ]

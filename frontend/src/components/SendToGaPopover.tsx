@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import { describeBusPayload, type BusPayload } from '../utils/dptValues';
 import { WriteControls } from './WriteControls';
 import { secondaryBtn } from '../utils/buttonStyles';
 
@@ -98,12 +99,12 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
     };
   }, [open]);
 
-  const write = async (payload: boolean | number | string) => {
+  const write = async (payload: BusPayload) => {
     setBusy(true);
     setFeedback(null);
     try {
       await sendTelegram(address, payload, dpt || undefined);
-      const shown = typeof payload === 'boolean' ? (payload ? 'on' : 'off') : String(payload);
+      const shown = describeBusPayload(payload, dpt);
       setFeedback({ ok: true, msg: `Sent ${shown}` });
       setTimeout(() => void loadLast(), 700);
     } catch (err) {

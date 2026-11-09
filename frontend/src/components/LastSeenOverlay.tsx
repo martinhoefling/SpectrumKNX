@@ -5,6 +5,7 @@ import type { Telegram } from '../hooks/useWebSocket';
 import type { FilterOptions } from '../types/filters';
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
+import type { BusPayload } from '../utils/dptValues';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
@@ -216,7 +217,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     }
   };
 
-  const handleWrite = async (payload: boolean | number | string, dpt: string) => {
+  const handleWrite = async (payload: BusPayload, dpt: string) => {
     setBusy(true);
     setSendError(null);
     try {
