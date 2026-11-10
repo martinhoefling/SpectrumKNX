@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot, Download } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
-import { SendToGaPopover } from './SendToGaPopover';
+import { SendToGaHost, SendToGaPopover, type ListScrollSnapshot } from './SendToGaPopover';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
@@ -35,6 +35,8 @@ interface TelegramTableProps {
   canSend?: boolean;
   /** Jump from the send popover's last-value timestamp to the telegram list. */
   onGotoTelegram?: (telegram: Telegram) => void;
+  /** Live bus feed for the send popover's wait-for-read-response. */
+  latestTelegram?: Telegram | null;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -210,6 +212,7 @@ function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascendi
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
+  latestTelegram,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -1199,6 +1202,68 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   keyTowardNewerRef.current = keyTowardNewer;
   keyScrollDeltaRef.current = keyScrollDelta;
 
+  /**
+   * Pause live-follow for send-popover open / restore. Mirrors an edge click
+   * (#266) without replacing the pause/scroll rubber-band path.
+   */
+  const pauseLiveFollowForSend = () => {
+    if (!atEdgeRef.current) return;
+    atEdgeRef.current = false;
+    detachedFromEdgeRef.current = true;
+    setFollowingLive(false);
+    onListFollowChange?.(false);
+  };
+
+  /** Snapshot for send-popover "restore list position" (anchor key + viewport offset). */
+  const captureListScroll = useCallback((): ListScrollSnapshot | null => {
+    pauseLiveFollowForSend();
+    const el = parentRef.current;
+    if (!el) return null;
+    const scrollTop = el.scrollTop;
+    if (anchorRef.current) {
+      return { scrollTop, key: anchorRef.current.key, offset: anchorRef.current.offset };
+    }
+    const items = virtualizer.getVirtualItems();
+    const first = items[0];
+    if (first == null) return { scrollTop, key: null, offset: 0 };
+    const t = telegramRows[first.index];
+    if (!t) return { scrollTop, key: null, offset: 0 };
+    const key = anchorKey(t);
+    const offset = rowOffset(key) ?? (first.start - scrollTop);
+    anchorRef.current = { key, offset };
+    onListAnchorKeyChange?.(key);
+    return { scrollTop, key, offset };
+  }, [virtualizer, telegramRows, onListAnchorKeyChange]);
+
+  /** Restore the list to the send-popover open snapshot; pauses live-follow. */
+  const restoreListScroll = useCallback((snap: ListScrollSnapshot) => {
+    const el = parentRef.current;
+    if (!el) return;
+    pauseLiveFollowForSend();
+    if (snap.key) {
+      const idx = telegramRows.findIndex(r => anchorKey(r) === snap.key);
+      if (idx >= 0) {
+        markProgrammatic();
+        virtualizer.scrollToIndex(idx, { align: 'start' });
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const found = rowOffset(snap.key!);
+          if (found != null) {
+            markProgrammatic();
+            el.scrollTop += found - snap.offset;
+            anchorRef.current = { key: snap.key!, offset: snap.offset };
+            onListAnchorKeyChange?.(snap.key!);
+          } else {
+            markProgrammatic();
+            el.scrollTop = snap.scrollTop;
+          }
+        }));
+        return;
+      }
+    }
+    markProgrammatic();
+    el.scrollTop = snap.scrollTop;
+  }, [virtualizer, telegramRows, onListAnchorKeyChange]);
+
   // Record the row to pin across list updates. `selectedKey` is the row the
   // user is working on; it wins while any part of it is inside the viewport, so
   // rows arriving above it (a reload, Time-Delta-Context) can't push it away
@@ -2155,6 +2220,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   dptSub={t.dpt_sub}
                   buttonClassName="quick-send-btn"
                   onGotoTelegram={onGotoTelegram}
+                  latestTelegram={latestTelegram}
                 />
               )}
             </div>
@@ -2293,7 +2359,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     : (telegramRows.length > 0 && (!rangeMeasured || justUnpaused) ? stickyNewerCountRef.current : 0);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div data-telegram-table style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <SendToGaHost
+        latestTelegram={latestTelegram}
+        onGotoTelegram={onGotoTelegram}
+        captureListScroll={captureListScroll}
+        restoreListScroll={restoreListScroll}
+      >
       {/* Quick info bar (#311): collapsible summary directly above the header. */}
       {infoOpen && infoMetrics && (
         <div style={{
@@ -2833,6 +2905,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         />
       </div>
       </div>
+      </SendToGaHost>
     </div>
   );
 };

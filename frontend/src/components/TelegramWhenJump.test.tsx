@@ -16,11 +16,13 @@ describe('formatTelegramWhen', () => {
 });
 
 describe('telegramEventType', () => {
-  it('prefers simplified_type', () => {
-    expect(telegramEventType({ simplified_type: 'Write', telegram_type: 'GroupValueWrite' })).toBe('Write');
+  it('prefers simplified_type as uppercase', () => {
+    expect(telegramEventType({ simplified_type: 'Write', telegram_type: 'GroupValueWrite' })).toBe('WRITE');
+    expect(telegramEventType({ simplified_type: 'Read', telegram_type: 'GroupValueRead' })).toBe('READ');
+    expect(telegramEventType({ simplified_type: 'Response', telegram_type: 'GroupValueResponse' })).toBe('RESPONSE');
   });
 
-  it('falls back to telegram_type', () => {
+  it('falls back to telegram_type without forcing uppercase', () => {
     expect(telegramEventType({ simplified_type: null, telegram_type: 'GroupValueRead' })).toBe('GroupValueRead');
   });
 });
@@ -31,13 +33,13 @@ describe('TelegramWhenJump', () => {
     render(
       <TelegramWhenJump
         timestamp="2026-01-01T10:05:00.000Z"
-        eventType="Write"
+        eventType="WRITE"
         onJump={onJump}
       />,
     );
     const when = screen.getByText(/2026-01-01/);
     const jump = screen.getByRole('button', { name: 'Go to telegram' });
-    const type = screen.getByText('Write');
+    const type = screen.getByText('WRITE');
     expect(when.compareDocumentPosition(jump) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(jump.compareDocumentPosition(type) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(jump);
@@ -45,14 +47,14 @@ describe('TelegramWhenJump', () => {
   });
 
   it('omits the jump button when onJump is missing', () => {
-    render(<TelegramWhenJump timestamp="2026-01-01T10:05:00.000Z" eventType="Read" />);
+    render(<TelegramWhenJump timestamp="2026-01-01T10:05:00.000Z" eventType="READ" />);
     expect(screen.queryByRole('button', { name: 'Go to telegram' })).not.toBeInTheDocument();
-    expect(screen.getByText('Read')).toBeInTheDocument();
+    expect(screen.getByText('READ')).toBeInTheDocument();
   });
 
   it('omits event type when not provided', () => {
     render(<TelegramWhenJump timestamp="2026-01-01T10:05:00.000Z" onJump={() => {}} />);
     expect(screen.getByRole('button', { name: 'Go to telegram' })).toBeInTheDocument();
-    expect(screen.queryByText('Write')).not.toBeInTheDocument();
+    expect(screen.queryByText('WRITE')).not.toBeInTheDocument();
   });
 });

@@ -1,11 +1,41 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { WriteToBusPanel, mergeColTracks, resolvePanelHeight, shouldAutoGrowPanelHeight } from './WriteToBusPanel';
+import { WriteToBusPanel, mergeColTracks, midTracksTemplate, resolvePanelHeight, scrollLeftOnViewportResize, shouldAutoGrowPanelHeight } from './WriteToBusPanel';
+
+test('hiding the value column drops that track, not the DPT track', () => {
+  const tracks = [90, 100, 20, 30, 40, 50, 60, 70, 80, 90];
+  expect(midTracksTemplate(tracks, true)).toBe(
+    'minmax(100px, 1fr) 20px 30px 40px 50px 60px 70px 80px 90px',
+  );
+  // 40px is DPT. 50px is Value and is the track that goes away.
+  expect(midTracksTemplate(tracks, false)).toBe(
+    'minmax(100px, 1fr) 20px 30px 40px 60px 70px 80px 90px',
+  );
+  expect(midTracksTemplate(null, false).split(' ').filter(part => part !== '1fr)')).toHaveLength(8);
+});
 
 test('mergeColTracks grows only unless shrink is allowed', () => {
   expect(mergeColTracks(null, [10, 20])).toEqual([10, 20]);
   expect(mergeColTracks([10, 30], [8, 40])).toEqual([10, 40]);
   expect(mergeColTracks([10, 30], [8, 40], { allowShrink: true })).toEqual([8, 40]);
+});
+
+test('scrollLeftOnViewportResize shifts left only when the bar appears or is at the right stop', () => {
+  // Shrink makes the scrollbar appear: content 350 fit in 400, not in 300. Right edge stays.
+  expect(scrollLeftOnViewportResize(0, 400, 300, 350)).toBe(50);
+  // Thumb already at the right stop (600 of 1000-400). Shrink keeps that edge.
+  expect(scrollLeftOnViewportResize(600, 400, 300, 1000)).toBe(700);
+  // One pixel short of the stop still counts as the stop.
+  expect(scrollLeftOnViewportResize(599, 400, 300, 1000)).toBe(699);
+  // Scrollbar already visible and not at the stop: shrink leaves scrollLeft alone.
+  expect(scrollLeftOnViewportResize(0, 400, 300, 800)).toBe(0);
+  expect(scrollLeftOnViewportResize(200, 400, 300, 1000)).toBe(200);
+  // Grow does not shift. A thumb at the stop stays there because of the clamp.
+  expect(scrollLeftOnViewportResize(700, 300, 500, 1000)).toBe(500);
+  expect(scrollLeftOnViewportResize(200, 300, 500, 1000)).toBe(200);
+  // Unchanged viewport does not move, and content that still fits stays at 0.
+  expect(scrollLeftOnViewportResize(40, 200, 200, 500)).toBe(40);
+  expect(scrollLeftOnViewportResize(0, 400, 300, 250)).toBe(0);
 });
 
 test('mergeColTracks can protect columns from shrink (status with error)', () => {
@@ -60,6 +90,12 @@ test('shouldAutoGrowPanelHeight grows only when ≤8 rows and already at previou
 
 const ROWS_KEY = 'spectrumknx-write-panel-rows';
 
+/** Mid template's first track is `minmax(..., 1fr)` (one extra whitespace token). */
+function midTrackCount(container: HTMLElement): number {
+  const inner = container.querySelector('.wtb-mid-inner') as HTMLElement;
+  return inner.style.gridTemplateColumns.trim().split(/\s+/).length - 1;
+}
+
 const IDLE = { jobs: [] as unknown[] };
 const RUNNING_JOB = {
   state: 'running',
@@ -100,6 +136,85 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+test('the value column is hidden when every row is a button DPT', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '' },
+    { address: '4/5/6', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  expect(container.querySelector('[data-wtb-col="5"]')).toBeNull();
+  expect(screen.getAllByRole('button', { name: /^on$/i })).toHaveLength(2);
+  expect(midTrackCount(container)).toBe(8);
+});
+
+test('the value column stays when one row needs a value field', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '' },
+    { address: '4/5/6', dpt: '9.001', value: '21', delay: '', every: '' },
+  ]));
+  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const cells = Array.from(container.querySelectorAll('[data-wtb-col="5"]'));
+  expect(cells).toHaveLength(2);
+  expect(cells.filter(el => el.querySelector('input'))).toHaveLength(1);
+  expect(cells.filter(el => !el.querySelector('input'))).toHaveLength(1);
+  expect(screen.getByRole('button', { name: /^on$/i })).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('Value')).toHaveValue('21');
+  expect(midTrackCount(container)).toBe(9);
+});
+
+/** Pixel widths of the mid tracks. The name track is `minmax(Npx, 1fr)`. */
+function midTrackPx(template: string): number[] {
+  const name = Number(template.match(/^minmax\((\d+)px/)?.[1] ?? NaN);
+  const rest = template
+    .replace(/^minmax\(\d+px,\s*1fr\)\s*/, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => Number(part.replace(/px$/, '')));
+  return [name, ...rest];
+}
+
+test('changing a row DPT reoptimizes column tracks', () => {
+  const rect = (width: number) => ({
+    x: 0, y: 0, top: 0, left: 0, bottom: 16, right: width, width, height: 16, toJSON() { return {}; },
+  }) as DOMRect;
+  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.hasAttribute('data-dpt-field')) {
+      const input = this.querySelector('input');
+      const name = (this.textContent ?? '').length;
+      return rect(((input?.value.length ?? 0) + name) * 8 + 24);
+    }
+    if (this.hasAttribute('data-value-field')) {
+      const input = this.querySelector('input');
+      return rect(((input?.value || input?.placeholder || '').length + 1) * 10);
+    }
+    return rect(24);
+  });
+
+  try {
+    localStorage.setItem(ROWS_KEY, JSON.stringify([
+      { address: '1/2/3', dpt: '9.001', value: '21.5', delay: '', every: '' },
+    ]));
+    const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+    const template = () => (container.querySelector('.wtb-mid-inner') as HTMLElement).style.gridTemplateColumns;
+    const before = midTrackPx(template());
+    const dptBefore = before[3];
+    const valueBefore = before[4];
+    expect(dptBefore).toBeGreaterThan(valueBefore);
+
+    fireEvent.change(screen.getByLabelText('Value'), { target: { value: '1' } });
+    const afterValue = midTrackPx(template());
+    expect(afterValue[4]).toBeGreaterThanOrEqual(valueBefore);
+
+    fireEvent.change(screen.getByLabelText('Datapoint type'), { target: { value: '1.001' } });
+    fireEvent.blur(screen.getByLabelText('Datapoint type'));
+    const afterDpt = midTrackPx(template());
+    expect(afterDpt[3]).toBeLessThan(dptBefore);
+    expect(container.querySelector('[data-wtb-col="5"]')).toBeNull();
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('sends immediately from a row when no delay or interval is set', async () => {
@@ -356,6 +471,41 @@ test('picks up an already-running job on mount', async () => {
   expect(shell.querySelector('[data-status-metric="countdown"]')).not.toBeNull();
   expect(shell.textContent).toMatch(/-\d+s|-\d+:\d{2}/);
   expect(screen.getByLabelText(/Sends done 3/)).toHaveTextContent('3');
+});
+
+test('a status error cancels only that row\'s active job', async () => {
+  const jobA = { ...RUNNING_JOB, id: 'job-a', address: '1/2/3' };
+  const jobB = { ...RUNNING_JOB, id: 'job-b', address: '4/5/6' };
+  const cancelBodies: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/knx/send/scheduled/status')) {
+      return { ok: true, json: async () => statusOf(jobA, jobB) } as Response;
+    }
+    if (url.includes('/api/knx/send/scheduled/cancel')) {
+      cancelBodies.push(init?.body ? JSON.parse(String(init.body)) : null);
+      return { ok: true, json: async () => ({ status: 'ok' }) } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }));
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '5', value: 'abc', delay: '', every: '5', scheduledJobId: 'job-a' },
+    { address: '4/5/6', dpt: '5', value: '1', delay: '', every: '5', scheduledJobId: 'job-b' },
+  ]));
+
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
+
+  fireEvent.click(screen.getAllByRole('button', { name: /Write/ })[0]);
+
+  const err = await screen.findByText('Invalid value: abc');
+  expect(err.closest('[data-status-field]')).toHaveAttribute('aria-label', 'Invalid value: abc');
+  await waitFor(() => {
+    expect(cancelBodies).toEqual([{ id: 'job-a' }]);
+  });
+  expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(1);
+  expect(screen.getByLabelText(/cyclic send to 4\/5\/6/)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/cyclic send to 1\/2\/3/)).not.toBeInTheDocument();
 });
 
 test('count column stays hidden until a cyclic job has sent at least once', async () => {
@@ -697,6 +847,14 @@ test('DPT-1 target renders On/Off and records the GA in recents', async () => {
   expect(JSON.parse(localStorage.getItem('spectrumknx-recent-send-gas')!)).toEqual(['12/0/0']);
 });
 
+test('committing a GA address records it in recents without sending', () => {
+  render(<WriteToBusPanel targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]} onClose={() => {}} />);
+  const ga = screen.getByPlaceholderText('GA');
+  fireEvent.change(ga, { target: { value: '12/0/0' } });
+  fireEvent.blur(ga);
+  expect(JSON.parse(localStorage.getItem('spectrumknx-recent-send-gas')!)).toEqual(['12/0/0']);
+});
+
 // ── Last value per row (#439) ────────────────────────────────────────────────
 
 const telegramOn = (address: string, over: Record<string, unknown> = {}) => ({
@@ -730,9 +888,9 @@ test('shows the last value of the entered group address (#439)', async () => {
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('Last value:21.5 °C'));
   // Prefix + value+unit; event kind and time live in the Event column.
   expect(lastValueOf()).toHaveTextContent('Last value:');
-  expect(lastValueOf()).not.toHaveTextContent('Write');
+  expect(lastValueOf()).not.toHaveTextContent('WRITE');
   expect(lastValueOf().textContent).not.toMatch(/\d{2}:\d{2}:\d{2}/);
-  expect(document.querySelector('[data-wtb-col="3"]')).toHaveTextContent('Write');
+  expect(document.querySelector('[data-wtb-col="3"]')).toHaveTextContent('WRITE');
   expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/telegrams/last?target_address=1%2F2%2F3'))).toBe(true);
 });
 
@@ -779,6 +937,71 @@ test('last value decodes DPT 3.007 raw 0 as decrease 0 and toggles hex', async (
   expect(value).toHaveTextContent('0x00');
 });
 
+test('last value keeps decoded/raw when a new telegram arrives', async () => {
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
+  }));
+  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  const value = await waitFor(() => lastValueOf().querySelector('strong') as HTMLElement);
+  expect(value).toHaveAttribute('aria-label', '21.5 °C');
+  fireEvent.click(value);
+  expect(value).toHaveAttribute('aria-label', '0x0c1a');
+
+  rerender(
+    <WriteToBusPanel
+      targets={[]}
+      onClose={() => {}}
+      latestTelegram={telegramOn('1/2/3', {
+        timestamp: '2026-01-01T10:00:05.000000+00:00',
+        value_formatted: '22.0',
+        value_numeric: 22,
+        raw_hex: '0x0c4c',
+      })}
+    />,
+  );
+  await waitFor(() => expect(lastValueOf().querySelector('strong')).toHaveAttribute('aria-label', '0x0c4c'));
+});
+
+test('bare DPT main 2 sends hex and binary and refuses values outside 0-3', async () => {
+  const fetchMock = mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/knx/send': { status: 'sent' },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  const dpt = container.querySelector('input[aria-label="Datapoint type"]') as HTMLInputElement;
+  fireEvent.change(dpt, { target: { value: '2' } });
+  fireEvent.blur(dpt);
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '0b11' } });
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+
+  await waitFor(() => expect(screen.getByLabelText(/written '0b11' to 1\/2\/3/)).toBeInTheDocument());
+  const sent = () => fetchMock.mock.calls.filter(([u]) => {
+    const url = String(u);
+    return url.includes('/api/knx/send') && !url.includes('scheduled');
+  });
+  const body = JSON.parse((sent()[0][1] as RequestInit).body as string);
+  expect(body).toMatchObject({ address: '1/2/3', payload: 3, dpt: '2' });
+
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '0x3' } });
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  await waitFor(() => expect(sent()).toHaveLength(2));
+  expect(JSON.parse((sent()[1][1] as RequestInit).body as string).payload).toBe(3);
+
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '4' } });
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(await screen.findByText('Value 4 is out of range for DPT 2 (0–3)')).toBeInTheDocument();
+
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '0b100' } });
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(await screen.findByText('Value 4 is out of range for DPT 2 (0–3)')).toBeInTheDocument();
+  expect(sent()).toHaveLength(2);
+});
+
 test('offers a go-to button in the event cell beside time and kind', async () => {
   const onGotoTelegram = vi.fn();
   vi.stubGlobal('fetch', mockFetch({
@@ -792,12 +1015,12 @@ test('offers a go-to button in the event cell beside time and kind', async () =>
   const button = await screen.findByRole('button', { name: 'Go to telegram' });
   expect(button).toHaveClass('quick-filter-bar-toggle');
   expect(lastValueOf()).toHaveTextContent('21.5 °C');
-  expect(lastValueOf()).not.toHaveTextContent('Write');
+  expect(lastValueOf()).not.toHaveTextContent('WRITE');
   // Event track must measure the whole cell (time + kind + jump), not only the button —
   // otherwise the labels overflow onto DPT.
   const eventCell = document.querySelector('[data-wtb-col="3"]') as HTMLElement;
   expect(eventCell).toContainElement(button);
-  expect(eventCell).toHaveTextContent('Write');
+  expect(eventCell).toHaveTextContent('WRITE');
   // Same date-time shape as SendToGaPopover: yyyy-MM-dd HH:mm:ss
   expect(eventCell.textContent).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
   // Jump sits immediately after Date/Time, before kind (no far-right pin).
@@ -805,7 +1028,7 @@ test('offers a go-to button in the event cell beside time and kind', async () =>
     /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(el.textContent ?? ''),
   );
   expect(whenNode).toBeTruthy();
-  const kindNode = within(eventCell).getByText('Write');
+  const kindNode = within(eventCell).getByText('WRITE');
   expect(whenNode!.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(button.compareDocumentPosition(kindNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
@@ -817,6 +1040,35 @@ test('offers a go-to button in the event cell beside time and kind', async () =>
   rerender(<WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2' } });
   expect(screen.queryByRole('button', { name: 'Go to telegram' })).not.toBeInTheDocument();
+});
+
+test('offers a go-to button in the event cell for a Read last telegram', async () => {
+  const onGotoTelegram = vi.fn();
+  const readTg = telegramOn('0/7/1', {
+    simplified_type: 'Read',
+    telegram_type: 'GroupValueRead',
+    value_formatted: null,
+    unit: null,
+  });
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/telegrams/last': { telegrams: [readTg] },
+  }));
+  render(<WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '0/7/1' } });
+
+  const button = await screen.findByRole('button', { name: 'Go to telegram' });
+  const eventCell = document.querySelector('[data-wtb-col="3"]') as HTMLElement;
+  expect(eventCell).toContainElement(button);
+  expect(within(eventCell).getByText('READ')).toBeInTheDocument();
+  expect(eventCell.textContent).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+  // Read has no decoded value — Last value cell stays empty.
+  expect(document.querySelector('.wtb-last-value')).toBeNull();
+
+  fireEvent.click(button);
+  expect(onGotoTelegram).toHaveBeenCalledWith(expect.objectContaining({
+    target_address: '0/7/1', simplified_type: 'Read',
+  }));
 });
 
 test('leaves last empty when the group address has no recorded value', async () => {
@@ -872,7 +1124,7 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   const statusJump = await screen.findByRole('button', { name: 'Go to status telegram' });
   const statusShell = statusJump.closest('[data-status-field]')!;
   expect(statusShell.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
-  expect(statusShell.textContent).toMatch(/Read/);
+  expect(statusShell.textContent).toMatch(/READ/);
   expect(statusShell.querySelector('.lucide-radio')).not.toBeNull();
   // Bound Read request must keep the orange wait icon until a Response arrives.
   expect(statusShell.querySelector('svg')).toHaveStyle({ color: 'var(--warning)' });
@@ -892,13 +1144,13 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={response} />);
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('22.3 °C'));
   // Event column and Status both show the Response once the wait ends.
-  expect(screen.getAllByText('Response').length).toBeGreaterThanOrEqual(1);
-  expect(lastValueOf()).not.toHaveTextContent('Response');
+  expect(screen.getAllByText('RESPONSE').length).toBeGreaterThanOrEqual(1);
+  expect(lastValueOf()).not.toHaveTextContent('RESPONSE');
   expect(screen.queryByLabelText(/read request sent to 1\/2\/3 without response/)).not.toBeInTheDocument();
   // Pending-read chrome is gone; Response keeps a green Radio.
   expect(screen.queryByLabelText(/read request sent/i)).not.toBeInTheDocument();
   const statusAfter = document.querySelector('[data-status-field]');
-  expect(statusAfter?.textContent).toMatch(/Response/);
+  expect(statusAfter?.textContent).toMatch(/RESPONSE/);
   expect(statusAfter?.querySelector('.lucide-radio')).not.toBeNull();
   expect(statusAfter?.querySelector('svg')).toHaveStyle({ color: 'var(--success)' });
 });
@@ -933,7 +1185,7 @@ test('a Write on the same GA does not end a read wait — only Response does', a
   rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={response} />);
   await waitFor(() => expect(screen.queryByLabelText(/read request sent/)).not.toBeInTheDocument());
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
-  expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/Response/);
+  expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/RESPONSE/);
 });
 
 test('waiting Cancel clears the status wait', async () => {
@@ -1020,7 +1272,7 @@ test('delayed Write keeps a prior Read event visible during the countdown', asyn
   rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
   expect(screen.getByRole('button', { name: 'Go to status telegram' }).closest('[data-status-field]')!.textContent)
-    .toMatch(/Read/);
+    .toMatch(/READ/);
 
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '15' } });
@@ -1030,7 +1282,7 @@ test('delayed Write keeps a prior Read event visible during the countdown', asyn
     btn => btn.closest('[data-status-field]') as HTMLElement,
   );
   await waitFor(() => expect(shell.textContent).toMatch(/-\d+s|-\d+:\d{2}/));
-  expect(shell.textContent).toMatch(/Read/);
+  expect(shell.textContent).toMatch(/READ/);
   expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
   // Status event kind Read always keeps the Read (Radio) icon.
   expect(shell.querySelector('.lucide-radio')).not.toBeNull();
@@ -1451,7 +1703,7 @@ test('status shell shows write event like Event column and clears', async () => 
   const jump = await screen.findByRole('button', { name: 'Go to status telegram' });
   const statusShell = jump.closest('[data-status-field]')!;
   expect(statusShell.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
-  expect(statusShell.textContent).toMatch(/Write/);
+  expect(statusShell.textContent).toMatch(/WRITE/);
   expect(statusShell.getAttribute('aria-label') ?? '').toMatch(/written '50' to 1\/2\/3/);
   fireEvent.click(jump);
   expect(onGotoTelegram).toHaveBeenCalledWith(expect.objectContaining({
@@ -1711,7 +1963,7 @@ test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not t
   });
   rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readTg} />);
   await waitFor(() => {
-    expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/Read/);
+    expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/READ/);
   });
 
   fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
@@ -1720,8 +1972,8 @@ test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not t
 
   const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
   expect(pending.querySelector('.lucide-radio')).not.toBeNull();
-  expect(pending.textContent).toMatch(/Read/);
-  expect(pending.textContent).not.toMatch(/Write/);
+  expect(pending.textContent).toMatch(/READ/);
+  expect(pending.textContent).not.toMatch(/WRITE/);
   expect(screen.queryByLabelText(/written '/)).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
 });
@@ -1808,6 +2060,7 @@ test('header Close calls onClose', () => {
   expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
   const closeBtn = screen.getByRole('button', { name: 'Close send panel' });
   expect(closeBtn).toHaveClass('wtb-close-button');
+  expect(closeBtn.parentElement).toHaveClass('wtb-panel-header');
   fireEvent.click(closeBtn);
   expect(onClose).toHaveBeenCalledTimes(1);
 });
@@ -1831,6 +2084,7 @@ test('only the mid pane has a horizontal scrollbar host (GA and status stay pinn
   const outer = container.querySelector('.wtb-h-scroll') as HTMLElement;
   expect(outer).toBeTruthy();
   expect(outer.style.overflowX).toBe('hidden');
+  expect(outer.style.padding).toBe('0px 0px 0px 0.85rem');
   expect(container.querySelector('.wtb-mid-h-scroll')).toBeTruthy();
   expect(container.querySelector('.wtb-mid-clip')).toBeTruthy();
   expect(container.querySelector('.wtb-rows-grid')).toBeTruthy();

@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent as ReactUIEvent } from 'react';
-import { createPortal } from 'react-dom';
-import { Radio, Plus, Minus, AlertTriangle, CheckCircle2, Timer, RotateCcw, ChevronDown, X, Send } from 'lucide-react';
+import { Radio, Plus, Minus, AlertTriangle, CheckCircle2, Timer, RotateCcw, X, Send } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -17,11 +16,12 @@ import {
   type ScheduledSendStatus,
 } from '../utils/knxSend';
 import { GaCombobox } from './GaCombobox';
-import { WriteControls } from './WriteControls';
+import { DptField } from './DptField';
+import { WriteControls, needsValueColumn } from './WriteControls';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
-import { dptDesignation, dptUnit } from '../utils/dpt';
+import { buildWriteDptOptions, dptUnit } from '../utils/dpt';
 import { describeBusPayload, formatBusValueForDpt, type BusPayload } from '../utils/dptValues';
 import { BusValueText } from './BusValueText';
 import { getPref, setPref } from '../utils/prefs';
@@ -90,14 +90,6 @@ function resolveName(text: string, options: FilterOption[]): FilterOption | 'amb
   return options.find(o => (o.address ?? '').toLowerCase() === q) ?? null;
 }
 const POLL_INTERVAL_MS = 1000;
-
-// Common DPTs offered as datalist hints when overriding a GA's type (#342).
-// The input stays free-text; these just guide the frequent cases.
-const COMMON_DPTS = [
-  '1.001', '1.002', '2.001', '3.007', '4.001', '5.001', '5.004', '5.010',
-  '6.010', '7.001', '8.001', '9.001', '9.004', '10.001', '11.001', '12.001',
-  '13.001', '14.056', '16.000', '17.001', '18.001', '19.001', '20.102', '232.600',
-];
 
 let rowSeq = 0;
 const newRow = (): Row => ({
@@ -211,6 +203,7 @@ function telegramValue(tg: Telegram | null | undefined, fallback = '', dpt?: str
 /** Shared write-panel grid: addr | name | last | event | dpt | value | send | delay | every | read | status | del | add. */
 const WTB_COLS = 13;
 const WTB_NAME_COL = 1;
+const WTB_VALUE_COL = 5;
 const WTB_SEND_COL = 6;
 const WTB_STATUS_COL = 10;
 /** Middle pane scrolls horizontally: name … read (GA + status/del/add stay pinned). */
@@ -221,16 +214,28 @@ const WTB_COL_GAP = '0.45rem';
 const WTB_BUFFER_COLS = new Set([0, 4, 5, 7, 8]);
 const WTB_INPUT_BUFFER_PX = 10;
 
-const WTB_FALLBACK_MID_TRACKS =
-  'minmax(0, 1fr) max-content max-content max-content max-content max-content max-content max-content max-content';
 const WTB_FALLBACK_RIGHT_TRACKS = 'max-content max-content max-content';
 
-function midTracksTemplate(colTracks: number[] | null): string {
-  if (!colTracks) return WTB_FALLBACK_MID_TRACKS;
-  return colTracks
-    .slice(WTB_MID_START, WTB_MID_END)
-    .map((w, i) => (WTB_MID_START + i === WTB_NAME_COL ? `minmax(${w}px, 1fr)` : `${w}px`))
-    .join(' ');
+/**
+ * Mid-pane tracks (name … read). The name track is `minmax(w, 1fr)`, which
+ * contains a space — drop the value track by column index, not by splitting
+ * the template string, or the DPT track is removed instead and the field
+ * paints under the send buttons.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- unit-tested layout helper
+export function midTracksTemplate(colTracks: number[] | null, showValueCol: boolean): string {
+  const tracks = colTracks
+    ? colTracks.slice(WTB_MID_START, WTB_MID_END).map((w, i) => (
+      WTB_MID_START + i === WTB_NAME_COL ? `minmax(${w}px, 1fr)` : `${w}px`
+    ))
+    : [
+      'minmax(0, 1fr)',
+      ...Array.from({ length: WTB_MID_END - WTB_MID_START - 1 }, () => 'max-content'),
+    ];
+  const visible = showValueCol
+    ? tracks
+    : tracks.filter((_, i) => WTB_MID_START + i !== WTB_VALUE_COL);
+  return visible.join(' ');
 }
 
 function rightTracksTemplate(colTracks: number[] | null): string {
@@ -423,6 +428,35 @@ export function mergeColTracks(
   return next.map((w, i) => (protect.has(i) ? Math.max(prev[i] ?? 0, w) : w));
 }
 
+/** Thumb within this many pixels of max scroll counts as the right stop. */
+const SCROLL_STOP_EPS_PX = 1;
+
+/**
+ * Horizontal mid-pane scroll after the clip width changes.
+ * Shift left only when shrinking makes the scrollbar appear, or when the
+ * thumb is already at the right stop — both keep the content's right edge.
+ * Otherwise keep scrollLeft and only clamp it into the new range. Growing
+ * does not shift; a thumb already at the stop stays there via the clamp.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- unit-tested layout helper
+export function scrollLeftOnViewportResize(
+  scrollLeft: number,
+  prevViewport: number,
+  nextViewport: number,
+  contentWidth: number,
+): number {
+  const prevMax = Math.max(0, contentWidth - prevViewport);
+  const nextMax = Math.max(0, contentWidth - nextViewport);
+  const shrinking = nextViewport < prevViewport;
+  const hadScrollbar = prevMax > 0;
+  const atRightStop = scrollLeft >= prevMax - SCROLL_STOP_EPS_PX;
+  if (shrinking && (!hadScrollbar || atRightStop)) {
+    const rightEdge = scrollLeft + prevViewport;
+    return Math.min(nextMax, Math.max(0, rightEdge - nextViewport));
+  }
+  return Math.min(nextMax, Math.max(0, scrollLeft));
+}
+
 const HEIGHT_PREF_KEY = 'send-panel-height';
 const HEIGHT_HANDLE_PX = 3;
 /** Matches global scrollbar thickness; reserved so H/V bars don't jump layout. */
@@ -598,6 +632,12 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   const midInnerRef = useRef<HTMLDivElement>(null);
   const midBarRef = useRef<HTMLDivElement>(null);
   const hostWidthRef = useRef<number | null>(null);
+  /** Last id+DPT signature. A change reoptimizes tracks (shrink), not only grows them. */
+  const dptSigRef = useRef<string | null>(null);
+  /** Visible mid offset, including clamp, so a resize does not read a stale render. */
+  const midScrollLeftRef = useRef(0);
+  /** Previous mid-clip clientWidth. Null until the first measure (stay left-aligned). */
+  const prevMidViewportRef = useRef<number | null>(null);
   const heightMaxRef = useRef(0);
   const heightDraggingRef = useRef(heightDragging);
   const pollRef = useRef<number | null>(null);
@@ -633,29 +673,10 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
 
   // DPT hints for the editable DPT field (#342): common types plus every DPT
   // present in the loaded project, each with its designation.
-  const dptOptions = useMemo(() => {
-    const byKey = new Map<string, string>();
-    for (const key of COMMON_DPTS) byKey.set(key, dptDesignation(key));
-    for (const t of targets) {
-      if (t.main == null) continue;
-      const key = formatDpt(t.main, t.sub);
-      if (!byKey.has(key)) byKey.set(key, '');
-    }
-    for (const d of dptCatalog) {
-      if (d.main == null) continue;
-      const key = formatDpt(d.main, d.sub);
-      const name = dptDesignation(key, d.label);
-      if (name) byKey.set(key, name);
-      else if (!byKey.has(key)) byKey.set(key, '');
-    }
-    return [...byKey.entries()]
-      .map(([key, name]) => ({ key, name }))
-      .sort((a, b) => {
-        const [am, as = 0] = a.key.split('.').map(Number);
-        const [bm, bs = 0] = b.key.split('.').map(Number);
-        return am - bm || as - bs;
-      });
-  }, [targets, dptCatalog]);
+  const dptOptions = useMemo(
+    () => buildWriteDptOptions(dptCatalog, targets),
+    [targets, dptCatalog],
+  );
 
   // Last value per row (#439): fetched once per entered GA, then kept current
   // from the live feed — which keeps flowing while the telegram list is paused,
@@ -691,7 +712,11 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   ).length;
   const showCancelAll = cancelRowCount > 1;
 
-  const midTemplateColumns = useMemo(() => midTracksTemplate(colTracks), [colTracks]);
+  const showValueCol = rows.some(r => needsValueColumn(r.dpt || null, parseDptMain(r.dpt)));
+  const midTemplateColumns = useMemo(
+    () => midTracksTemplate(colTracks, showValueCol),
+    [colTracks, showValueCol],
+  );
   const rightTemplateColumns = useMemo(() => rightTracksTemplate(colTracks), [colTracks]);
   const leftWidth = useMemo(() => leftColWidth(colTracks), [colTracks]);
   const rightWidth = useMemo(() => rightPaneWidth(colTracks), [colTracks]);
@@ -712,14 +737,16 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   }, [midContentWidth, midViewportWidth]);
 
   const onMidBarScroll = useCallback((e: ReactUIEvent<HTMLDivElement>) => {
+    midScrollLeftRef.current = e.currentTarget.scrollLeft;
     setMidScrollLeft(e.currentTarget.scrollLeft);
   }, []);
 
-  // Derive a clamped offset so shrinking the mid pane never needs a setState-in-effect.
+  // Derive a clamped offset so content-width changes never need a setState-in-effect.
   const midScrollLeftApplied = clampMidScroll(midScrollLeft);
 
   // Keep the under-mid scrollbar thumb in sync when wheel/programmatic scroll moves.
   useLayoutEffect(() => {
+    midScrollLeftRef.current = midScrollLeftApplied;
     const bar = midBarRef.current;
     if (bar && Math.abs(bar.scrollLeft - midScrollLeftApplied) > 0.5) {
       bar.scrollLeft = midScrollLeftApplied;
@@ -738,14 +765,18 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
       if (dx === 0) return;
       e.preventDefault();
-      setMidScrollLeft(prev => clampMidScroll(prev + dx));
+      setMidScrollLeft(prev => {
+        const next = clampMidScroll(prev + dx);
+        midScrollLeftRef.current = next;
+        return next;
+      });
     };
     grid.addEventListener('wheel', onWheel, { passive: false });
     return () => grid.removeEventListener('wheel', onWheel);
   }, [clampMidScroll, bodyEpoch, rows.length]);
 
   // Measure column tracks + height bounds. Content changes grow tracks only;
-  // a host-width change (or remount) fully reoptimizes.
+  // a host-width change, a DPT change, or a remount fully reoptimizes.
   useLayoutEffect(() => {
     const headerGrid = headerGridRef.current;
     const grid = gridRef.current;
@@ -754,6 +785,10 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     const scroll = scrollRef.current;
     // Header row is omitted for a single send row; measurement still runs.
     if (!grid || !host || !hScroll || !scroll) return;
+
+    const dptSig = rows.map(r => `${r.id}\0${r.dpt}`).join('\n');
+    const dptChanged = dptSigRef.current !== null && dptSigRef.current !== dptSig;
+    dptSigRef.current = dptSig;
 
     const measureCols = (allowShrink: boolean) => {
       const next = Array.from({ length: WTB_COLS }, () => 0);
@@ -779,8 +814,28 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     const measureMidScroll = () => {
       const clip = midClipRef.current;
       const inner = midInnerRef.current;
-      if (clip) setMidViewportWidth(clip.clientWidth);
-      if (inner) setMidContentWidth(Math.ceil(inner.scrollWidth));
+      const view = clip ? clip.clientWidth : null;
+      const content = inner ? Math.ceil(inner.scrollWidth) : null;
+      if (view != null) {
+        const prev = prevMidViewportRef.current;
+        // First measure stays left-aligned. A later shrink shifts left only
+        // when the scrollbar appears or the thumb is already at the right stop.
+        if (prev != null && content != null && view !== prev) {
+          const next = scrollLeftOnViewportResize(
+            midScrollLeftRef.current,
+            prev,
+            view,
+            content,
+          );
+          if (next !== midScrollLeftRef.current) {
+            midScrollLeftRef.current = next;
+            setMidScrollLeft(next);
+          }
+        }
+        prevMidViewportRef.current = view;
+        setMidViewportWidth(view);
+      }
+      if (content != null) setMidContentWidth(content);
     };
 
     const measureHeightBounds = () => {
@@ -800,10 +855,17 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       const headerBlockH = headerWrap?.offsetHeight ?? headerGrid?.offsetHeight ?? 0;
       const hCs = getComputedStyle(hScroll);
       const padTop = parseFloat(hCs.paddingTop) || 0;
+      // Title band is in flow. offsetHeight is the highlight only; the gap under
+      // it is margin-bottom and must be counted separately.
+      const titleHeader = host.querySelector('.wtb-panel-header') as HTMLElement | null;
+      const titleMargin = titleHeader ? (parseFloat(getComputedStyle(titleHeader).marginBottom) || 0) : 0;
+      const titleBlockH = (titleHeader?.offsetHeight ?? 0) + titleMargin;
       // Gap below the V-scrollport (not inside it) + mid H-scrollbar gutter + resize handle.
       const belowRowsGap = parseFloat(getComputedStyle(scroll).marginBottom) || 0;
-      const chrome = padTop + headerBlockH + belowRowsGap + SCROLLBAR_GUTTER_PX + HEIGHT_HANDLE_PX;
-      const min = Math.ceil(chrome + oneRowH);
+      const chrome = padTop + titleBlockH + headerBlockH + belowRowsGap + SCROLLBAR_GUTTER_PX + HEIGHT_HANDLE_PX;
+      // The host border sits inside the border-box, under the resize handle.
+      // The first row still clears without that pixel, so the drag floor is one shorter.
+      const min = Math.ceil(chrome + oneRowH) - 1;
       const max = Math.ceil(chrome + rowsH);
       const prevMax = heightMaxRef.current;
       heightMaxRef.current = max;
@@ -831,7 +893,12 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       measureHeightBounds();
     };
 
-    measureContent();
+    // DPT edits swap the write widget and the designation width. Reoptimize
+    // once here; later content observation stays grow-only so typing does not
+    // shrink a track mid-edit.
+    measureCols(dptChanged);
+    measureMidScroll();
+    measureHeightBounds();
     if (typeof ResizeObserver === 'undefined') return;
 
     hostWidthRef.current = host.clientWidth;
@@ -864,6 +931,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   }, [
     rows, bodyEpoch, lastValues, dptOptions, anyJobActive, jobsByRowId,
     showCountdownCol, showSendCountCol, showActionCol, anyCancelAction, actionWidth,
+    showValueCol,
   ]);
 
   const onHeightResizeStart = useCallback((e: ReactMouseEvent) => {
@@ -945,6 +1013,29 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     }
   };
 
+  /**
+   * Status error owns the row. Drop its live job (countdown and Cancel) and
+   * keep the message — do not restore a successful Write over it.
+   */
+  const failRow = (rowId: string, msg: string) => {
+    const owned = jobsByRowIdRef.current[rowId];
+    setJobsByRowId(prev => {
+      if (!(rowId in prev)) return prev;
+      const next = { ...prev };
+      delete next[rowId];
+      if (!Object.values(next).some(isLiveJob)) watchingRef.current = false;
+      return next;
+    });
+    updateRow(rowId, {
+      feedback: { ok: false, msg },
+      statusWatch: null,
+      statusTelegram: null,
+      readBaseline: null,
+      scheduledJobId: null,
+    });
+    void cancelDetachedJob(rowId, owned);
+  };
+
   const addRowAfter = (id: string, opts?: { copy?: boolean }) => {
     setRows(rs => {
       const index = rs.findIndex(r => r.id === id);
@@ -980,6 +1071,12 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     void cancelDetachedJob(id, owned);
   };
 
+  const rememberGa = (address: string) => {
+    const trimmed = address.trim();
+    if (!trimmed) return;
+    setRecentGas(pushRecentGa(trimmed));
+  };
+
   const applyResolved = (id: string, option: FilterOption) => {
     updateRow(id, {
       address: option.address ?? '',
@@ -987,6 +1084,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       ...clearStatusPatch(),
       dpt: option.main != null ? formatDpt(option.main, option.sub) : '',
     });
+    if (option.address) rememberGa(option.address);
   };
 
   // Typing updates only the field being edited. The other field follows when
@@ -1005,8 +1103,10 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   };
 
   const onAddressCommit = (id: string, text: string) => {
-    const match = byAddress.get(text.trim());
+    const trimmed = text.trim();
+    const match = byAddress.get(trimmed);
     updateRow(id, { name: match?.name ?? '' });
+    rememberGa(trimmed);
   };
 
   const onNameChange = (id: string, next: string, option?: FilterOption) => {
@@ -1113,7 +1213,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     try {
       if (scheduled) {
         if (intervalSeconds > 0 && intervalSeconds < 1) {
-          updateRow(row.id, { feedback: { ok: false, msg: 'Interval must be at least 1 second' } });
+          failRow(row.id, 'Interval must be at least 1 second');
           return;
         }
         // Same-row re-click cancels and restarts that row's job only.
@@ -1150,14 +1250,9 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           statusTelegram: null,
         });
       }
-      setRecentGas(pushRecentGa(row.address.trim()));
+      rememberGa(row.address);
     } catch (err) {
-      updateRow(row.id, {
-        feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' },
-        statusWatch: null,
-        statusTelegram: null,
-        scheduledJobId: null,
-      });
+      failRow(row.id, err instanceof Error ? err.message : 'Request failed');
     } finally {
       updateRow(row.id, { busy: false });
     }
@@ -1176,14 +1271,9 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       updateRow(row.id, {
         feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` },
       });
-      setRecentGas(pushRecentGa(row.address.trim()));
+      rememberGa(row.address);
     } catch (err) {
-      updateRow(row.id, {
-        feedback: { ok: false, msg: err instanceof Error ? err.message : 'Request failed' },
-        statusWatch: null,
-        statusTelegram: null,
-        readBaseline: null,
-      });
+      failRow(row.id, err instanceof Error ? err.message : 'Request failed');
     } finally {
       updateRow(row.id, { busy: false });
     }
@@ -1206,21 +1296,22 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
         borderBottom: '1px solid var(--border-color)',
       }}
     >
-      {/* Header band above the grid (title + close); not the Cancel/Reset row. */}
-      <div className="wtb-panel-chrome" aria-hidden />
-      <div className="wtb-panel-title">
-        <Send size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} aria-hidden />
-        Write to bus
+      {/* Title band (highlight only). Gap under it is margin, not part of the fill. */}
+      <div className="wtb-panel-header">
+        <div className="wtb-panel-title">
+          <Send size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} aria-hidden />
+          Write to bus
+        </div>
+        <button
+          type="button"
+          className="wtb-close-button"
+          onClick={onClose}
+          title="Close send panel"
+          aria-label="Close send panel"
+        >
+          <X size={16} />
+        </button>
       </div>
-      <button
-        type="button"
-        className="wtb-close-button"
-        onClick={onClose}
-        title="Close send panel"
-        aria-label="Close send panel"
-      >
-        <X size={16} />
-      </button>
       {/* H-scroll wraps header + rows so columns stay aligned; only rows V-scroll.
           No right padding — the V-scrollbar sits on the panel's right edge. */}
       <div
@@ -1233,7 +1324,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           flexDirection: 'column',
           overflowX: 'hidden',
           overflowY: 'hidden',
-          padding: 'calc(var(--wtb-header-h) + 0.45rem) 0 0 0.85rem',
+          padding: '0 0 0 0.85rem',
           boxSizing: 'border-box',
           // Mid-pane horizontal offset (name … read).
           ['--wtb-mid-x' as string]: `-${midScrollLeftApplied}px`,
@@ -1368,7 +1459,6 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
           const addressValid = GA_RE.test(row.address.trim());
           const lastTelegram = addressValid ? lastValues[row.address.trim()] : undefined;
-          const lastHasValue = lastTelegram != null && lastTelegram.simplified_type !== 'Read';
           // Stay "waiting" until a Response clears statusWatch (or Cancel).
           const awaiting = row.statusWatch === 'read';
           // Leftover Read feedback after Cancel — keep unanswered Read chrome,
@@ -1456,7 +1546,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                   <div data-wtb-col="3" style={{ minWidth: 0, width: '100%', overflow: 'hidden' }}>
                     <EventCell
                       telegram={addressValid ? lastTelegram : undefined}
-                      canJump={Boolean(lastHasValue && lastTelegram)}
+                      canJump={Boolean(lastTelegram)}
                       onJump={() => lastTelegram && onGotoTelegram?.(lastTelegram)}
                     />
                   </div>
@@ -1486,15 +1576,18 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                     value={row.value}
                     onValueChange={v => updateRow(row.id, { value: v })}
                     onWrite={payload => void write(row, payload)}
+                    onError={msg => failRow(row.id, msg)}
                     disabled={scheduledDisabled}
                     unit={
-                      lastTelegram?.unit
-                      || (row.dpt.trim()
+                      (row.dpt.trim()
                         ? dptUnit(row.dpt.trim(), dptOptions.find(o => o.key === row.dpt.trim())?.name || null)
                         : '')
+                      || lastTelegram?.unit
+                      || ''
                     }
                     valueColProps={{ 'data-wtb-col': '5', style: { width: '100%', minWidth: 0, overflow: 'hidden' } }}
                     sendColProps={{ 'data-wtb-col': '6' }}
+                    reserveValueSlot={showValueCol}
                   />
                   <SecondsField
                     col="7"
@@ -1651,8 +1744,9 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       />
       <style>{`
         .wtb-panel-host {
-          /* Fixed header band; grid padding clears below it separately. */
+          /* Highlight height. The gap under it is margin on the header, outside the fill. */
           --wtb-header-h: calc(1.05rem + 16px);
+          --wtb-header-gap: 0.45rem;
         }
         .wtb-h-scroll::-webkit-scrollbar,
         .wtb-scrollport::-webkit-scrollbar,
@@ -1666,22 +1760,20 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
         .wtb-mid-inner {
           transform: translateX(var(--wtb-mid-x, 0px));
         }
-        .wtb-panel-chrome {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
+        .wtb-panel-header {
+          position: relative;
+          flex-shrink: 0;
           height: var(--wtb-header-h);
+          margin-bottom: var(--wtb-header-gap);
           background: color-mix(in srgb, var(--bg-tag) 55%, transparent);
           border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
-          pointer-events: none;
           z-index: 5;
         }
         .wtb-panel-title {
           position: absolute;
           top: 0.2rem;
           left: 0.25rem;
-          z-index: 6;
+          z-index: 1;
           display: flex;
           align-items: center;
           gap: 0.45rem;
@@ -2000,19 +2092,25 @@ function LastValue({ telegram, dpt }: { telegram: Telegram | undefined; dpt: str
   if (!hasValue) return <span aria-hidden style={{ display: 'inline-block', height: 18 }} />;
   return (
     <span
-      // Remounting on a new telegram restarts the highlight animation.
-      key={telegram.timestamp}
-      className="wtb-last-value wtb-last-value-flash"
-      title={`Last telegram on this group address: ${telegram.simplified_type ?? telegram.telegram_type} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${new Date(telegram.timestamp).toLocaleString()}`}
+      className="wtb-last-value"
+      title={`Last telegram on this group address: ${telegramEventType(telegram)} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${new Date(telegram.timestamp).toLocaleString()}`}
     >
+      {/* Remounting only the flash restarts the highlight without resetting decoded/raw. */}
+      <span key={telegram.timestamp} className="wtb-last-value-flash" aria-hidden />
       <span style={{ color: 'var(--text-dim)' }}>Last value:</span>
       <BusValueText value={telegram} dpt={dpt} />
       <style>{`
         .wtb-last-value {
+          position: relative;
           display: inline-flex; align-items: baseline; gap: 0.35rem;
           font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 4px; white-space: nowrap;
         }
-        .wtb-last-value-flash { animation: wtb-last-value-flash 1.6s ease-out; }
+        .wtb-last-value-flash {
+          position: absolute; inset: 0; border-radius: inherit;
+          pointer-events: none; z-index: 0;
+          animation: wtb-last-value-flash 1.6s ease-out;
+        }
+        .wtb-last-value > :not(.wtb-last-value-flash) { position: relative; z-index: 1; }
         @keyframes wtb-last-value-flash {
           from { background: rgba(99, 102, 241, 0.35); }
           to { background: transparent; }
@@ -2178,7 +2276,7 @@ function RowStatus({
       return `written '${val}' to ${ga}`;
     }
     if (statusTelegram) {
-      const kind = statusTelegram.simplified_type ?? statusTelegram.telegram_type ?? 'Telegram';
+      const kind = telegramEventType(statusTelegram) || 'Telegram';
       return `${kind} on ${ga}`;
     }
     if (feedback?.ok) return feedback.msg;
@@ -2417,254 +2515,6 @@ function RowStatus({
       </div>
       {actionSlot}
     </div>
-  );
-}
-
-interface DptChoice {
-  key: string;
-  name: string;
-}
-
-/**
- * DPT entry for one row. Editable only once that row has a group address.
- * The suggestion list is portaled and pinned under this field. Reset and the
- * chevron live inside the field so showing the reset does not shift the row.
- */
-function DptField({ value, options, disabled, overridden, title, onChange, onReset, resetTitle }: {
-  value: string;
-  options: DptChoice[];
-  disabled: boolean;
-  overridden: boolean;
-  title: string;
-  onChange: (next: string) => void;
-  onReset: () => void;
-  resetTitle: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(0);
-  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
-  // Close the menu when the field becomes disabled (no valid GA) without an
-  // effect, so re-enabling it does not pop the suggestions back open.
-  const [prevDisabled, setPrevDisabled] = useState(disabled);
-  if (disabled !== prevDisabled) {
-    setPrevDisabled(disabled);
-    if (disabled) setOpen(false);
-  }
-  const shellRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  const matches = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    const exact = options.some(o => o.key.toLowerCase() === q);
-    if (!q || exact) return options;
-    return options.filter(o => o.key.toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
-  }, [value, options]);
-
-  // Designation beside the key (catalog/common name); not part of the editable value.
-  const designation = useMemo(() => {
-    const key = value.trim();
-    if (!key) return '';
-    const fromOptions = options.find(o => o.key === key)?.name;
-    return fromOptions || dptDesignation(key);
-  }, [value, options]);
-
-  const active = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1);
-
-  const place = () => {
-    const el = shellRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const width = Math.max(r.width, 240);
-    let left = r.left;
-    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
-    setBox({ top: r.bottom + 4, left, width });
-  };
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    place();
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [open, matches.length]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (shellRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
-
-  const pick = (choice: DptChoice) => {
-    onChange(choice.key);
-    setOpen(false);
-    // Drop focus so the next click opens the list again instead of only
-    // placing a caret in an already-focused field.
-    inputRef.current?.blur();
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') { setOpen(false); return; }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (!open) { setOpen(true); return; }
-      const dir = e.key === 'ArrowDown' ? 1 : -1;
-      setHighlight(h => {
-        const current = Math.min(h, Math.max(matches.length - 1, 0));
-        return Math.max(0, Math.min(matches.length - 1, current + dir));
-      });
-      return;
-    }
-    if (e.key === 'Enter' && open && matches[active]) {
-      e.preventDefault();
-      pick(matches[active]);
-    }
-  };
-
-  return (
-    <>
-      <div
-        ref={shellRef}
-        className="glass-input"
-        data-dpt-field
-        style={{
-          position: 'relative',
-          display: 'inline-flex',
-          alignItems: 'center',
-          width: '100%',
-          minWidth: '5.75rem',
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-          padding: '0.2rem 0.3rem 0.2rem 0.35rem',
-          gap: '0.25rem',
-          borderColor: overridden ? 'var(--accent-primary)' : undefined,
-          opacity: disabled ? 0.45 : 1,
-        }}
-      >
-        <input
-          ref={inputRef}
-          aria-label="Datapoint type"
-          value={value}
-          disabled={disabled}
-          placeholder="—"
-          title={title}
-          onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(0); }}
-          onFocus={() => { if (!disabled) { setOpen(true); setHighlight(0); } }}
-          onBlur={() => setOpen(false)}
-          onKeyDown={onKeyDown}
-          style={{
-            width: `${Math.max(value.length, 1)}ch`,
-            flex: 'none',
-            minWidth: 0,
-            border: 'none',
-            outline: 'none',
-            background: 'transparent',
-            padding: 0,
-            color: 'var(--text-main)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '0.72rem',
-          }}
-        />
-        {designation ? (
-          <span
-            aria-hidden
-            style={{
-              fontSize: '0.72rem',
-              color: 'var(--text-dim)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              minWidth: 0,
-              flex: '1 1 auto',
-              pointerEvents: 'none',
-            }}
-          >
-            {designation}
-          </span>
-        ) : null}
-        <button
-          type="button"
-          className="icon-button"
-          tabIndex={overridden && !disabled ? 0 : -1}
-          aria-hidden={!overridden}
-          disabled={disabled || !overridden}
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => { if (overridden) onReset(); }}
-          title={overridden ? resetTitle : undefined}
-          style={{
-            color: 'var(--text-dim)',
-            padding: '0.05rem',
-            visibility: overridden ? 'visible' : 'hidden',
-            pointerEvents: overridden ? 'auto' : 'none',
-            flexShrink: 0,
-            marginLeft: 'auto',
-          }}
-        >
-          <RotateCcw size={12} />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Toggle datapoint type list"
-          disabled={disabled}
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => {
-            if (disabled) return;
-            if (open) {
-              setOpen(false);
-              inputRef.current?.blur();
-            } else {
-              inputRef.current?.focus();
-            }
-          }}
-          style={{ color: 'var(--text-dim)', padding: '0.05rem', flexShrink: 0 }}
-        >
-          <ChevronDown size={13} />
-        </button>
-      </div>
-      {open && !disabled && matches.length > 0 && box && createPortal(
-        <div
-          ref={menuRef}
-          role="listbox"
-          aria-label="Datapoint types"
-          style={{
-            position: 'fixed', top: box.top, left: box.left, width: box.width, zIndex: 80,
-            maxHeight: 240, overflowY: 'auto',
-            background: 'var(--bg-panel)', border: '1px solid var(--border-color)',
-            borderRadius: 8, boxShadow: 'var(--shadow-lg)', padding: '0.25rem',
-          }}
-        >
-          {matches.map((o, i) => (
-            <button
-              type="button"
-              key={o.key}
-              role="option"
-              aria-selected={i === active}
-              onMouseDown={e => { e.preventDefault(); pick(o); }}
-              onMouseEnter={() => setHighlight(i)}
-              style={{
-                display: 'flex', alignItems: 'baseline', gap: '0.55rem',
-                width: '100%', textAlign: 'left', border: 'none', borderRadius: 6, cursor: 'pointer',
-                padding: '0.3rem 0.45rem',
-                background: i === active ? 'rgba(99,102,241,0.18)' : 'transparent',
-              }}
-            >
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'var(--text-main)' }}>{o.key}</span>
-              {o.name && <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{o.name}</span>}
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </>
   );
 }
 

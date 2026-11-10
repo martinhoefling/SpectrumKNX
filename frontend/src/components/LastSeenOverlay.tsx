@@ -380,6 +380,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                         buttonClassName="quick-send-btn"
                         buttonStyle={rowIconBtnStyle}
                         onGotoTelegram={onGotoTelegram}
+                        latestTelegram={latestTelegram}
                       />
                     )}
                     {mode === 'ga' && onVisualizeGAs && (
@@ -544,6 +545,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               value={writeValue}
               onValueChange={v => { setWriteValue(v); setSendError(null); }}
               onWrite={payload => void handleWrite(payload, formatDpt(selectedInfo?.main, selectedInfo?.sub))}
+              onError={setSendError}
               disabled={busy}
             />
             <button
@@ -655,6 +657,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                                 dptSub={t.dpt_sub}
                                 buttonStyle={rowIconBtnStyle}
                                 onGotoTelegram={onGotoTelegram}
+                                latestTelegram={latestTelegram}
                               />
                             )}
                             {onVisualizeGAs && (

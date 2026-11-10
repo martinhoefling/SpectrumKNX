@@ -48,7 +48,7 @@ test('fetches last values for its addresses and leaves never-seen GAs blank', as
   const seenCells = within(seenRow).getAllByRole('cell');
   // Shared TelegramWhenJump format (seconds, no fractional) + event type.
   expect(seenCells[3].textContent).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
-  expect(seenCells[3]).toHaveTextContent('Write');
+  expect(seenCells[3]).toHaveTextContent('WRITE');
   expect(screen.queryByRole('button', { name: 'Go to telegram' })).not.toBeInTheDocument();
 
   const neverSeenRow = screen.getByText('Kitchen Status').closest('tr')!;

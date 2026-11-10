@@ -9,6 +9,27 @@ const OPTIONS = [
   { address: '12/0/0', name: 'Heating mode' },
 ];
 
+test('the chevron toggles the suggestion list', () => {
+  render(
+    <GaCombobox value="" onChange={() => {}} options={OPTIONS} recentAddresses={['12/0/0']} />,
+  );
+  const chevron = screen.getByRole('button', { name: 'Toggle suggestions' });
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  fireEvent.click(chevron);
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  fireEvent.click(chevron);
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+});
+
+test('a click on the field shell opens the suggestion list', () => {
+  render(
+    <GaCombobox value="" onChange={() => {}} options={OPTIONS} recentAddresses={['12/0/0']} />,
+  );
+  const input = screen.getByRole('combobox');
+  fireEvent.mouseDown(input.parentElement!);
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+});
+
 test('shows only recent addresses, newest first, while the input is empty', () => {
   render(
     <GaCombobox value="" onChange={() => {}} options={OPTIONS} recentAddresses={['12/0/0', '4/5/6']} />
@@ -159,7 +180,7 @@ test('arrow keys move through the suggestions and Enter selects the highlighted 
   expect(picks).toEqual(['12/0/0']);
 });
 
-test('blur of an incomplete value adopts the highlighted suggestion, or the first', () => {
+test('typing clears the suggestion highlight; blur keeps free text', () => {
   const picks: string[] = [];
   const commits: string[] = [];
   function Harness() {
@@ -173,23 +194,63 @@ test('blur of an incomplete value adopts the highlighted suggestion, or the firs
       />
     );
   }
-  const { unmount } = render(<Harness />);
+  render(<Harness />);
+  const input = screen.getByRole('combobox');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: '1' } });
+  for (const opt of screen.getAllByRole('option')) {
+    expect(opt).toHaveAttribute('data-active', 'false');
+  }
+  fireEvent.blur(input);
+  expect(picks).toEqual([]);
+  expect(commits).toEqual(['1']);
+  expect(input).toHaveValue('1');
+});
+
+test('blur of an incomplete value adopts a highlighted suggestion', () => {
+  const picks: string[] = [];
+  const commits: string[] = [];
+  function Harness() {
+    const [value, setValue] = useState('');
+    return (
+      <GaCombobox
+        value={value}
+        onChange={(text, option) => { setValue(text); if (option) picks.push(option.address ?? ''); }}
+        onCommit={text => commits.push(text)}
+        options={OPTIONS}
+      />
+    );
+  }
+  render(<Harness />);
   const input = screen.getByRole('combobox');
   fireEvent.change(input, { target: { value: '1' } });
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
   fireEvent.blur(input);
   expect(picks).toEqual(['1/2/3']);
   expect(commits).toEqual([]);
   expect(input).toHaveValue('1/2/3');
+});
 
-  picks.length = 0;
-  unmount();
+test('Enter after typing commits free text instead of a suggestion', () => {
+  const picks: string[] = [];
+  const commits: string[] = [];
+  function Harness() {
+    const [value, setValue] = useState('');
+    return (
+      <GaCombobox
+        value={value}
+        onChange={(text, option) => { setValue(text); if (option) picks.push(option.address ?? ''); }}
+        onCommit={text => commits.push(text)}
+        options={OPTIONS}
+      />
+    );
+  }
   render(<Harness />);
-  const again = screen.getByRole('combobox');
-  fireEvent.change(again, { target: { value: '1' } });
-  fireEvent.keyDown(again, { key: 'ArrowDown' });
-  fireEvent.blur(again);
-  expect(picks).toEqual(['12/0/0']);
-  expect(again).toHaveValue('12/0/0');
+  const input = screen.getByRole('combobox');
+  fireEvent.change(input, { target: { value: '9/9/9' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(picks).toEqual([]);
+  expect(commits).toEqual(['9/9/9']);
 });
 
 test('filters the full project list from the first typed character', () => {

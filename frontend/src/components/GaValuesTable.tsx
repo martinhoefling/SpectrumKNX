@@ -221,6 +221,7 @@ export const GaValuesTable: React.FC<GaValuesTableProps> = ({
                         dptSub={entry.dpt.sub}
                         buttonStyle={iconBtnStyle}
                         onGotoTelegram={onGotoTelegram}
+                        latestTelegram={latestTelegram}
                       />
                     )}
                     <button

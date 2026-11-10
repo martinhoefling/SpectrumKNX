@@ -13,17 +13,19 @@ export function formatTelegramWhen(timestamp: string | Date | undefined | null):
   return format(d, 'yyyy-MM-dd HH:mm:ss');
 }
 
-/** Prefer simplified_type (Read / Write / Response); fall back to telegram_type. */
+/** Prefer simplified_type (READ / WRITE / RESPONSE); fall back to telegram_type. */
 // eslint-disable-next-line react-refresh/only-export-components -- shared telegram helper
 export function telegramEventType(telegram: Pick<Telegram, 'simplified_type' | 'telegram_type'> | null | undefined): string {
   if (!telegram) return '';
-  return (telegram.simplified_type ?? telegram.telegram_type ?? '').trim();
+  const raw = (telegram.simplified_type ?? telegram.telegram_type ?? '').trim();
+  if (raw === 'Write' || raw === 'Read' || raw === 'Response') return raw.toUpperCase();
+  return raw;
 }
 
 interface Props {
   /** ISO timestamp or Date of the bus event. */
   timestamp?: string | Date | null;
-  /** Optional event kind shown after the jump (Read / Write / Response). */
+  /** Optional event kind shown after the jump (READ / WRITE / RESPONSE). */
   eventType?: string | null;
   /** When set, render the jump button immediately right of the timestamp. */
   onJump?: () => void;

@@ -1,10 +1,36 @@
+import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { expect, test, vi } from 'vitest';
-import { WriteControls } from './WriteControls';
+import { WriteControls, needsValueColumn } from './WriteControls';
+
+test('needsValueColumn is false only for button DPTs', () => {
+  expect(needsValueColumn('1.001', 1)).toBe(false);
+  expect(needsValueColumn('2.002', 2)).toBe(false);
+  expect(needsValueColumn('5.001', 5)).toBe(true);
+  expect(needsValueColumn('3.007', 3)).toBe(true);
+  expect(needsValueColumn('', null)).toBe(true);
+  expect(needsValueColumn('1', 1)).toBe(true);
+});
+
+test('reserveValueSlot false omits the empty value cell for button DPTs', () => {
+  const { container } = render(
+    <WriteControls
+      dptMain={1}
+      dptKey="1.001"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      reserveValueSlot={false}
+      valueColProps={{ 'data-wtb-col': '5' }}
+    />,
+  );
+  expect(container.querySelector('[data-wtb-col="5"]')).toBeNull();
+  expect(screen.getByRole('button', { name: /^on$/i })).toBeInTheDocument();
+});
 
 test('DPT 1 renders on/off as accent action buttons that write booleans (#218)', () => {
   const onWrite = vi.fn();
-  render(<WriteControls dptMain={1} value="" onValueChange={() => {}} onWrite={onWrite} />);
+  render(<WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={onWrite} />);
 
   const on = screen.getByRole('button', { name: /^on$/i });
   const off = screen.getByRole('button', { name: /^off$/i });
@@ -23,11 +49,32 @@ test('DPT 1 renders on/off as accent action buttons that write booleans (#218)',
 
 test('multi-button send cells size to content then share leftover width', () => {
   const { container } = render(
-    <WriteControls dptMain={1} value="" onValueChange={() => {}} onWrite={() => {}} />,
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={() => {}} />,
   );
   const send = screen.getByRole('button', { name: /^on$/i }).parentElement as HTMLElement;
   expect(send.style.gridTemplateColumns).toBe('repeat(2, minmax(max-content, 1fr))');
   expect(container.querySelectorAll('button').length).toBeGreaterThanOrEqual(2);
+});
+
+test('sendFit hug keeps content-sized wrapping buttons', () => {
+  render(
+    <WriteControls
+      dptMain={1}
+      dptKey="1.001"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      sendFit="hug"
+      sendEnd={<button type="button">Read</button>}
+    />,
+  );
+  const on = screen.getByRole('button', { name: /^on$/i });
+  const send = on.parentElement as HTMLElement;
+  expect(send.style.display).toBe('flex');
+  expect(send.style.flexWrap).toBe('wrap');
+  expect(send.style.gridTemplateColumns).toBe('');
+  expect(on.style.width).not.toBe('100%');
+  expect(screen.getByRole('button', { name: /^Read$/i }).parentElement).toBe(send);
 });
 
 test('a 1-bit subtype renders its own values, not on/off', () => {
@@ -114,6 +161,21 @@ test('value choice select keeps the chevron right-aligned', () => {
   expect(container.querySelector('[aria-label="Value"]')).toBe(trigger);
 });
 
+test('value choice select navigates with arrow keys and Enter', () => {
+  const onWrite = vi.fn();
+  render(<WriteControls dptMain={3} dptKey="3.008" value="" onValueChange={() => {}} onWrite={onWrite} />);
+  const trigger = screen.getByRole('button', { name: 'Value' });
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  expect(screen.getByRole('listbox', { name: 'Value' })).toBeInTheDocument();
+  expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  expect(screen.queryByRole('listbox', { name: 'Value' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(onWrite).toHaveBeenCalledWith({ control: 'up', step_code: 1 });
+});
+
 test('numeric free values are right-aligned against the unit sibling', () => {
   const { container } = render(
     <WriteControls dptMain={9} dptKey="9.001" value="21.5" unit="°C" onValueChange={() => {}} onWrite={() => {}} />,
@@ -123,6 +185,12 @@ test('numeric free values are right-aligned against the unit sibling', () => {
   expect(shell).toHaveStyle({ width: '100%' });
   expect(input).toHaveStyle({ textAlign: 'right' });
   expect(input.nextElementSibling).toHaveTextContent('°C');
+});
+
+test('empty free-value placeholder stays left-aligned', () => {
+  render(<WriteControls dptMain={9} dptKey="9.001" value="" unit="°C" onValueChange={() => {}} onWrite={() => {}} />);
+  expect(screen.getByLabelText('Value')).toHaveStyle({ textAlign: 'left' });
+  expect(screen.getByPlaceholderText('Value')).toBeInTheDocument();
 });
 
 test('text DPTs stay left-aligned in the value shell', () => {
@@ -137,18 +205,46 @@ test('Write is disabled while the value is empty', () => {
 
 test('DPT 16/28 (string) allow sending an empty value (#410)', () => {
   const onWrite = vi.fn();
-  render(<WriteControls dptMain={16} value="" onValueChange={() => {}} onWrite={onWrite} />);
+  render(<WriteControls dptMain={16} dptKey="16.000" value="" onValueChange={() => {}} onWrite={onWrite} />);
 
   const writeBtn = screen.getByRole('button', { name: /Write/ });
   expect(writeBtn).not.toBeDisabled();
   fireEvent.click(writeBtn);
-  expect(onWrite).toHaveBeenCalledWith('');
+  expect(onWrite).toHaveBeenCalledWith(' '.repeat(14));
+});
+
+test('DPT 4 sends a single padded character and uses a mono value field', () => {
+  const onWrite = vi.fn();
+  render(<WriteControls dptMain={4} dptKey="4.001" value="" onValueChange={() => {}} onWrite={onWrite} />);
+  const input = screen.getByLabelText('Value');
+  expect(input).toHaveStyle({ fontFamily: "'JetBrains Mono', monospace" });
+  expect(input).toHaveAttribute('maxLength', '1');
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(onWrite).toHaveBeenCalledWith(' ');
+});
+
+test('ASCII text DPT reports charset errors instead of writing', () => {
+  const onWrite = vi.fn();
+  const onError = vi.fn();
+  render(
+    <WriteControls
+      dptMain={16}
+      dptKey="16.000"
+      value="Ä"
+      onValueChange={() => {}}
+      onWrite={onWrite}
+      onError={onError}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  expect(onWrite).not.toHaveBeenCalled();
+  expect(onError).toHaveBeenCalledWith('Character not allowed for DPT 16.000 (ASCII)');
 });
 
 test('DPT 10 renders a time input field and handles write', () => {
   const onWrite = vi.fn();
   const onValueChange = vi.fn();
-  const { container } = render(<WriteControls dptMain={10} value="12:30:00" onValueChange={onValueChange} onWrite={onWrite} />);
+  const { container } = render(<WriteControls dptMain={10} dptKey="10.001" value="12:30:00" onValueChange={onValueChange} onWrite={onWrite} />);
 
   const input = container.querySelector('input[type="time"]');
   expect(input).toBeInTheDocument();
@@ -160,7 +256,7 @@ test('DPT 10 renders a time input field and handles write', () => {
 
 test('DPT 11 renders a date input field and handles write', () => {
   const onWrite = vi.fn();
-  const { container } = render(<WriteControls dptMain={11} value="2026-07-18" onValueChange={() => {}} onWrite={onWrite} />);
+  const { container } = render(<WriteControls dptMain={11} dptKey="11.001" value="2026-07-18" onValueChange={() => {}} onWrite={onWrite} />);
 
   const input = container.querySelector('input[type="date"]');
   expect(input).toBeInTheDocument();
@@ -170,9 +266,222 @@ test('DPT 11 renders a date input field and handles write', () => {
   expect(onWrite).toHaveBeenCalledWith('2026-07-18');
 });
 
+test('a bare DPT main renders a value field and one Write button', () => {
+  render(<WriteControls dptMain={1} dptKey="1" value="" onValueChange={() => {}} onWrite={() => {}} />);
+  expect(screen.getByPlaceholderText('Value')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Write/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^on$/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Toggle recent values' })).not.toBeInTheDocument();
+});
+
+test('recent values show a chevron and open from the field', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  const input = screen.getByLabelText('Value');
+  const chevron = screen.getByRole('button', { name: 'Toggle recent values' });
+  expect(chevron).toBeInTheDocument();
+  expect(screen.queryByText('40')).not.toBeInTheDocument();
+  fireEvent.focus(input);
+  const recent = screen.getByText('40');
+  expect(recent.closest('[data-portaled-menu]')?.parentElement).toBe(document.body);
+  fireEvent.blur(input);
+  expect(screen.queryByText('40')).not.toBeInTheDocument();
+});
+
+test('arrow keys move the recent-values highlight; Enter picks it', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  const onValueChange = vi.fn();
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={onValueChange} onWrite={() => {}} />,
+  );
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  expect(screen.getByRole('option', { name: '40' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  expect(screen.getByRole('option', { name: '10' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onValueChange).toHaveBeenCalledWith('10');
+  expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+});
+
+test('arrow keys scroll the highlighted recent value into view', () => {
+  localStorage.setItem(
+    'recent_val_ga_1/2/3',
+    JSON.stringify(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']),
+  );
+  const scrollIntoView = vi.fn();
+  HTMLElement.prototype.scrollIntoView = scrollIntoView;
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  scrollIntoView.mockClear();
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  expect(screen.getByRole('option', { name: 'b' })).toHaveAttribute('aria-selected', 'true');
+  expect(scrollIntoView).toHaveBeenCalled();
+});
+
+test('Enter with an open recent-values list picks the highlight without writing', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  const onValueChange = vi.fn();
+  const onWrite = vi.fn();
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={onValueChange} onWrite={onWrite} />,
+  );
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  expect(screen.getByRole('option', { name: '40' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onValueChange).toHaveBeenCalledWith('40');
+  expect(onWrite).not.toHaveBeenCalled();
+  expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+});
+
+test('typing clears the recent-values highlight', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  const onValueChange = vi.fn();
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={onValueChange} onWrite={() => {}} />,
+  );
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  expect(screen.getByRole('option', { name: '40' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.change(input, { target: { value: '2' } });
+  expect(screen.getByRole('option', { name: '40' })).toHaveAttribute('aria-selected', 'false');
+  expect(screen.getByRole('option', { name: '10' })).toHaveAttribute('aria-selected', 'false');
+});
+
+test('Enter after typing writes the typed value instead of a recent', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  const onWrite = vi.fn();
+  function Controlled() {
+    const [value, setValue] = useState('');
+    return (
+      <WriteControls
+        dptMain={5}
+        dptKey="5.001"
+        address="1/2/3"
+        value={value}
+        onValueChange={setValue}
+        onWrite={onWrite}
+      />
+    );
+  }
+  render(<Controlled />);
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: '21' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onWrite).toHaveBeenCalledWith(21);
+  expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+});
+
+test('typing filters recent values; clearing the input restores the MRU list', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10', '21']));
+  function Controlled() {
+    const [value, setValue] = useState('');
+    return (
+      <WriteControls
+        dptMain={5}
+        dptKey="5.001"
+        address="1/2/3"
+        value={value}
+        onValueChange={setValue}
+        onWrite={() => {}}
+      />
+    );
+  }
+  render(<Controlled />);
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['40', '10', '21']);
+  fireEvent.change(input, { target: { value: '2' } });
+  expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['21']);
+  fireEvent.change(input, { target: { value: '' } });
+  expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['40', '10', '21']);
+});
+
+test('a written value moves to the top of the recent-values list', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  function Controlled() {
+    const [value, setValue] = useState('');
+    return (
+      <WriteControls
+        dptMain={5}
+        dptKey="5.001"
+        address="1/2/3"
+        value={value}
+        onValueChange={setValue}
+        onWrite={() => {}}
+      />
+    );
+  }
+  render(<Controlled />);
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: '21' } });
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  fireEvent.change(input, { target: { value: '' } });
+  fireEvent.focus(input);
+  expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['21', '40', '10']);
+});
+
+test('blur saves the typed value into recent values', () => {
+  localStorage.clear();
+  function Controlled() {
+    const [value, setValue] = useState('');
+    return (
+      <WriteControls
+        dptMain={5}
+        dptKey="5.001"
+        address="1/2/3"
+        value={value}
+        onValueChange={setValue}
+        onWrite={() => {}}
+      />
+    );
+  }
+  render(<Controlled />);
+  const input = screen.getByLabelText('Value');
+  fireEvent.change(input, { target: { value: '33' } });
+  fireEvent.blur(input);
+  expect(JSON.parse(localStorage.getItem('recent_val_ga_1/2/3')!)).toEqual(['33']);
+  fireEvent.change(input, { target: { value: '' } });
+  fireEvent.focus(input);
+  expect(screen.getByRole('option', { name: '33' })).toBeInTheDocument();
+});
+
+test('a click in the value field closes an open recent-values list', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40']));
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  const input = screen.getByLabelText('Value');
+  const shell = input.closest('[data-value-field]') as HTMLElement;
+  fireEvent.focus(input);
+  expect(screen.getByText('40')).toBeInTheDocument();
+  fireEvent.mouseDown(shell);
+  expect(screen.queryByText('40')).not.toBeInTheDocument();
+});
+
+test('recent values stay in the document when the value cell clips overflow', () => {
+  localStorage.setItem('recent_val_ga_9/9/9', JSON.stringify(['40']));
+  render(
+    <div style={{ overflow: 'hidden', height: 20 }}>
+      <WriteControls dptMain={5} dptKey="5.001" address="9/9/9" value="" onValueChange={() => {}} onWrite={() => {}} />
+    </div>,
+  );
+  fireEvent.focus(screen.getByLabelText('Value'));
+  const menu = screen.getByText('40').closest('[data-portaled-menu]');
+  expect(menu?.parentElement).toBe(document.body);
+});
+
 test('DPT 19 renders a datetime-local input field and handles write', () => {
   const onWrite = vi.fn();
-  const { container } = render(<WriteControls dptMain={19} value="2026-07-18T12:30" onValueChange={() => {}} onWrite={onWrite} />);
+  const { container } = render(<WriteControls dptMain={19} dptKey="19.001" value="2026-07-18T12:30" onValueChange={() => {}} onWrite={onWrite} />);
 
   const input = container.querySelector('input[type="datetime-local"]');
   expect(input).toBeInTheDocument();

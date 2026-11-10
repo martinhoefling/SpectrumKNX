@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { formatBusValueForDpt, type BusValueView } from '../utils/dptValues';
+import { isTextDptMain, parseDptMain } from '../utils/knxSend';
 import { TT } from '../utils/telegramCellStyles';
 
 interface Props {
@@ -34,6 +35,10 @@ export function BusValueText({
   const canToggle = hex !== '';
   const showingHex = showHex && canToggle;
   const decoded = formatBusValueForDpt(value, dpt);
+  const textDpt = isTextDptMain(dpt ? parseDptMain(dpt) : null);
+  const textStyle: CSSProperties | undefined = textDpt
+    ? { fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre', ...style }
+    : style;
 
   const Tag = as;
   const decodedClass = className ?? TT.value;
@@ -48,7 +53,7 @@ export function BusValueText({
 
   if (!canToggle) {
     return (
-      <Tag className={decodedClass} style={style}>
+      <Tag className={decodedClass} style={textStyle}>
         {decodedBody}
       </Tag>
     );
@@ -76,7 +81,7 @@ export function BusValueText({
     >
       <span
         className={decodedClass}
-        style={{ visibility: showingHex ? 'hidden' : 'visible', ...style }}
+        style={{ visibility: showingHex ? 'hidden' : 'visible', ...textStyle }}
         aria-hidden={showingHex}
       >
         {decodedBody}

@@ -54,3 +54,22 @@ test('formatBusValueForDpt decodes DPT 2 raw nibble', () => {
   expect(formatBusValueForDpt({ value_numeric: 0 }, '2.001')).toEqual({ text: 'off', unit: '' });
   expect(formatBusValueForDpt({ value_numeric: 3 }, '2.001')).toEqual({ text: 'on (control)', unit: '' });
 });
+
+test('formatBusValueForDpt keeps and pads spaces for fixed-width text DPTs', () => {
+  expect(formatBusValueForDpt({ value_formatted: 'Hi' }, '16.000')).toEqual({
+    text: 'Hi'.padEnd(14, ' '),
+    unit: '',
+  });
+  expect(formatBusValueForDpt({ value_formatted: '  A' }, '16.001')).toEqual({
+    text: '  A'.padEnd(14, ' '),
+    unit: '',
+  });
+  expect(formatBusValueForDpt({ value_formatted: 'X' }, '4.001')).toEqual({
+    text: 'X',
+    unit: '',
+  });
+  expect(formatBusValueForDpt({ value_formatted: 'Café' }, '28.001')).toEqual({
+    text: 'Café',
+    unit: '',
+  });
+});

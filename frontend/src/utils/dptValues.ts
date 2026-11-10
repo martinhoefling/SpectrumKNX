@@ -5,6 +5,8 @@
  * (on/off, true/false, up/down), not a generic boolean.
  */
 
+import { isTextDptMain, textDptCharWidth } from './knxSend';
+
 export type BusPayload =
   | boolean
   | number
@@ -195,9 +197,12 @@ export function formatBusValueForDpt(
   dptKey?: string | null,
 ): { text: string; unit: string } {
   const choices = discreteDptValues(dptKey);
-  const formatted = (value.value_formatted ?? '').trim();
-  const formattedKey = formatted.toLowerCase().replace(/_/g, ' ');
   const parsed = dptKey ? parseDptKey(dptKey) : null;
+  const textDpt = isTextDptMain(parsed?.main);
+  // Text DPTs keep leading/trailing spaces; other DPTs still trim labels.
+  const rawFormatted = value.value_formatted ?? '';
+  const formatted = textDpt ? rawFormatted : rawFormatted.trim();
+  const formattedKey = formatted.trim().toLowerCase().replace(/_/g, ' ');
 
   if (choices && choices.length > 0) {
     const fromJson = payloadFromJson(value.value_json ?? undefined);
@@ -242,10 +247,14 @@ export function formatBusValueForDpt(
     if (bit != null) return { text: bit ? 'on' : 'off', unit: '' };
   }
 
-  const text = formatted
+  let text = formatted
     || (value.value_numeric != null ? String(value.value_numeric) : '')
     || value.raw_hex
     || '—';
+  if (textDpt && text !== '—') {
+    const width = textDptCharWidth(parsed?.main);
+    if (width != null) text = text.padEnd(width, ' ').slice(0, width);
+  }
   const unit = text === '—' ? '' : (value.unit ?? '').trim();
   return { text, unit };
 }

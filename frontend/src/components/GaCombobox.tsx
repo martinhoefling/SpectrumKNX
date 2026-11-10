@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Clock } from 'lucide-react';
+import { ChevronDown, Clock } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 
@@ -40,6 +40,7 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
   const [highlight, setHighlight] = useState(0);
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // A list pick commits through onChange. Blur follows the click and must not
@@ -72,7 +73,10 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
     return { matches: recent, recentCount: recent.length };
   }, [value, options, recentAddresses]);
 
-  const activeIndex = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1);
+  // -1 = no highlight (cleared by typing); otherwise clamp into the list.
+  const activeIndex = highlight < 0 || matches.length === 0
+    ? -1
+    : Math.min(highlight, matches.length - 1);
 
   const isExact = (text: string) => {
     const q = text.trim().toLowerCase();
@@ -111,7 +115,7 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
   }, [open, matches.length, value]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || activeIndex < 0) return;
     optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
   }, [open, activeIndex]);
 
@@ -142,8 +146,8 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
     if (matches.length === 0) return;
     keyboardNav.current = true;
     setHighlight(h => {
-      const current = Math.min(h, matches.length - 1);
-      return Math.max(0, Math.min(matches.length - 1, current + dir));
+      if (h < 0) return dir > 0 ? 0 : matches.length - 1;
+      return Math.max(0, Math.min(matches.length - 1, h + dir));
     });
   };
 
@@ -152,13 +156,13 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       e.stopPropagation();
-      if (!open) { setOpen(true); return; }
+      if (!open) { setOpen(true); setHighlight(0); return; }
       moveHighlight(e.key === 'ArrowDown' ? 1 : -1);
       return;
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (open && matches[activeIndex]) pick(matches[activeIndex]);
+      if (open && activeIndex >= 0 && matches[activeIndex]) pick(matches[activeIndex]);
       else commitText();
     }
   };
@@ -169,20 +173,37 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width }}>
-      <input
+      <div
         className="glass-input"
+        onMouseDown={e => {
+          if ((e.target as HTMLElement).closest('[data-ga-chevron]')) return;
+          if (e.target !== inputRef.current) e.preventDefault();
+          setHighlight(0);
+          setOpen(true);
+          inputRef.current?.focus();
+        }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          width: '100%',
+          boxSizing: 'border-box',
+          padding: '0.2rem 0.3rem 0.2rem 0.35rem',
+          gap: '0.25rem',
+        }}
+      >
+      <input
+        ref={inputRef}
         value={value}
         placeholder={placeholder}
         size={size}
-        onChange={e => { pickedRef.current = false; onChange(e.target.value); setOpen(true); setHighlight(0); }}
-        onFocus={() => { pickedRef.current = false; setOpen(true); }}
+        onChange={e => { pickedRef.current = false; onChange(e.target.value); setOpen(true); setHighlight(-1); }}
+        onFocus={() => { pickedRef.current = false; setOpen(true); setHighlight(0); }}
         onBlur={() => {
           if (pickedRef.current) { pickedRef.current = false; setOpen(false); return; }
-          // Incomplete text with the list still open adopts the highlighted
-          // entry, which is the first one until the cursor moves. Both fields
-          // of this row then resolve to that GA.
+          // Incomplete text adopts a highlighted suggestion only while one is
+          // selected (arrows/hover). Typing clears the highlight so free text stays.
           const incomplete = value.trim() !== '' && !isExact(value);
-          const chosen = matches[activeIndex];
+          const chosen = activeIndex >= 0 ? matches[activeIndex] : undefined;
           if (open && incomplete && chosen) { pick(chosen); return; }
           setOpen(false);
           onCommit?.(value);
@@ -190,10 +211,40 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-activedescendant={open && matches[activeIndex] ? `${listId}-opt-${activeIndex}` : undefined}
+        aria-activedescendant={open && activeIndex >= 0 && matches[activeIndex] ? `${listId}-opt-${activeIndex}` : undefined}
         onKeyDown={onKeyDown}
-        style={{ width: '100%', fontFamily: display === 'name' ? 'inherit' : "'JetBrains Mono', monospace" }}
+        style={{
+          width: `${size}ch`,
+          flex: 'none',
+          minWidth: 0,
+          border: 'none',
+          outline: 'none',
+          background: 'transparent',
+          padding: 0,
+          color: 'inherit',
+          font: 'inherit',
+          fontFamily: display === 'name' ? 'inherit' : "'JetBrains Mono', monospace",
+        }}
       />
+      <button
+        type="button"
+        className="icon-button"
+        data-ga-chevron
+        aria-label="Toggle suggestions"
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+        onClick={() => {
+          if (open) setOpen(false);
+          else {
+            setHighlight(0);
+            setOpen(true);
+            inputRef.current?.focus();
+          }
+        }}
+        style={{ color: 'var(--text-dim)', padding: '0.05rem', flexShrink: 0, marginLeft: 'auto' }}
+      >
+        <ChevronDown size={13} />
+      </button>
+      </div>
       {open && matches.length > 0 && box && createPortal(
         <div
           ref={menuRef}

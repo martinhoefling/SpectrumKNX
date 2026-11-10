@@ -456,7 +456,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
           {activeFilters.types.map(t => (
             <OptionRow
               key={`active-type-${t}`}
-              label={t}
+              label={t.toUpperCase()}
               checked={!isFilterDisabled(activeFilters, 'types', t)}
               count={counts ? (counts?.types[t] ?? 0) : undefined}
               onToggle={() => onFiltersChange(toggleFilterDisabled(activeFilters, 'types', t))}
@@ -607,7 +607,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             {filteredTypes.map(t => (
               <OptionRow
                 key={t}
-                label={t}
+                label={t.toUpperCase()}
                 checked={activeFilters.types.includes(t)}
                 count={counts ? (counts?.types[t] ?? 0) : undefined}
                 onToggle={() => update({ types: toggle(activeFilters.types, t) })}
