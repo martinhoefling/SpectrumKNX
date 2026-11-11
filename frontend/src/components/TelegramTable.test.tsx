@@ -682,7 +682,29 @@ test('fill-spacer pause labels only when manually paused and fill rubber fully v
   const right = screen.getByTestId('fill-rubber-pause-label-right');
   expect(left).toHaveTextContent('...paused manually...');
   expect(right).toHaveTextContent('...paused manually...');
-  expect(left).toHaveStyle({ color: 'var(--text-dim)', fontStyle: 'italic' });
+  expect(left).toHaveClass('fill-rubber-pause-label');
+  expect(right).toHaveClass('fill-rubber-pause-label');
+
+  // Another toward-newer wheel at the hard stop remounts labels (restart fade).
+  act(() => {
+    fireEvent.wheel(port, { deltaY: -40 });
+  });
+  const leftAfterWheel = screen.getByTestId('fill-rubber-pause-label-left');
+  expect(leftAfterWheel).toBeInTheDocument();
+  expect(leftAfterWheel).not.toBe(left);
+
+  // Overlay scrollbar thumb drag further into fill at the hard stop remounts too.
+  const thumb = screen.getByTestId('list-scrollbar-thumb');
+  act(() => {
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientY: 80 });
+    fireEvent.pointerMove(thumb, { pointerId: 1, clientY: 40 });
+  });
+  const leftAfterSb = screen.getByTestId('fill-rubber-pause-label-left');
+  expect(leftAfterSb).toBeInTheDocument();
+  expect(leftAfterSb).not.toBe(leftAfterWheel);
+  act(() => {
+    fireEvent.pointerUp(thumb, { pointerId: 1, clientY: 40 });
+  });
 
   // Settled live edge → fill spacer scrolled away → no labels.
   act(() => {
@@ -691,6 +713,13 @@ test('fill-spacer pause labels only when manually paused and fill rubber fully v
   });
   expect(screen.queryByTestId('fill-rubber-pause-label-left')).not.toBeInTheDocument();
   expect(screen.queryByTestId('fill-rubber-pause-label-right')).not.toBeInTheDocument();
+
+  // Re-enter fill rubber → labels return (fade restarts via rising edge).
+  act(() => {
+    port.scrollTop = 0;
+    fireEvent.scroll(port);
+  });
+  expect(screen.getByTestId('fill-rubber-pause-label-left')).toBeInTheDocument();
 
   // Auto-pause at full fill → still no labels.
   rerender(

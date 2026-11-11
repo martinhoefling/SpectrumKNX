@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import React, { Fragment, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -705,13 +705,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // Wheel/key delta to apply into the merged list after a pause-buffer flush pin.
   const pendingFlushScrollDeltaRef = useRef<number | null>(null);
   // Latest toward-newer live-edge helpers for the global key listener (empty deps).
-  const engageLiveTowardNewerRef = useRef((_deltaY: number) => {});
-  const keyTowardNewerRef = useRef((_key: string) => false);
-  const keyScrollDeltaRef = useRef((_key: string) => 0);
+  const engageLiveTowardNewerRef = useRef<(deltaY: number) => void>(() => {});
+  const keyTowardNewerRef = useRef<(key: string) => boolean>(() => false);
+  const keyScrollDeltaRef = useRef<(key: string) => number>(() => 0);
   const scheduleRubberBandRef = useRef(() => {});
   const unlockScrollGeometryIfSettledRef = useRef(() => {});
-  const inFillRubberZoneRef = useRef(() => false);
-  const inOppositeRubberZoneRef = useRef(() => false);
+  const inFillRubberZoneRef = useRef<() => boolean>(() => false);
+  const inOppositeRubberZoneRef = useRef<() => boolean>(() => false);
   useEffect(() => {
     const release = () => {
       if (!scrollbarHeldRef.current) return;
@@ -835,8 +835,22 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
 
   const [showFillPauseLabels, setShowFillPauseLabels] = useState(false);
+  /** Bumps to remount labels so the highlight→dim fade restarts. */
+  const [fillPauseFadeKey, setFillPauseFadeKey] = useState(0);
+  const fillPauseLabelsShownRef = useRef(false);
+  /** One highlight pulse per scrollbar drag past the fill hard-stop. */
+  const fillPauseSbPulsedRef = useRef(false);
+  const pulseFillPauseLabels = () => {
+    setFillPauseFadeKey(k => k + 1);
+  };
   const syncFillPauseLabels = () => {
-    setShowFillPauseLabels(!!isManualPause && fillRubberFullyVisible());
+    const next = !!isManualPause && fillRubberFullyVisible();
+    if (next && !fillPauseLabelsShownRef.current) {
+      pulseFillPauseLabels();
+    }
+    if (!next) fillPauseSbPulsedRef.current = false;
+    fillPauseLabelsShownRef.current = next;
+    setShowFillPauseLabels(next);
   };
   useLayoutEffect(() => {
     syncFillPauseLabels();
@@ -1183,7 +1197,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     e.stopPropagation();
     const el = parentRef.current;
     if (!el) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     scrollbarHeldRef.current = true;
     lockScrollGeometry();
     sbDragRef.current = {
@@ -1198,13 +1212,29 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const el = parentRef.current;
     if (!drag || drag.pointerId !== e.pointerId || !el) return;
     noteUserScroll();
-    el.scrollTop = mapThumbDeltaToScrollTop(drag.startScrollTop, e.clientY - drag.startY);
+    const deltaY = e.clientY - drag.startY;
+    const before = el.scrollTop;
+    const next = mapThumbDeltaToScrollTop(drag.startScrollTop, deltaY);
+    el.scrollTop = next;
+    // Thumb dragged further into fill while already at the hard stop.
+    const towardFill = liveEdge === 'top' ? deltaY < 0 : deltaY > 0;
+    if (
+      isManualPause
+      && towardFill
+      && before === next
+      && fillRubberFullyVisible()
+      && !fillPauseSbPulsedRef.current
+    ) {
+      fillPauseSbPulsedRef.current = true;
+      pulseFillPauseLabels();
+    }
   };
 
   const onSbThumbPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = sbDragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
     sbDragRef.current = null;
+    fillPauseSbPulsedRef.current = false;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
     // Global pointerup listener also clears scrollbarHeldRef + rubber/unlock.
   };
@@ -1223,10 +1253,17 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     if (maxScroll <= 0) return;
     noteUserScroll();
     // Page toward the click; keep real scroll range (no virtual backlog travel).
+    const before = el.scrollTop;
     if (y < thumbTop) {
       el.scrollTop = Math.max(0, el.scrollTop - el.clientHeight);
+      if (isManualPause && liveEdge === 'top' && before === el.scrollTop && fillRubberFullyVisible()) {
+        pulseFillPauseLabels();
+      }
     } else if (y > thumbTop + thumbHeight) {
       el.scrollTop = Math.min(maxScroll, el.scrollTop + el.clientHeight);
+      if (isManualPause && liveEdge === 'bottom' && before === el.scrollTop && fillRubberFullyVisible()) {
+        pulseFillPauseLabels();
+      }
     }
   };
 
@@ -2307,56 +2344,36 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       {/* Fill-spacer overlay: Pause tooltip copy, only while manually paused and
           the fill rubber band is fully on screen. */}
       {showFillPauseLabels && fillRubberPx > 0 && (
-        <>
+        <Fragment key={fillPauseFadeKey}>
           <div
             aria-hidden
+            className="fill-rubber-pause-label"
             data-testid="fill-rubber-pause-label-left"
             style={{
-              position: 'absolute',
               left: 0,
               width: '50%',
               height: fillRubberPx,
               [liveEdge]: 0,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              color: 'var(--text-dim)',
-              fontStyle: 'italic',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              pointerEvents: 'none',
               zIndex: 19,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
             }}
           >
             ...paused manually...
           </div>
           <div
             aria-hidden
+            className="fill-rubber-pause-label"
             data-testid="fill-rubber-pause-label-right"
             style={{
-              position: 'absolute',
               right: 0,
               width: '50%',
               height: fillRubberPx,
               [liveEdge]: 0,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              color: 'var(--text-dim)',
-              fontStyle: 'italic',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              pointerEvents: 'none',
               zIndex: 19,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
             }}
           >
             ...paused manually...
           </div>
-        </>
+        </Fragment>
       )}
 
       {/* Marks pill — shown only while rows are marked (#310); the arrows jump
@@ -2386,6 +2403,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           noteUserScroll();
           if (wheelTowardNewer(e.deltaY)) {
             engageLiveTowardNewer(e.deltaY);
+            // Hard-stop overscroll: scrollTop may not change, so remount to
+            // restart the pause-label highlight fade on each attempt.
+            if (isManualPause && fillRubberFullyVisible()) {
+              pulseFillPauseLabels();
+            }
           }
           if (inOppositeRubberZone() || inFillRubberZone()) {
             lockScrollGeometry();
@@ -2611,6 +2633,26 @@ style.textContent = `
 
   .quick-last-seen-btn:hover {
     color: var(--accent-primary);
+  }
+
+  @keyframes fill-pause-label-fade {
+    from { color: var(--text-main); }
+    to { color: var(--text-dim); }
+  }
+
+  .fill-rubber-pause-label {
+    position: absolute;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-style: italic;
+    font-size: 0.75rem;
+    font-weight: 500;
+    pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+    color: var(--text-dim);
+    animation: fill-pause-label-fade 550ms ease-out forwards;
   }
 
   .jump-to-live-pill {

@@ -661,10 +661,12 @@ function App() {
     setListFollow(true);
   }, [setCachePaused]);
 
-  useEffect(() => {
-    const next = pauseModeForListFollow(pauseMode, listFollow);
-    if (next !== pauseMode) setPauseMode(next);
-  }, [listFollow, pauseMode]);
+  // Couple list live-follow to pause mode in the same turn as follow changes
+  // (table scroll unfollow, chart jump, etc.) — avoid syncing via an effect.
+  const handleListFollowChange = useCallback((follow: boolean) => {
+    setListFollow(follow);
+    setPauseMode(prev => pauseModeForListFollow(prev, follow));
+  }, []);
 
   useEffect(() => {
     setCachePaused(isPaused);
@@ -742,15 +744,15 @@ function App() {
     }
     const key = anchorKey(nearest);
     setFlaggedTelegramKeys(prev => prev.includes(key) ? prev : [...prev, key]);
-    setListFollow(false);
+    handleListFollowChange(false);
     setListAnchorKey(key);
     setActivePanel('list');
-  }, [liveTelegrams]);
+  }, [liveTelegrams, handleListFollowChange]);
 
   // Last value in a write row: open the telegram list and center that telegram.
   // Marking happens in the table, and only if the telegram is not filtered out.
   const handleGotoTelegram = useCallback((telegram: Telegram) => {
-    setListFollow(false);
+    handleListFollowChange(false);
     // Drop a restored anchor so mounting the list does not pin a different row
     // after this jump. The table captures a new anchor once it has centered.
     setListAnchorKey(null);
@@ -758,7 +760,7 @@ function App() {
     setActivePanel('list');
     listGotoSeq.current += 1;
     setListGoto({ id: listGotoSeq.current, telegram });
-  }, []);
+  }, [handleListFollowChange]);
 
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
@@ -781,9 +783,9 @@ function App() {
   const handleShowGaTelegrams = useCallback((address: string) => {
     handleFilterGAs([address]);
     setFiltersEnabled(true);
-    setListFollow(true);
+    handleListFollowChange(true);
     setActivePanel('list');
-  }, [handleFilterGAs]);
+  }, [handleFilterGAs, handleListFollowChange]);
 
   // Time-Delta-Context window, now edited from the telegram list's DELTA TIME
   // quick-filter cell rather than the filter pane (#309, #371).
@@ -1437,7 +1439,7 @@ function App() {
                     onDeltaContextChange={handleDeltaContextChange}
                     onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
                     listFollow={listFollow}
-                    onListFollowChange={setListFollow}
+                    onListFollowChange={handleListFollowChange}
                     isPaused={isPaused}
                     isManualPause={pauseMode === 'manual'}
                     pausedCount={pausedCount}
