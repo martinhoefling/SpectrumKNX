@@ -166,6 +166,9 @@ const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 /** Fill-axis overscroll rubber; rubber-bands back to the edge telegram. */
 const FILL_RUBBER_PX = Math.round(ROW_ESTIMATE / 2);
 const EDGE_SCROLL_EPS = 20;
+/** Visual scrollbar track width (matches header paddingRight / index.css). */
+const LIST_SB_WIDTH_PX = 8;
+const LIST_SB_MIN_THUMB_PX = 20;
 
 function timeMs(timestamp: string): number {
   return new Date(timestamp).getTime();
@@ -1121,9 +1124,121 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
   };
 
+  // Paint-only overlay thumb — mutate DOM (no useState) so sync cannot trigger
+  // an extra render that would clear the sticky newer-pill across a flush gap.
+  const sbTrackRef = useRef<HTMLDivElement | null>(null);
+  const sbThumbRef = useRef<HTMLDivElement | null>(null);
+  const sbDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startScrollTop: number;
+  } | null>(null);
+
+  /** Paint-only thumb: size/position as if pausedCount rows were in scrollHeight. */
+  const syncOverlayScrollbar = () => {
+    const el = parentRef.current;
+    const track = sbTrackRef.current;
+    const thumb = sbThumbRef.current;
+    if (!el || !track || !thumb) return;
+    const { clientHeight, scrollHeight, scrollTop } = el;
+    const backlogPx = telegramRows.length > 0 ? Math.max(0, pausedCount) * ROW_ESTIMATE : 0;
+    const virtSH = scrollHeight + backlogPx;
+    if (virtSH <= clientHeight + 0.5) {
+      track.style.display = 'none';
+      return;
+    }
+    track.style.display = '';
+    const thumbHeight = Math.max(LIST_SB_MIN_THUMB_PX, (clientHeight * clientHeight) / virtSH);
+    const virtMaxScroll = Math.max(0, virtSH - clientHeight);
+    const trackTravel = Math.max(0, clientHeight - thumbHeight);
+    const virtScrollTop = liveEdge === 'top'
+      ? Math.min(virtMaxScroll, Math.max(0, scrollTop + backlogPx))
+      : Math.min(virtMaxScroll, Math.max(0, scrollTop));
+    const top = virtMaxScroll > 0 ? (virtScrollTop / virtMaxScroll) * trackTravel : 0;
+    thumb.style.top = `${top}px`;
+    thumb.style.height = `${thumbHeight}px`;
+  };
+
+  const mapThumbDeltaToScrollTop = (startScrollTop: number, deltaY: number) => {
+    const el = parentRef.current;
+    if (!el) return startScrollTop;
+    const { clientHeight, scrollHeight } = el;
+    const backlogPx = telegramRows.length > 0 ? Math.max(0, pausedCount) * ROW_ESTIMATE : 0;
+    const virtSH = scrollHeight + backlogPx;
+    const thumbHeight = Math.max(LIST_SB_MIN_THUMB_PX, (clientHeight * clientHeight) / Math.max(virtSH, 1));
+    const trackTravel = Math.max(0, clientHeight - thumbHeight);
+    const maxScroll = Math.max(0, scrollHeight - clientHeight);
+    const virtMaxScroll = Math.max(0, virtSH - clientHeight);
+    if (trackTravel <= 0 || maxScroll <= 0) return startScrollTop;
+    const virtDelta = (deltaY / trackTravel) * virtMaxScroll;
+    if (liveEdge === 'top') {
+      const startVirt = startScrollTop + backlogPx;
+      return Math.max(0, Math.min(maxScroll, startVirt + virtDelta - backlogPx));
+    }
+    return Math.max(0, Math.min(maxScroll, startScrollTop + virtDelta));
+  };
+
+  const onSbThumbPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = parentRef.current;
+    if (!el) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    scrollbarHeldRef.current = true;
+    lockScrollGeometry();
+    sbDragRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      startScrollTop: el.scrollTop,
+    };
+  };
+
+  const onSbThumbPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = sbDragRef.current;
+    const el = parentRef.current;
+    if (!drag || drag.pointerId !== e.pointerId || !el) return;
+    noteUserScroll();
+    el.scrollTop = mapThumbDeltaToScrollTop(drag.startScrollTop, e.clientY - drag.startY);
+  };
+
+  const onSbThumbPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = sbDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    sbDragRef.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    // Global pointerup listener also clears scrollbarHeldRef + rubber/unlock.
+  };
+
+  const onSbTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    const el = parentRef.current;
+    const thumb = sbThumbRef.current;
+    if (!el || !thumb || thumb.clientHeight <= 0) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const thumbTop = thumb.offsetTop;
+    const thumbHeight = thumb.offsetHeight;
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    if (maxScroll <= 0) return;
+    noteUserScroll();
+    // Page toward the click; keep real scroll range (no virtual backlog travel).
+    if (y < thumbTop) {
+      el.scrollTop = Math.max(0, el.scrollTop - el.clientHeight);
+    } else if (y > thumbTop + thumbHeight) {
+      el.scrollTop = Math.min(maxScroll, el.scrollTop + el.clientHeight);
+    }
+  };
+
+  useLayoutEffect(() => {
+    syncOverlayScrollbar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pausedCount, telegramRows.length, virtTotalPx, oppositeSpacerPx, liveEdge, fillRubberPx, viewportHeight]);
+
   const handleScroll = () => {
     // Labels track fill visibility even for programmatic rubber/settle scrolls.
     syncFillPauseLabels();
+    syncOverlayScrollbar();
     // Ignore the scrolls our own compensation triggers.
     if (programmaticScrollRef.current || refindingAnchorRef.current) return;
     markCursorRef.current = null;
@@ -2288,7 +2403,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         }}
         // overflow-anchor off: we compensate scrollTop manually on prepend (#202),
         // so the browser's native anchoring must not also move the viewport.
-        style={{ flex: 1, overflowY: 'auto', position: 'relative', overflowAnchor: 'none' }}
+        // paddingRight reserves space for the visual overlay scrollbar track.
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          position: 'relative',
+          overflowAnchor: 'none',
+          paddingRight: LIST_SB_WIDTH_PX,
+        }}
         className="custom-scrollbar"
       >
         {telegramRows.length === 0 ? (
@@ -2373,6 +2495,28 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           </>
         )}
       </div>
+
+      {/* Visual scrollbar only — thumb sized as if pausedCount rows were in
+          scrollHeight; real scrollHeight / scroll behavior unchanged.
+          Always mounted; syncOverlayScrollbar toggles display. */}
+      <div
+        ref={sbTrackRef}
+        className="list-sb-track"
+        data-testid="list-scrollbar-track"
+        aria-hidden
+        style={{ display: 'none' }}
+        onPointerDown={onSbTrackPointerDown}
+      >
+        <div
+          ref={sbThumbRef}
+          className="list-sb-thumb"
+          data-testid="list-scrollbar-thumb"
+          onPointerDown={onSbThumbPointerDown}
+          onPointerMove={onSbThumbPointerMove}
+          onPointerUp={onSbThumbPointerUp}
+          onPointerCancel={onSbThumbPointerUp}
+        />
+      </div>
       </div>
     </div>
   );
@@ -2381,6 +2525,39 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
 // Add styles for quick filter buttons and resize handles
 const style = document.createElement('style');
 style.textContent = `
+  /* Hide native scrollbar on the telegram list port — overlay thumb paints instead. */
+  .custom-scrollbar {
+    scrollbar-width: none;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .list-sb-track {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: ${LIST_SB_WIDTH_PX}px;
+    z-index: 15;
+    pointer-events: auto;
+  }
+
+  .list-sb-thumb {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    background: var(--scrollbar-thumb);
+    border-radius: 10px;
+    cursor: default;
+    pointer-events: auto;
+  }
+
+  .list-sb-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+
   .quick-filter-btn, .quick-visualize-btn, .quick-last-seen-btn, .quick-send-btn {
     background: transparent;
     border: none;

@@ -1939,6 +1939,52 @@ test('pausedCount does not grow scrollHeight; pill still shows backlog', () => {
   }
 });
 
+test('overlay scrollbar thumb shrinks with pausedCount while scrollHeight stays fixed', () => {
+  scrollBlockSize = 800;
+  const rows = makeList(10, 9);
+  const props = (pausedN: number) => (
+    <TelegramTable
+      telegrams={rows}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      listFollow={false}
+      onListFollowChange={vi.fn()}
+      isPaused={pausedN > 0}
+      pausedCount={pausedN}
+    />
+  );
+
+  try {
+    const view = render(props(0));
+    const port = view.container.querySelector('.custom-scrollbar') as HTMLElement;
+    fireEvent.scroll(port);
+    const track = screen.getByTestId('list-scrollbar-track');
+    const thumb0 = screen.getByTestId('list-scrollbar-thumb');
+    expect(track.style.display).not.toBe('none');
+    const h0 = Number.parseFloat(thumb0.style.height);
+    expect(h0).toBeGreaterThan(0);
+    const sh0 = port.scrollHeight;
+
+    view.rerender(props(5));
+    fireEvent.scroll(port);
+    const thumb5 = screen.getByTestId('list-scrollbar-thumb');
+    const h5 = Number.parseFloat(thumb5.style.height);
+    expect(port.scrollHeight).toBe(sh0);
+    expect(h5).toBeLessThan(h0);
+    expect(h5).toBeCloseTo(
+      Math.max(20, (800 * 800) / (sh0 + 5 * 85)),
+      0,
+    );
+    expect(screen.getByRole('button', { name: '5 newer telegrams' })).toBeInTheDocument();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
 test('settled live edge stays on newest published row when pausedCount is set', () => {
   const ROW = 85;
   scrollBlockSize = ROW * 2;
