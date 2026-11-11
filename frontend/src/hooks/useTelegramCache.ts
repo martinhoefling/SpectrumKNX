@@ -421,6 +421,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
 
   const setPaused = useCallback(
     (paused: boolean) => {
+      if (pausedRef.current === paused) return;
       pausedRef.current = paused;
       setPausedCount(0);
       // Resuming reveals everything ingested while frozen.
@@ -437,6 +438,9 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
     pendingRef.current = [];
     coverageRef.current!.clear();
     saveCoverage();
+    // Drop the pause-backlog counter too — cleared telegrams must not keep the
+    // jump-to-live pill alive with a count that can never appear in the list.
+    setPausedCount(0);
     setTelegrams([]);
     await cacheRef.current!.clear().catch(() => {});
   }, [trackRemoved, saveCoverage]);

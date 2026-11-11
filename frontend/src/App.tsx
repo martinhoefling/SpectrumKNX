@@ -32,6 +32,12 @@ import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
 import { useTelegramCache } from './hooks/useTelegramCache';
+import {
+  type PauseMode,
+  pauseModeForListFollow,
+  pauseModeForToggle,
+  cachePausedForMode,
+} from './utils/bufferPauseMode';
 import { rangeToMs } from './utils/historyLoad';
 import { HistorySearch } from './components/HistorySearch';
 import { ImportExportView } from './components/ImportExportView';
@@ -332,7 +338,10 @@ function App() {
     loadError: historyLoadError,
     clear: clearTelegrams,
   } = useTelegramCache(loadLimit, restoreOnStartup);
-  const [isPaused, setIsPaused] = useState(false);
+  const [pauseMode, setPauseMode] = useState<PauseMode>('playing');
+  // Snapshot frozen in auto/manual; flush moves mode to playing without
+  // necessarily enabling live-follow (edge flush keeps the viewport + pill).
+  const isPaused = cachePausedForMode(pauseMode);
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -604,11 +613,62 @@ function App() {
   }, [rateMode]);
 
   // ── Pause / Resume ──────────────────────────────────────────────────────────
+  // Playing → Pause latches as manual. While paused, the Pause icon toggles
+  // auto ↔ manual (stays frozen). Manual→Auto publishes the backlog once, then
+  // re-freezes. Empty buffer ("No data available") locks Paused manually.
+  // Resume via jump-to-live, or auto edge-flush / follow-while-auto.
+  const bufferEmpty = liveTelegrams.length === 0;
   const togglePause = () => {
-    const next = !isPaused;
-    setCachePaused(next);
-    setIsPaused(next);
+    if (bufferEmpty) return;
+    const next = pauseModeForToggle(pauseMode);
+    if (pauseMode === 'manual' && next === 'auto') {
+      // Reveal telegrams ingested during manual pause, then stay auto-frozen.
+      setListFollow(false);
+      setCachePaused(false);
+      setCachePaused(true);
+      setPauseMode('auto');
+      return;
+    }
+    setPauseMode(next);
+    // Sync cache in the same turn so the pill does not see isPaused flip
+    // before publish/pausedCount update.
+    setCachePaused(cachePausedForMode(next));
+    // Auto-pause implies not live-following; otherwise pauseModeForListFollow
+    // would immediately promote auto → playing while follow is still on.
+    if (next === 'auto') setListFollow(false);
   };
+
+  // Status icon: Play=running, Pause=frozen; color separates auto vs manual.
+  const pauseTitle =
+    pauseMode === 'playing' ? 'Playing'
+    : pauseMode === 'auto' ? 'Paused automatically'
+    : 'Paused manually';
+  const pauseColor =
+    pauseMode === 'playing' ? 'var(--success)'
+    : pauseMode === 'auto' ? 'var(--text-dim)'
+    : 'var(--accent-primary)';
+
+  const flushPauseBuffer = useCallback(() => {
+    if (pauseMode !== 'auto') return;
+    setPauseMode('playing');
+    setCachePaused(false);
+  }, [pauseMode, setCachePaused]);
+
+  // Newer-pill: always Play + follow + flush (including manual pause latch).
+  const jumpToLiveResume = useCallback(() => {
+    setPauseMode('playing');
+    setCachePaused(false);
+    setListFollow(true);
+  }, [setCachePaused]);
+
+  useEffect(() => {
+    const next = pauseModeForListFollow(pauseMode, listFollow);
+    if (next !== pauseMode) setPauseMode(next);
+  }, [listFollow, pauseMode]);
+
+  useEffect(() => {
+    setCachePaused(isPaused);
+  }, [isPaused, setCachePaused]);
 
   const toggleColumn = (col: string) =>
     setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }));
@@ -857,7 +917,12 @@ function App() {
                     {/* Buffer-related actions live with the count (#284): clear + load history */}
                     <button
                       className="icon-button"
-                      onClick={() => { void clearTelegrams(); }}
+                      onClick={() => {
+                        setPauseMode('manual');
+                        setCachePaused(true);
+                        setListFollow(false);
+                        void clearTelegrams();
+                      }}
                       title="Clear (also wipes the local telegram cache)"
                       style={{ color: 'var(--text-dim)', padding: '0.15rem' }}
                     >
@@ -888,10 +953,18 @@ function App() {
                     <button
                       className="icon-button"
                       onClick={togglePause}
-                      title={isPaused ? 'Resume' : 'Pause'}
-                      style={{ color: isPaused ? 'var(--accent-primary)' : 'var(--text-dim)', padding: '0.15rem' }}
+                      title={pauseTitle}
+                      disabled={bufferEmpty}
+                      style={{
+                        color: pauseColor,
+                        padding: '0.15rem',
+                        opacity: bufferEmpty ? 0.45 : 1,
+                        cursor: bufferEmpty ? 'not-allowed' : 'pointer',
+                      }}
                     >
-                      {isPaused ? <Play size={15} fill="currentColor" /> : <Pause size={15} fill="currentColor" />}
+                      {pauseMode === 'playing'
+                        ? <Play size={15} fill="currentColor" />
+                        : <Pause size={15} fill="currentColor" />}
                     </button>
                     <span style={{ color: 'var(--text-main)', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                       {activeFilterCount
@@ -899,11 +972,6 @@ function App() {
                         : <>{liveTelegrams.length}{bufferLimitWarning}</>}
                     </span>
                   </span>
-                  {isPaused && (
-                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--warning-text)' }}>
-                      Paused: <span style={{ fontWeight: 600 }}>{pausedCount}</span>
-                    </span>
-                  )}
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     WS: <span style={{ color: isConnected ? 'var(--success)' : 'var(--error)', fontWeight: 500 }}>{isConnected ? 'Active' : 'Offline'}</span>
                   </span>
@@ -1370,6 +1438,11 @@ function App() {
                     onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
                     listFollow={listFollow}
                     onListFollowChange={setListFollow}
+                    isPaused={isPaused}
+                    isManualPause={pauseMode === 'manual'}
+                    pausedCount={pausedCount}
+                    onPauseFlush={flushPauseBuffer}
+                    onJumpToLive={jumpToLiveResume}
                     listAnchorKey={listAnchorKey}
                     onListAnchorKeyChange={setListAnchorKey}
                     markedKeys={markedTelegramKeys}

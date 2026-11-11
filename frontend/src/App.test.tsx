@@ -1,6 +1,8 @@
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { expect, test, vi } from 'vitest';
+import React from 'react';
 import App from './App';
+import { makeTelegram } from './test/telegramFactory';
 
 // Mock the WebSocket hook
 vi.mock('./hooks/useWebSocket', () => ({
@@ -9,6 +11,49 @@ vi.mock('./hooks/useWebSocket', () => ({
     telegrams: [],
   }),
 }));
+
+/** Controllable cache so pause/clear tests can leave the empty-buffer lock. */
+vi.mock('./hooks/useTelegramCache', () => {
+  return {
+    useTelegramCache: () => {
+      const [telegrams, setTelegrams] = React.useState(() => [makeTelegram({ raw_hex: '0xseed' })]);
+      const [pausedCount, setPausedCount] = React.useState(0);
+      const pausedRef = React.useRef(false);
+      const backlogRef = React.useRef<ReturnType<typeof makeTelegram>[]>([]);
+      return {
+        telegrams,
+        addLive: (t: ReturnType<typeof makeTelegram>) => {
+          if (pausedRef.current) {
+            backlogRef.current.push(t);
+            setPausedCount(c => c + 1);
+          } else {
+            setTelegrams(prev => [t, ...prev]);
+          }
+        },
+        setConnected: () => {},
+        setPaused: (paused: boolean) => {
+          if (pausedRef.current === paused) return;
+          pausedRef.current = paused;
+          setPausedCount(0);
+          if (!paused && backlogRef.current.length > 0) {
+            const batch = backlogRef.current;
+            backlogRef.current = [];
+            setTelegrams(prev => [...batch, ...prev]);
+          }
+        },
+        pausedCount,
+        loadRange: async () => {},
+        isLoading: false,
+        loadError: null,
+        clear: async () => {
+          backlogRef.current = [];
+          setPausedCount(0);
+          setTelegrams([]);
+        },
+      };
+    },
+  };
+});
 
 // Mock fetch calls
 vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
@@ -42,7 +87,35 @@ test('play/pause and the filter toggle live with the Telegram List (#374)', asyn
   render(<App />);
   // The list panel owns its own header with the filter toggle and play/pause.
   expect(await screen.findByRole('button', { name: 'Toggle filter panel' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Playing' })).toBeInTheDocument();
+});
+
+test('manual pause latches as Paused manually', async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Playing' }));
+  expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+});
+
+test('Pause icon toggles Paused manually ↔ Paused automatically', async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Playing' }));
+  expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Paused manually' }));
+  expect(screen.getByRole('button', { name: 'Paused automatically' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Paused automatically' }));
+  expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+});
+
+test('clearing the buffer locks Paused manually while empty', async () => {
+  render(<App />);
+  expect(await screen.findByRole('button', { name: 'Playing' })).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByTitle('Clear (also wipes the local telegram cache)'));
+  });
+  const pauseBtn = await screen.findByRole('button', { name: 'Paused manually' });
+  expect(pauseBtn).toBeDisabled();
+  fireEvent.click(pauseBtn);
+  expect(screen.getByRole('button', { name: 'Paused manually' })).toBeDisabled();
 });
 
 test('companion mode warns while Home Assistant\'s store holds pre-UTC timestamps (#462)', async () => {

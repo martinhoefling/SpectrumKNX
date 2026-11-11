@@ -485,6 +485,26 @@ describe('useTelegramCache', () => {
     expect(JSON.parse(localStorage.getItem(COVERAGE_STORAGE_KEY)!)).toEqual([]);
   });
 
+  it('clear resets pausedCount so the jump pill cannot show deleted telegrams', async () => {
+    const { result } = renderHook(() => useTelegramCache(1000));
+    await settle(result);
+
+    act(() => {
+      result.current.addLive(tg(1000, 'a'));
+      result.current.setPaused(true);
+      result.current.addLive(tg(2000, 'b'));
+      result.current.addLive(tg(3000, 'c'));
+    });
+    expect(result.current.pausedCount).toBe(2);
+
+    await act(async () => {
+      await result.current.clear();
+    });
+
+    expect(result.current.telegrams).toEqual([]);
+    expect(result.current.pausedCount).toBe(0);
+  });
+
   it('evicts the oldest telegrams when shrinking the buffer limit', async () => {
     const { result, rerender } = renderHook(({ limit }) => useTelegramCache(limit), {
       initialProps: { limit: 3 },
