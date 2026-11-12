@@ -5,27 +5,10 @@ import { makeTelegram } from '../test/telegramFactory';
 import { anchorKey } from '../utils/anchorKey';
 import type { Telegram } from '../hooks/useWebSocket';
 import { DEFAULT_FILTERS } from '../types/filters';
+import { installVirtualLayout } from '../test/virtualLayout';
 
 // jsdom has no layout: give the virtualizer a viewport so it renders rows.
-beforeAll(() => {
-  globalThis.ResizeObserver = class {
-    private cb: ResizeObserverCallback;
-    constructor(cb: ResizeObserverCallback) {
-      this.cb = cb;
-    }
-    observe(el: Element) {
-      const size = { inlineSize: 1000, blockSize: el.classList.contains('log-row') ? 85 : 800 };
-      this.cb(
-        [{ target: el, contentRect: el.getBoundingClientRect(), borderBoxSize: [size], contentBoxSize: [size] } as unknown as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
-    }
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  Element.prototype.getBoundingClientRect = () =>
-    ({ width: 1000, height: 800, top: 0, bottom: 800, left: 0, right: 1000, x: 0, y: 0, toJSON: () => {} }) as DOMRect;
-});
+beforeAll(installVirtualLayout);
 
 const visibleColumns = {
   time: true, delta: true, source: true, sourceName: true,

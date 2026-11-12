@@ -36,7 +36,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('write row renders On/Off for a DPT 1 GA and sends a boolean, like the send bar (#213)', async () => {
+test('write row renders the DPT 1 subtype values and sends a boolean, like the send bar (#213)', async () => {
   const fetchMock = mockFetch({
     '/api/telegrams': { telegrams: [] },
     '/api/knx/send': { status: 'sent' },
@@ -55,7 +55,8 @@ test('write row renders On/Off for a DPT 1 GA and sends a boolean, like the send
 
   // DPT-aware controls instead of a free value field that would cause a ConversionError.
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText('On'));
+  // DPT 1.011 (state) offers inactive/active, not On/Off.
+  fireEvent.click(screen.getByText('Active'));
 
   await waitFor(() => {
     const sendCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/knx/send'));

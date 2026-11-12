@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useReducer, useSyncExternalStore } from 'react';
 
 // Persisted expand/collapse state for the Building Structure tree.
 //
@@ -55,10 +55,14 @@ const setOverride = (key: string, open: boolean) => {
  */
 export function useExpanded(key: string, defaultOpen: boolean): [boolean, () => void] {
   useSyncExternalStore(subscribe, getSnapshot);
+  // The store subscription is made in an effect. A toggle before it ran (right
+  // after the tree mounted) would notify nobody, so re-render this node directly.
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   const open = key in overrides ? overrides[key] : defaultOpen;
   const toggle = useCallback(() => {
     const current = key in overrides ? overrides[key] : defaultOpen;
     setOverride(key, !current);
+    rerender();
   }, [key, defaultOpen]);
   return [open, toggle];
 }
