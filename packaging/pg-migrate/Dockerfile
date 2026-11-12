@@ -46,6 +46,12 @@ RUN apt-get update \
 COPY packaging/pg-migrate/migrate.sh /usr/local/bin/pg-migrate
 RUN chmod +x /usr/local/bin/pg-migrate
 
+# The image runs as postgres. postgresql-common 294 creates /var/lib/postgresql
+# owned by root, so give the data directory to postgres explicitly, as the
+# add-on image does.
+RUN install -d -o postgres -g postgres /var/lib/postgresql/data \
+    && chown postgres:postgres /var/lib/postgresql
+
 ENV DATADIR=/var/lib/postgresql/data
 ENV TARGET_MAJOR=18
 USER postgres
