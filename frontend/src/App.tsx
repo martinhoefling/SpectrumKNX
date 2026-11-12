@@ -32,6 +32,12 @@ import { useTheme } from './hooks/useTheme';
 import { apiUrl, wsUrl } from './utils/basePath';
 import { HistoryLoader } from './components/HistoryLoader';
 import { useTelegramCache } from './hooks/useTelegramCache';
+import {
+  type PauseMode,
+  pauseModeForListFollow,
+  pauseModeForToggle,
+  cachePausedForMode,
+} from './utils/bufferPauseMode';
 import { rangeToMs } from './utils/historyLoad';
 import { HistorySearch } from './components/HistorySearch';
 import { ImportExportView } from './components/ImportExportView';
@@ -327,12 +333,16 @@ function App() {
     setConnected: setCacheConnected,
     setPaused: setCachePaused,
     pausedCount,
+    revealPaused,
     loadRange,
     isLoading: isHistoryLoading,
     loadError: historyLoadError,
     clear: clearTelegrams,
   } = useTelegramCache(loadLimit, restoreOnStartup);
-  const [isPaused, setIsPaused] = useState(false);
+  const [pauseMode, setPauseMode] = useState<PauseMode>('playing');
+  // Snapshot frozen in auto/manual; flush moves mode to playing without
+  // necessarily enabling live-follow (edge flush keeps the viewport + pill).
+  const isPaused = cachePausedForMode(pauseMode);
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -604,11 +614,75 @@ function App() {
   }, [rateMode]);
 
   // ── Pause / Resume ──────────────────────────────────────────────────────────
+  // Playing → Pause latches as manual. While paused, the Pause icon toggles
+  // auto ↔ manual (stays frozen). Manual→Auto keeps the backlog in the pause
+  // buffer; the table fills the fill-spacer with its oldest row and feeds the
+  // rest in as the user scrolls toward the live edge. Empty buffer ("No data
+  // available") locks Paused manually. Resume via jump-to-live, or auto
+  // edge-flush / follow-while-auto.
+  const bufferEmpty = liveTelegrams.length === 0;
   const togglePause = () => {
-    const next = !isPaused;
-    setCachePaused(next);
-    setIsPaused(next);
+    if (bufferEmpty) return;
+    const next = pauseModeForToggle(pauseMode);
+    if (pauseMode === 'manual' && next === 'auto') {
+      setListFollow(false);
+      setPauseMode('auto');
+      return;
+    }
+    setPauseMode(next);
+    // Sync cache in the same turn so the pill does not see isPaused flip
+    // before publish/pausedCount update.
+    setCachePaused(cachePausedForMode(next));
+    // Auto-pause implies not live-following; otherwise pauseModeForListFollow
+    // would immediately promote auto → playing while follow is still on.
+    if (next === 'auto') setListFollow(false);
   };
+
+  // Status icon: Play=running, Pause=frozen; color separates auto vs manual.
+  const pauseTitle =
+    pauseMode === 'playing' ? 'Playing'
+    : pauseMode === 'auto' ? 'Paused automatically'
+    : 'Paused manually';
+  const pauseColor =
+    pauseMode === 'playing' ? 'var(--success)'
+    : pauseMode === 'auto' ? 'var(--text-dim)'
+    : 'var(--accent-primary)';
+
+  const flushPauseBuffer = useCallback(() => {
+    if (pauseMode !== 'auto') return;
+    setPauseMode('playing');
+    setCachePaused(false);
+  }, [pauseMode, setCachePaused]);
+
+  // Metered flush: reveal the oldest `n` backlog rows while staying auto-paused,
+  // so the table can scroll them in line by line. Once the backlog is gone the
+  // mode returns to playing (same as a full flush). Manual pause never reveals.
+  const revealPauseBuffer = useCallback((n: number) => {
+    if (pauseMode !== 'auto') return;
+    const remaining = revealPaused(n);
+    if (remaining <= 0) {
+      setPauseMode('playing');
+      setCachePaused(false);
+    }
+  }, [pauseMode, revealPaused, setCachePaused]);
+
+  // Newer-pill: always Play + follow + flush (including manual pause latch).
+  const jumpToLiveResume = useCallback(() => {
+    setPauseMode('playing');
+    setCachePaused(false);
+    setListFollow(true);
+  }, [setCachePaused]);
+
+  // Couple list live-follow to pause mode in the same turn as follow changes
+  // (table scroll unfollow, chart jump, etc.) — avoid syncing via an effect.
+  const handleListFollowChange = useCallback((follow: boolean) => {
+    setListFollow(follow);
+    setPauseMode(prev => pauseModeForListFollow(prev, follow));
+  }, []);
+
+  useEffect(() => {
+    setCachePaused(isPaused);
+  }, [isPaused, setCachePaused]);
 
   const toggleColumn = (col: string) =>
     setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }));
@@ -682,15 +756,15 @@ function App() {
     }
     const key = anchorKey(nearest);
     setFlaggedTelegramKeys(prev => prev.includes(key) ? prev : [...prev, key]);
-    setListFollow(false);
+    handleListFollowChange(false);
     setListAnchorKey(key);
     setActivePanel('list');
-  }, [liveTelegrams]);
+  }, [liveTelegrams, handleListFollowChange]);
 
   // Last value in a write row: open the telegram list and center that telegram.
   // Marking happens in the table, and only if the telegram is not filtered out.
   const handleGotoTelegram = useCallback((telegram: Telegram) => {
-    setListFollow(false);
+    handleListFollowChange(false);
     // Drop a restored anchor so mounting the list does not pin a different row
     // after this jump. The table captures a new anchor once it has centered.
     setListAnchorKey(null);
@@ -698,7 +772,7 @@ function App() {
     setActivePanel('list');
     listGotoSeq.current += 1;
     setListGoto({ id: listGotoSeq.current, telegram });
-  }, []);
+  }, [handleListFollowChange]);
 
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
@@ -721,9 +795,9 @@ function App() {
   const handleShowGaTelegrams = useCallback((address: string) => {
     handleFilterGAs([address]);
     setFiltersEnabled(true);
-    setListFollow(true);
+    handleListFollowChange(true);
     setActivePanel('list');
-  }, [handleFilterGAs]);
+  }, [handleFilterGAs, handleListFollowChange]);
 
   // Time-Delta-Context window, now edited from the telegram list's DELTA TIME
   // quick-filter cell rather than the filter pane (#309, #371).
@@ -857,7 +931,12 @@ function App() {
                     {/* Buffer-related actions live with the count (#284): clear + load history */}
                     <button
                       className="icon-button"
-                      onClick={() => { void clearTelegrams(); }}
+                      onClick={() => {
+                        setPauseMode('manual');
+                        setCachePaused(true);
+                        setListFollow(false);
+                        void clearTelegrams();
+                      }}
                       title="Clear (also wipes the local telegram cache)"
                       style={{ color: 'var(--text-dim)', padding: '0.15rem' }}
                     >
@@ -888,10 +967,18 @@ function App() {
                     <button
                       className="icon-button"
                       onClick={togglePause}
-                      title={isPaused ? 'Resume' : 'Pause'}
-                      style={{ color: isPaused ? 'var(--accent-primary)' : 'var(--text-dim)', padding: '0.15rem' }}
+                      title={pauseTitle}
+                      disabled={bufferEmpty}
+                      style={{
+                        color: pauseColor,
+                        padding: '0.15rem',
+                        opacity: bufferEmpty ? 0.45 : 1,
+                        cursor: bufferEmpty ? 'not-allowed' : 'pointer',
+                      }}
                     >
-                      {isPaused ? <Play size={15} fill="currentColor" /> : <Pause size={15} fill="currentColor" />}
+                      {pauseMode === 'playing'
+                        ? <Play size={15} fill="currentColor" />
+                        : <Pause size={15} fill="currentColor" />}
                     </button>
                     <span style={{ color: 'var(--text-main)', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                       {activeFilterCount
@@ -899,11 +986,6 @@ function App() {
                         : <>{liveTelegrams.length}{bufferLimitWarning}</>}
                     </span>
                   </span>
-                  {isPaused && (
-                    <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--warning-text)' }}>
-                      Paused: <span style={{ fontWeight: 600 }}>{pausedCount}</span>
-                    </span>
-                  )}
                   <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
                     WS: <span style={{ color: isConnected ? 'var(--success)' : 'var(--error)', fontWeight: 500 }}>{isConnected ? 'Active' : 'Offline'}</span>
                   </span>
@@ -1369,7 +1451,13 @@ function App() {
                     onDeltaContextChange={handleDeltaContextChange}
                     onDeltaContextEnabledChange={handleDeltaContextEnabledChange}
                     listFollow={listFollow}
-                    onListFollowChange={setListFollow}
+                    onListFollowChange={handleListFollowChange}
+                    isPaused={isPaused}
+                    isManualPause={pauseMode === 'manual'}
+                    pausedCount={pausedCount}
+                    onPauseFlush={flushPauseBuffer}
+                    onPauseReveal={revealPauseBuffer}
+                    onJumpToLive={jumpToLiveResume}
                     listAnchorKey={listAnchorKey}
                     onListAnchorKeyChange={setListAnchorKey}
                     markedKeys={markedTelegramKeys}
