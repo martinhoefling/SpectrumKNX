@@ -12,6 +12,14 @@ vi.mock('./hooks/useWebSocket', () => ({
   }),
 }));
 
+/** Test handle into the mocked cache: inject live telegrams, observe reveals. */
+const cacheCtl = vi.hoisted(() => ({
+  addLive: null as null | ((t: { timestamp: string }) => void),
+  revealCalls: [] as number[],
+  /** Per-test hook run on every reveal (e.g. to simulate the row pin). */
+  onReveal: null as null | ((n: number) => void),
+}));
+
 /** Controllable cache so pause/clear tests can leave the empty-buffer lock. */
 vi.mock('./hooks/useTelegramCache', () => {
   return {
@@ -20,16 +28,18 @@ vi.mock('./hooks/useTelegramCache', () => {
       const [pausedCount, setPausedCount] = React.useState(0);
       const pausedRef = React.useRef(false);
       const backlogRef = React.useRef<ReturnType<typeof makeTelegram>[]>([]);
+      const addLive = (t: ReturnType<typeof makeTelegram>) => {
+        if (pausedRef.current) {
+          backlogRef.current.push(t);
+          setPausedCount(c => c + 1);
+        } else {
+          setTelegrams(prev => [t, ...prev]);
+        }
+      };
+      cacheCtl.addLive = addLive as (t: { timestamp: string }) => void;
       return {
         telegrams,
-        addLive: (t: ReturnType<typeof makeTelegram>) => {
-          if (pausedRef.current) {
-            backlogRef.current.push(t);
-            setPausedCount(c => c + 1);
-          } else {
-            setTelegrams(prev => [t, ...prev]);
-          }
-        },
+        addLive,
         setConnected: () => {},
         setPaused: (paused: boolean) => {
           if (pausedRef.current === paused) return;
@@ -42,6 +52,16 @@ vi.mock('./hooks/useTelegramCache', () => {
           }
         },
         pausedCount,
+        revealPaused: (n: number) => {
+          cacheCtl.revealCalls.push(n);
+          if (!pausedRef.current || n <= 0) return backlogRef.current.length;
+          const batch = backlogRef.current.splice(0, n);
+          cacheCtl.onReveal?.(batch.length);
+          if (batch.length > 0) setTelegrams(prev => [...batch.reverse(), ...prev]);
+          const remaining = backlogRef.current.length;
+          setPausedCount(remaining);
+          return remaining;
+        },
         loadRange: async () => {},
         isLoading: false,
         loadError: null,
@@ -104,6 +124,103 @@ test('Pause icon toggles Paused manually ↔ Paused automatically', async () => 
   expect(screen.getByRole('button', { name: 'Paused automatically' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Paused automatically' }));
   expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+});
+
+test('auto-pause backlog is fed in slices by fill-axis wheels and resumes playing once drained', async () => {
+  cacheCtl.revealCalls.length = 0;
+  const { container } = render(<App />);
+  expect(await screen.findByRole('button', { name: 'Playing' })).toBeInTheDocument();
+  const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+  // jsdom has no layout: give the scrollport a real range so edge / rubber
+  // zone checks behave (scrollTop 60 is "at the live edge", not overscrolled).
+  Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => 2000 });
+  Object.defineProperty(port, 'clientHeight', { configurable: true, get: () => 800 });
+  // Let the mount-time scrollToEdge's programmatic mark expire.
+  await act(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+
+  // Scrolling away from the live edge unfollows → auto pause.
+  await act(async () => {
+    port.scrollTop = 500;
+    fireEvent.scroll(port);
+  });
+  expect(screen.getByRole('button', { name: 'Paused automatically' })).toBeInTheDocument();
+
+  // Five telegrams arrive into the frozen snapshot.
+  const base = Date.now();
+  await act(async () => {
+    for (let i = 0; i < 5; i++) {
+      cacheCtl.addLive!(makeTelegram({ timestamp: new Date(base + i * 1000).toISOString(), raw_hex: `0xb${i}` }));
+    }
+  });
+  expect(screen.getByRole('button', { name: '5 newer telegrams' })).toBeInTheDocument();
+
+  // Back at the live edge, a small wheel toward newer reveals a slice (not all).
+  await act(async () => {
+    port.scrollTop = 60;
+    fireEvent.scroll(port);
+  });
+  await act(async () => {
+    fireEvent.wheel(port, { deltaY: -5 });
+  });
+  expect(cacheCtl.revealCalls).toEqual([2]);
+  expect(screen.getByRole('button', { name: 'Paused automatically' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '3 newer telegrams' })).toBeInTheDocument();
+
+  // Further slices drain the backlog; the last one resumes playing.
+  await act(async () => {
+    fireEvent.wheel(port, { deltaY: -5 });
+  });
+  expect(cacheCtl.revealCalls).toEqual([2, 2]);
+  expect(screen.getByRole('button', { name: 'Paused automatically' })).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.wheel(port, { deltaY: -5 });
+  });
+  expect(cacheCtl.revealCalls).toEqual([2, 2, 1]);
+  expect(screen.getByRole('button', { name: 'Playing' })).toBeInTheDocument();
+});
+
+test('manual → auto pause with the fill spacer on screen reveals one backlog row, not the whole backlog', async () => {
+  cacheCtl.revealCalls.length = 0;
+  const { container } = render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Playing' }));
+  expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+  const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+  Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => 2000 });
+  Object.defineProperty(port, 'clientHeight', { configurable: true, get: () => 800 });
+  // jsdom rows have no height, so the table's pin is a no-op: simulate it by
+  // moving scrollTop by the height of the rows prepended above the edge row.
+  cacheCtl.onReveal = n => { port.scrollTop += n * 85; };
+  await act(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+
+  const base = Date.now();
+  await act(async () => {
+    for (let i = 0; i < 3; i++) {
+      cacheCtl.addLive!(makeTelegram({ timestamp: new Date(base + i * 1000).toISOString(), raw_hex: `0xm${i}` }));
+    }
+  });
+  expect(screen.getByRole('button', { name: '3 newer telegrams' })).toBeInTheDocument();
+
+  // Fill spacer fully on screen: manual pause holds it (labels, no reveal).
+  await act(async () => {
+    port.scrollTop = 0;
+    fireEvent.scroll(port);
+  });
+  expect(screen.getByTestId('fill-rubber-pause-label-left')).toHaveTextContent('...paused manually...');
+  expect(cacheCtl.revealCalls).toEqual([]);
+
+  // Switching to auto pause fills the slot with the oldest backlog row only.
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Paused manually' }));
+  });
+  try {
+    expect(screen.getByRole('button', { name: 'Paused automatically' })).toBeInTheDocument();
+    expect(cacheCtl.revealCalls).toEqual([1]);
+    expect(screen.getByRole('button', { name: '2 newer telegrams' })).toBeInTheDocument();
+    // The previous edge row kept its place: no snap to the settled edge.
+    expect(port.scrollTop).toBe(85);
+  } finally {
+    cacheCtl.onReveal = null;
+  }
 });
 
 test('clearing the buffer locks Paused manually while empty', async () => {

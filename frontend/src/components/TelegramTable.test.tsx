@@ -2121,3 +2121,576 @@ test('scrollbar hold freezes opposite spacer through overscroll; rubber waits fo
     scrollBlockSize = 800;
   }
 });
+
+// ── Metered pause-buffer reveal ─────────────────────────────────────────────
+// With `onPauseReveal` the backlog is fed in a few rows per fill-axis gesture
+// instead of one full flush, so the viewport never has to re-find an anchor
+// that left the virtualizer window (the jump to the live edge above ~18 rows).
+
+const ROW = 85;
+
+const meteredProps = (
+  telegrams: Telegram[],
+  paused: boolean,
+  pausedN: number,
+  handlers: {
+    onPauseReveal: ReturnType<typeof vi.fn>;
+    onPauseFlush: ReturnType<typeof vi.fn>;
+    onListFollowChange: ReturnType<typeof vi.fn>;
+  },
+  sort: SortConfig = sortConfig,
+) => (
+  <TelegramTable
+    telegrams={telegrams}
+    visibleColumns={visibleColumns}
+    sortConfig={sort}
+    onSort={vi.fn()}
+    activeFilters={DEFAULT_FILTERS}
+    onQuickFilter={vi.fn()}
+    onQuickVisualize={vi.fn()}
+    listFollow={false}
+    onListFollowChange={handlers.onListFollowChange}
+    isPaused={paused}
+    pausedCount={pausedN}
+    onPauseFlush={handlers.onPauseFlush}
+    onPauseReveal={handlers.onPauseReveal}
+  />
+);
+
+const meteredHandlers = () => ({
+  onPauseReveal: vi.fn(),
+  onPauseFlush: vi.fn(),
+  onListFollowChange: vi.fn(),
+});
+
+test('metered reveal: a fill-axis wheel at the frozen edge asks for a few rows, never the whole backlog', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  const frozen = makeList(8, 7);
+  try {
+    const { container, rerender } = render(meteredProps(frozen, true, 50, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+    h.onListFollowChange.mockClear();
+
+    // Enough rows for the 40px move plus the fill slot, one spare: 2 of 50.
+    const deltaY = -40;
+    fireEvent.wheel(port, { deltaY });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(2);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+
+    // Parent reveals the two oldest backlog rows; backlog shrinks, still paused.
+    // The pin (no-op under jsdom geometry) is simulated by the prepended height.
+    const pinned = LIVE_EDGE_TOP + 2 * ROW;
+    port.scrollTop = pinned;
+    rerender(meteredProps(makeList(10, 9), true, 48, h));
+    // The gesture continues into the revealed rows — no snap to the edge.
+    expect(port.scrollTop).toBe(pinned + deltaY);
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+    expect(screen.getByRole('button', { name: /newer telegram/ })).toBeInTheDocument();
+
+    // Away from the edge a wheel is plain scrolling; back at the edge the
+    // next slice is requested — line by line, never all 48 at once.
+    fireEvent.wheel(port, { deltaY });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+    fireEvent.wheel(port, { deltaY });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(2);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(2);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: slice size follows the gesture and is capped below the overscan window', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  try {
+    const { container } = render(meteredProps(makeList(8, 7), true, 500, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+
+    // A page-sized move would need 11 rows; the cap keeps the pinned row rendered.
+    fireEvent.wheel(port, { deltaY: -800 });
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(8);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: gesture outrunning the landed rows tops the slice up instead of snapping', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  try {
+    const { container, rerender } = render(meteredProps(makeList(8, 7), true, 50, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+
+    fireEvent.wheel(port, { deltaY: -300 });
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(6);
+
+    // Rows measured shorter than estimated: the pin lands only 200px further,
+    // so the 300px move runs into the fill slot (clamped at 0, 58px short).
+    port.scrollTop = LIVE_EDGE_TOP + 200;
+    rerender(meteredProps(makeList(14, 13), true, 44, h));
+    expect(port.scrollTop).toBe(0);
+    // The open slot is refilled right away: 58px leftover + fill slot → 3 rows.
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(2);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(3);
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: a slice with every row filtered out requests the next, wider slice', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  const rows = makeList(8, 7);
+  try {
+    const { container, rerender } = render(meteredProps(rows, true, 50, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+
+    const deltaY = -40;
+    fireEvent.wheel(port, { deltaY });
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(2);
+
+    // Backlog shrank but the visible list did not change (rows filtered out):
+    // keep going with a doubled slice, capped.
+    rerender(meteredProps(rows, true, 48, h));
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(2);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(4);
+    rerender(meteredProps(rows, true, 44, h));
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(3);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(8);
+    expect(port.scrollTop).toBe(LIVE_EDGE_TOP);
+
+    // Backlog drained without a single visible row: parent resumes playing,
+    // the held gesture is applied once, nothing is flushed wholesale.
+    rerender(meteredProps(rows, false, 0, h));
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(3);
+    expect(port.scrollTop).toBe(LIVE_EDGE_TOP + deltaY);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: passively returning to the newest row with a backlog does not re-follow', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  try {
+    const { container } = render(meteredProps(makeList(12, 11), true, 4, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+
+    // Leave the edge, then scroll back onto the newest row.
+    port.scrollTop = ROW * 6;
+    fireEvent.scroll(port);
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+    // Re-following would hand the whole backlog to a full flush + edge snap.
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+    expect(h.onPauseReveal).not.toHaveBeenCalled();
+
+    // Only the fill-axis gesture feeds the backlog.
+    fireEvent.wheel(port, { deltaY: -40 });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: the fill slot is filled from the backlog instead of rubber-banding; rubber returns once drained', async () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  const flushFrames = () => act(() => new Promise<void>(r => {
+    requestAnimationFrame(() => requestAnimationFrame(() => r()));
+  }));
+  try {
+    const { container, rerender } = render(meteredProps(makeList(6, 5), true, 2, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    await flushFrames();
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // The empty fill slot comes on screen with a backlog waiting: fill it.
+      port.scrollTop = 0;
+      fireEvent.scroll(port);
+      expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(90 + 180); });
+      // No rubber-band while the slice is pending.
+      expect(port.scrollTop).toBe(0);
+
+      // Backlog gone (parent resumed): the fill padding is a rubber band again.
+      rerender(meteredProps(makeList(8, 7), false, 0, h));
+      fireEvent.scroll(port);
+      await act(async () => { vi.advanceTimersByTime(90); });
+      await act(async () => { vi.advanceTimersByTime(180); });
+      expect(port.scrollTop).toBe(LIVE_EDGE_TOP);
+    } finally {
+      vi.useRealTimers();
+    }
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: manual pause stays a hard stop, no slice is requested', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  try {
+    const { container } = render(
+      <TelegramTable
+        telegrams={makeList(8, 7)}
+        visibleColumns={visibleColumns}
+        sortConfig={sortConfig}
+        onSort={vi.fn()}
+        activeFilters={DEFAULT_FILTERS}
+        onQuickFilter={vi.fn()}
+        onQuickVisualize={vi.fn()}
+        listFollow={false}
+        onListFollowChange={h.onListFollowChange}
+        isPaused
+        isManualPause
+        pausedCount={5}
+        onPauseFlush={h.onPauseFlush}
+        onPauseReveal={h.onPauseReveal}
+      />,
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+    fireEvent.wheel(port, { deltaY: -40 });
+    expect(h.onPauseReveal).not.toHaveBeenCalled();
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal: overlay scrollbar thumb pulled past the fill stop feeds the backlog', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  try {
+    const { container } = render(meteredProps(makeList(20, 19), true, 30, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = LIVE_EDGE_TOP;
+    fireEvent.scroll(port);
+    const thumb = screen.getByTestId('list-scrollbar-thumb');
+
+    // Dragging up from the settled edge: the real range is exhausted, the
+    // overhang asks for backlog rows (capped per step).
+    act(() => {
+      fireEvent.pointerDown(thumb, { pointerId: 1, clientY: 200 });
+      fireEvent.pointerMove(thumb, { pointerId: 1, clientY: 100 });
+    });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onPauseReveal.mock.calls[0][0]).toBeGreaterThan(0);
+    expect(h.onPauseReveal.mock.calls[0][0]).toBeLessThanOrEqual(8);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+    act(() => {
+      fireEvent.pointerUp(thumb, { pointerId: 1, clientY: 100 });
+    });
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('metered reveal on the ascending live edge (bottom) stays seamless', () => {
+  scrollBlockSize = ROW * 2;
+  const h = meteredHandlers();
+  const asc: SortConfig = [{ key: 'timestamp', direction: 'asc' }];
+  const frozen = [...makeList(8, 7)].reverse();
+  const revealed = [...makeList(10, 9)].reverse();
+  try {
+    const { container, rerender } = render(meteredProps(frozen, true, 20, h, asc));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    const max = Math.max(0, port.scrollHeight - port.clientHeight);
+    port.scrollTop = Math.max(0, max - LIVE_EDGE_TOP);
+    fireEvent.scroll(port);
+
+    fireEvent.wheel(port, { deltaY: -40 }); // toward older: nothing
+    expect(h.onPauseReveal).not.toHaveBeenCalled();
+
+    const deltaY = 40;
+    fireEvent.wheel(port, { deltaY });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(2);
+
+    // Appending at the bottom leaves existing rows in place; the gesture
+    // continues into the new rows.
+    const before = port.scrollTop;
+    rerender(meteredProps(revealed, true, 18, h, asc));
+    expect(port.scrollTop).toBe(before + deltaY);
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+// ── Spacer after a buffer clear; manual-pause hold ──────────────────────────
+
+const holdProps = (
+  telegrams: Telegram[],
+  opts: {
+    paused: boolean;
+    manual: boolean;
+    pausedN: number;
+    listFollow?: boolean;
+    handlers: ReturnType<typeof meteredHandlers>;
+    onJumpToLive?: ReturnType<typeof vi.fn>;
+    sort?: SortConfig;
+  },
+) => (
+  <TelegramTable
+    telegrams={telegrams}
+    visibleColumns={visibleColumns}
+    sortConfig={opts.sort ?? sortConfig}
+    onSort={vi.fn()}
+    activeFilters={DEFAULT_FILTERS}
+    onQuickFilter={vi.fn()}
+    onQuickVisualize={vi.fn()}
+    listFollow={opts.listFollow ?? false}
+    onListFollowChange={opts.handlers.onListFollowChange}
+    isPaused={opts.paused}
+    isManualPause={opts.manual}
+    pausedCount={opts.pausedN}
+    onPauseFlush={opts.handlers.onPauseFlush}
+    onPauseReveal={opts.handlers.onPauseReveal}
+    onJumpToLive={opts.onJumpToLive}
+  />
+);
+
+test('cleared list: newer-pill reveal lands on the edge row, not on the fill spacer', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  const onJumpToLive = vi.fn();
+  try {
+    const { container, rerender } = render(
+      holdProps(makeList(6, 5), { paused: false, manual: false, pausedN: 0, listFollow: true, handlers: h, onJumpToLive }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    expect(port.scrollTop).toBe(LIVE_EDGE_TOP);
+
+    // Buffer cleared while manually paused: "No data available", backlog waits.
+    rerender(holdProps([], { paused: true, manual: true, pausedN: 3, handlers: h, onJumpToLive }));
+    expect(screen.getByText('No data available.')).toBeInTheDocument();
+    port.scrollTop = 0;
+    fireEvent.scroll(port);
+
+    fireEvent.click(screen.getByRole('button', { name: /newer telegram/ }));
+    expect(onJumpToLive).toHaveBeenCalledTimes(1);
+
+    // Parent flushed the backlog: the first rows must sit flush with the edge —
+    // the fill spacer (scrollTop 0) must not stay on screen.
+    rerender(holdProps(makeList(3, 2), { paused: false, manual: false, pausedN: 0, handlers: h, onJumpToLive }));
+    expect(port.scrollTop).toBe(LIVE_EDGE_TOP);
+    expect(screen.queryByTestId('fill-rubber-pause-label-left')).not.toBeInTheDocument();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('cleared list: the first live telegram while following lands on the edge row', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  try {
+    const { container, rerender } = render(
+      holdProps(makeList(6, 5), { paused: false, manual: false, pausedN: 0, listFollow: true, handlers: h }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    rerender(holdProps([], { paused: false, manual: false, pausedN: 0, listFollow: true, handlers: h }));
+    // An empty list has no scroll range: the browser clamps scrollTop to 0.
+    port.scrollTop = 0;
+    fireEvent.scroll(port);
+
+    rerender(holdProps(makeList(1, 0), { paused: false, manual: false, pausedN: 0, listFollow: true, handlers: h }));
+    expect(port.scrollTop).toBe(LIVE_EDGE_TOP);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('cleared list: first rows while detached from the edge leave the viewport alone', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  try {
+    const { container, rerender } = render(
+      holdProps(makeList(20, 19), { paused: false, manual: false, pausedN: 0, listFollow: true, handlers: h }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    fireEvent.click(container.querySelectorAll('.log-row')[3]);
+    expect(h.onListFollowChange).toHaveBeenCalledWith(false);
+    port.scrollTop = ROW * 5;
+    fireEvent.scroll(port);
+
+    rerender(holdProps([], { paused: true, manual: true, pausedN: 2, handlers: h }));
+    port.scrollTop = 0;
+    fireEvent.scroll(port);
+    rerender(holdProps(makeList(2, 1), { paused: true, manual: true, pausedN: 0, handlers: h }));
+    expect(port.scrollTop).toBe(0);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('manual pause with a backlog: the fill spacer holds, no rubber-band, labels stay', async () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  const flushFrames = () => act(() => new Promise<void>(r => {
+    requestAnimationFrame(() => requestAnimationFrame(() => r()));
+  }));
+  try {
+    const { container } = render(
+      holdProps(makeList(6, 5), { paused: true, manual: true, pausedN: 4, handlers: h }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    await flushFrames();
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      act(() => {
+        port.scrollTop = 0;
+        fireEvent.scroll(port);
+      });
+      expect(screen.getByTestId('fill-rubber-pause-label-left')).toHaveTextContent('...paused manually...');
+      act(() => {
+        fireEvent.wheel(port, { deltaY: -40 });
+      });
+      await act(async () => { vi.advanceTimersByTime(90); });
+      await act(async () => { vi.advanceTimersByTime(180); });
+      expect(port.scrollTop).toBe(0);
+      expect(screen.getByTestId('fill-rubber-pause-label-left')).toBeInTheDocument();
+      expect(h.onPauseReveal).not.toHaveBeenCalled();
+      expect(h.onPauseFlush).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('manual pause without a backlog: the fill spacer still rubber-bands back', async () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  const flushFrames = () => act(() => new Promise<void>(r => {
+    requestAnimationFrame(() => requestAnimationFrame(() => r()));
+  }));
+  try {
+    const { container } = render(
+      holdProps(makeList(6, 5), { paused: true, manual: true, pausedN: 0, handlers: h }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    await flushFrames();
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      act(() => {
+        port.scrollTop = 0;
+        fireEvent.scroll(port);
+      });
+      await act(async () => { vi.advanceTimersByTime(90); });
+      await act(async () => { vi.advanceTimersByTime(180); });
+      expect(port.scrollTop).toBe(LIVE_EDGE_TOP);
+    } finally {
+      vi.useRealTimers();
+    }
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('manual → auto pause with the spacer on screen fills the slot with one backlog row', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  try {
+    const { container, rerender } = render(
+      holdProps(makeList(6, 5), { paused: true, manual: true, pausedN: 4, handlers: h }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = 0;
+    fireEvent.scroll(port);
+    expect(h.onPauseReveal).not.toHaveBeenCalled();
+
+    rerender(holdProps(makeList(6, 5), { paused: true, manual: false, pausedN: 4, handlers: h }));
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(1);
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+    expect(port.scrollTop).toBe(0);
+
+    // The oldest backlog row lands in the slot; the previous edge row keeps
+    // its place. The pin (no-op under jsdom geometry) is simulated by the
+    // prepended height — no snap to the edge, no further slice, still frozen:
+    // no follow.
+    port.scrollTop = ROW;
+    rerender(holdProps(makeList(7, 6), { paused: true, manual: false, pausedN: 3, handlers: h }));
+    expect(port.scrollTop).toBe(ROW);
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /newer telegram/ })).toBeInTheDocument();
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('after the slot fill, a wheel that would run into the fill slot continues the metered feed with its full delta', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  try {
+    // Edge row sits one row in (the slot row above it), still a backlog.
+    const { container, rerender } = render(meteredProps(makeList(7, 6), true, 3, h));
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = ROW;
+    fireEvent.scroll(port);
+    expect(h.onPauseReveal).not.toHaveBeenCalled();
+
+    // 85 → -15: the move crosses the settled edge (43) by 58px — not "at the
+    // edge" by the EPS test, but the browser would clamp it. Reveal instead.
+    const deltaY = -100;
+    fireEvent.wheel(port, { deltaY });
+    expect(h.onPauseReveal).toHaveBeenCalledTimes(1);
+    expect(h.onPauseReveal).toHaveBeenLastCalledWith(3);
+
+    // Pin simulated by the prepended height; the full delta is then applied.
+    port.scrollTop = ROW + 3 * ROW;
+    rerender(meteredProps(makeList(10, 9), true, 0, h));
+    expect(port.scrollTop).toBe(ROW + 3 * ROW + deltaY);
+    expect(h.onListFollowChange).not.toHaveBeenCalledWith(true);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});
+
+test('manual → auto pause away from the spacer requests nothing', () => {
+  scrollBlockSize = 800;
+  const h = meteredHandlers();
+  try {
+    const { container, rerender } = render(
+      holdProps(makeList(20, 19), { paused: true, manual: true, pausedN: 4, handlers: h }),
+    );
+    const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = ROW * 5;
+    fireEvent.scroll(port);
+
+    rerender(holdProps(makeList(20, 19), { paused: true, manual: false, pausedN: 4, handlers: h }));
+    expect(h.onPauseReveal).not.toHaveBeenCalled();
+    expect(h.onPauseFlush).not.toHaveBeenCalled();
+    expect(port.scrollTop).toBe(ROW * 5);
+  } finally {
+    scrollBlockSize = 800;
+  }
+});

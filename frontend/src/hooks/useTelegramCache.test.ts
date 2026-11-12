@@ -221,6 +221,63 @@ describe('useTelegramCache', () => {
     expect(result.current.pausedCount).toBe(0);
   });
 
+  it('revealPaused publishes the oldest n of the backlog, stays paused and keeps counting', async () => {
+    const { result } = renderHook(() => useTelegramCache(1000));
+    await settle(result);
+
+    act(() => {
+      result.current.addLive(tg(1000, 'a'));
+    });
+    act(() => {
+      result.current.setPaused(true);
+    });
+    act(() => {
+      result.current.addLive(tg(2000, 'b'));
+      result.current.addLive(tg(3000, 'c'));
+      result.current.addLive(tg(4000, 'd'));
+      result.current.addLive(tg(5000, 'e'));
+    });
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.a']);
+    expect(result.current.pausedCount).toBe(4);
+
+    // Oldest two of the backlog become visible; the two newest stay hidden.
+    let remaining = -1;
+    act(() => {
+      remaining = result.current.revealPaused(2);
+    });
+    expect(remaining).toBe(2);
+    expect(result.current.pausedCount).toBe(2);
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.c', '1.2.b', '1.2.a']);
+
+    // Still paused: a new live telegram is hidden and counted, nothing else moves.
+    act(() => {
+      result.current.addLive(tg(6000, 'f'));
+    });
+    expect(result.current.pausedCount).toBe(3);
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.c', '1.2.b', '1.2.a']);
+
+    // Over-revealing clamps at zero and shows everything.
+    act(() => {
+      remaining = result.current.revealPaused(10);
+    });
+    expect(remaining).toBe(0);
+    expect(result.current.pausedCount).toBe(0);
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual([
+      '1.2.f', '1.2.e', '1.2.d', '1.2.c', '1.2.b', '1.2.a',
+    ]);
+
+    // Not paused: no-op.
+    act(() => {
+      result.current.setPaused(false);
+      result.current.addLive(tg(7000, 'g'));
+    });
+    act(() => {
+      remaining = result.current.revealPaused(1);
+    });
+    expect(remaining).toBe(0);
+    expect(result.current.telegrams).toHaveLength(7);
+  });
+
   it('loadRange serves cache hits and fetches only the gaps', async () => {
     const cached = tg(1500, 'cached');
     seedIdb([cached]);

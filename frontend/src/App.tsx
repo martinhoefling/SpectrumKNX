@@ -333,6 +333,7 @@ function App() {
     setConnected: setCacheConnected,
     setPaused: setCachePaused,
     pausedCount,
+    revealPaused,
     loadRange,
     isLoading: isHistoryLoading,
     loadError: historyLoadError,
@@ -614,18 +615,17 @@ function App() {
 
   // ── Pause / Resume ──────────────────────────────────────────────────────────
   // Playing → Pause latches as manual. While paused, the Pause icon toggles
-  // auto ↔ manual (stays frozen). Manual→Auto publishes the backlog once, then
-  // re-freezes. Empty buffer ("No data available") locks Paused manually.
-  // Resume via jump-to-live, or auto edge-flush / follow-while-auto.
+  // auto ↔ manual (stays frozen). Manual→Auto keeps the backlog in the pause
+  // buffer; the table fills the fill-spacer with its oldest row and feeds the
+  // rest in as the user scrolls toward the live edge. Empty buffer ("No data
+  // available") locks Paused manually. Resume via jump-to-live, or auto
+  // edge-flush / follow-while-auto.
   const bufferEmpty = liveTelegrams.length === 0;
   const togglePause = () => {
     if (bufferEmpty) return;
     const next = pauseModeForToggle(pauseMode);
     if (pauseMode === 'manual' && next === 'auto') {
-      // Reveal telegrams ingested during manual pause, then stay auto-frozen.
       setListFollow(false);
-      setCachePaused(false);
-      setCachePaused(true);
       setPauseMode('auto');
       return;
     }
@@ -653,6 +653,18 @@ function App() {
     setPauseMode('playing');
     setCachePaused(false);
   }, [pauseMode, setCachePaused]);
+
+  // Metered flush: reveal the oldest `n` backlog rows while staying auto-paused,
+  // so the table can scroll them in line by line. Once the backlog is gone the
+  // mode returns to playing (same as a full flush). Manual pause never reveals.
+  const revealPauseBuffer = useCallback((n: number) => {
+    if (pauseMode !== 'auto') return;
+    const remaining = revealPaused(n);
+    if (remaining <= 0) {
+      setPauseMode('playing');
+      setCachePaused(false);
+    }
+  }, [pauseMode, revealPaused, setCachePaused]);
 
   // Newer-pill: always Play + follow + flush (including manual pause latch).
   const jumpToLiveResume = useCallback(() => {
@@ -1444,6 +1456,7 @@ function App() {
                     isManualPause={pauseMode === 'manual'}
                     pausedCount={pausedCount}
                     onPauseFlush={flushPauseBuffer}
+                    onPauseReveal={revealPauseBuffer}
                     onJumpToLive={jumpToLiveResume}
                     listAnchorKey={listAnchorKey}
                     onListAnchorKeyChange={setListAnchorKey}

@@ -57,6 +57,14 @@ interface TelegramTableProps {
   pausedCount?: number;
   /** Reach the frozen live edge while auto-paused: flush without forcing follow. */
   onPauseFlush?: () => void;
+  /**
+   * Metered flush while auto-paused: reveal the oldest `n` backlog telegrams
+   * (snapshot stays frozen otherwise). The table feeds the backlog in a few
+   * rows per fill-axis gesture so it scrolls in line by line; the parent
+   * resumes playing once the backlog is empty. Without it, the whole backlog
+   * is flushed via `onPauseFlush`.
+   */
+  onPauseReveal?: (n: number) => void;
   /** Newer-pill: force Play + follow + flush so the jump includes the pause buffer. */
   onJumpToLive?: () => void;
 
@@ -166,6 +174,12 @@ const ROW_ESTIMATE = 85; // matches the virtualizer's estimateSize
 /** Fill-axis overscroll rubber; rubber-bands back to the edge telegram. */
 const FILL_RUBBER_PX = Math.round(ROW_ESTIMATE / 2);
 const EDGE_SCROLL_EPS = 20;
+/**
+ * Most pause-backlog rows revealed per step. Must stay below the virtualizer's
+ * overscan so the row pinned across the insert is still rendered and can be
+ * re-positioned from its real DOM rect (no estimate-based refind).
+ */
+const REVEAL_MAX = 8;
 /** Visual scrollbar track width (matches header paddingRight / index.css). */
 const LIST_SB_WIDTH_PX = 8;
 const LIST_SB_MIN_THUMB_PX = 20;
@@ -212,7 +226,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
-  isPaused = false, isManualPause = false, pausedCount = 0, onPauseFlush, onJumpToLive,
+  isPaused = false, isManualPause = false, pausedCount = 0, onPauseFlush, onPauseReveal, onJumpToLive,
   markedKeys, onMarkedKeysChange, lastMarkedKey, onLastMarkedKeyChange,
   infoBarOpen, onInfoBarOpenChange,
   flaggedKeys, onFlaggedKeysChange,
@@ -662,7 +676,12 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     oppositeSpacerPx: liveOppositeSpacerPx,
     virtTotalPx: liveVirtTotalPx,
   };
-  const oppositeSpacerPx = frozenGeom?.oppositeSpacerPx ?? liveOppositeSpacerPx;
+  // Short-list settle pad held across a metered reveal: the pad drops to 0 the
+  // moment the growing list exceeds the viewport, which would clamp scrollTop
+  // and snap the viewport. Kept until scrollTop fits the live geometry again.
+  const [stickyOppositeSpacerPx, setStickyOppositeSpacerPx] = useState(0);
+  const oppositeSpacerPx =
+    frozenGeom?.oppositeSpacerPx ?? Math.max(liveOppositeSpacerPx, stickyOppositeSpacerPx);
   const rubberBandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rubberBandRafRef = useRef<number | null>(null);
   /** Active rubber-band animation; survives live prepends (no retarget). */
@@ -686,6 +705,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // Armed on every pause flush; forces pin (never scrollToEdge) until the
   // merged list actually changes the live-edge key.
   const flushPinRef = useRef(false);
+  // In-flight metered reveal: backlog size when requested and rows asked for.
+  // Lets the merge effect tell "reveal landed but every row was filtered out"
+  // (pausedCount dropped, edge key unchanged) from an unrelated publish.
+  const revealRef = useRef<{ before: number; n: number } | null>(null);
   // Newer-pill jump: next merge must scrollToEdge (not pin) after Play/flush.
   const jumpToLiveRef = useRef(false);
   // The row held still while anchored, and its offset from the scroll-container
@@ -825,6 +848,24 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     return el.scrollTop > max - fillRubberPx + 0.5;
   };
 
+  /**
+   * Auto-paused with a backlog the parent can meter out: the fill padding is
+   * then the insert slot for the next backlog rows, not a rubber band.
+   */
+  const backlogFeedActive = () =>
+    isPaused && !isManualPause && pausedCount > 0 && !!onPauseReveal;
+
+  /**
+   * Manually paused with a backlog: the fill spacer is a hard stop that stays
+   * on screen (with its "...paused manually..." labels) instead of rubber-
+   * banding away; switching to auto pause fills it with the oldest backlog row.
+   */
+  const manualHoldActive = () => isManualPause && pausedCount > 0;
+
+  /** Fill overscroll that should rubber-band back (nothing waiting to fill it). */
+  const inFillRubberBand = () =>
+    inFillRubberZone() && !backlogFeedActive() && !manualHoldActive();
+
   /** Fill spacer fully in the viewport (not partially scrolled away). */
   const fillRubberFullyVisible = () => {
     const el = parentRef.current;
@@ -867,14 +908,26 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
 
   const lockScrollGeometry = () => {
+    // A metered reveal needs the live virtualizer height: a frozen scrollHeight
+    // would clamp the pin and snap the viewport.
+    if (flushPinRef.current) return;
     setFrozenGeom(prev => prev ?? { ...liveGeomRef.current });
   };
 
   const unlockScrollGeometryIfSettled = () => {
     if (scrollbarHeldRef.current) return;
     if (rubberAnimRef.current) return;
-    if (inOppositeRubberZone() || inFillRubberZone()) return;
+    if (inOppositeRubberZone() || inFillRubberBand()) return;
     setFrozenGeom(null);
+  };
+
+  /** Drop the sticky short-list pad once scrollTop fits the live geometry. */
+  const releaseStickySpacerIfFits = () => {
+    if (stickyOppositeSpacerPx <= 0 || flushPinRef.current) return;
+    const el = parentRef.current;
+    if (!el) return;
+    const liveMax = Math.max(0, liveVirtTotalPx + liveOppositeSpacerPx - el.clientHeight);
+    if (el.scrollTop <= liveMax + 0.5) setStickyOppositeSpacerPx(0);
   };
 
   const checkAtEdge = () => {
@@ -884,6 +937,18 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     if (liveEdge === 'top') return el.scrollTop <= fillRubberPx + EDGE_SCROLL_EPS;
     const max = Math.max(0, el.scrollHeight - el.clientHeight);
     return el.scrollTop >= Math.max(0, max - fillRubberPx) - EDGE_SCROLL_EPS;
+  };
+
+  /**
+   * How far (px, ≥ 0) a fill-axis move of `deltaY` would carry the viewport
+   * past the settled live edge into the fill slot. 0 when it stays on rows.
+   */
+  const fillOverrunFor = (deltaY: number) => {
+    const el = parentRef.current;
+    if (!el) return 0;
+    const target = el.scrollTop + deltaY;
+    const settled = settledEdgeScrollTop();
+    return Math.max(0, liveEdge === 'top' ? settled - target : target - settled);
   };
 
   const cancelRubberBand = () => {
@@ -989,7 +1054,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
 
   const rubberBandFromZone = () => {
-    if (inFillRubberZone()) {
+    if (inFillRubberBand()) {
       startRubberBandTo(settledEdgeScrollTop(), 'fill');
       return;
     }
@@ -1010,7 +1075,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
   scheduleRubberBandRef.current = scheduleRubberBand;
   unlockScrollGeometryIfSettledRef.current = unlockScrollGeometryIfSettled;
-  inFillRubberZoneRef.current = inFillRubberZone;
+  inFillRubberZoneRef.current = inFillRubberBand;
   inOppositeRubberZoneRef.current = inOppositeRubberZone;
 
   useEffect(() => () => cancelRubberBand(), []);
@@ -1046,30 +1111,86 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   const syncFollowFromNewestVisibility = () => {
     if (isManualPause) return;
     if (detachedFromEdgeRef.current) return;
+    // A backlog still waits: following would flush it all at once.
+    if (backlogFeedActive()) return;
     if (!newestFullyVisible()) return;
     enableLiveFollow();
   };
 
+  /**
+   * Backlog rows to reveal for a fill-axis move of `px`: enough to cover the
+   * move plus the fill slot (so the viewport never runs into blank padding),
+   * one spare for rows measuring shorter than the estimate, capped so the
+   * pinned row stays rendered. Any shortfall is topped up by the merge effect.
+   */
+  const revealCountFor = (px: number) => {
+    const need = Math.ceil((Math.abs(px) + fillRubberPx) / ROW_ESTIMATE) + 1;
+    return Math.max(1, Math.min(pausedCount, need, REVEAL_MAX));
+  };
+
+  /**
+   * Ask the parent for the next metered slice. The edge-most visible row is
+   * pinned (selection ignored: a marked row elsewhere must not steer the
+   * flush); the gesture delta is applied once the rows have landed.
+   */
+  const requestReveal = (deltaY: number, n: number) => {
+    flushPinRef.current = true;
+    captureAnchor(null, { ignoreSelection: true });
+    pendingFlushScrollDeltaRef.current = deltaY;
+    revealRef.current = { before: pausedCount, n };
+    onPauseReveal?.(n);
+  };
+
+  /**
+   * Start a metered step from rest: a few rows inserted into the fill slot.
+   * Rows must grow scrollHeight, so no frozen geometry; a short list keeps its
+   * settle pad until the viewport fits the live geometry again.
+   */
+  const armMeteredReveal = (deltaY: number, n: number) => {
+    setFrozenGeom(null);
+    setStickyOppositeSpacerPx(prev => Math.max(prev, liveGeomRef.current.oppositeSpacerPx));
+    requestReveal(deltaY, n);
+  };
+
   // Scroll along the pause-buffer fill axis (toward the live edge) at the frozen
-  // fill end: flush the backlog and continue the gesture seamlessly. Against
+  // fill end: feed the backlog and continue the gesture seamlessly. Against
   // the fill axis never flushes (handleScroll has no flush). Empty list: no-op.
   // Without backlog, follow re-engages; fill-rubber overscroll rubber-bands back.
   const engageLiveTowardNewer = (deltaY: number) => {
     if (telegramRowsRef.current.length === 0) return;
-    if (!checkAtEdge()) return;
-    detachedFromEdgeRef.current = false;
+    if (flushPinRef.current) {
+      // Rows of the previous step have not landed yet: fold this move into the
+      // pending delta; the merge effect tops the reveal up if the slot is
+      // still open afterwards.
+      pendingFlushScrollDeltaRef.current = (pendingFlushScrollDeltaRef.current ?? 0) + deltaY;
+      return;
+    }
+    // A move that would run past the settled edge into the fill slot counts
+    // too while a backlog waits (e.g. right after a slot fill left the edge
+    // row 73px in): the browser clamps that part of the scroll, so without a
+    // reveal the gesture would lose it.
+    const overrun = fillOverrunFor(deltaY);
+    if (!checkAtEdge() && !(backlogFeedActive() && overrun > 0)) return;
     if (isPaused && pausedCount > 0) {
+      // Manual pause: the fill edge is a hard stop (labels pulse instead).
+      if (isManualPause) return;
+      detachedFromEdgeRef.current = false;
       // Flush must never claim the live edge — that would scrollToEdge on merge.
       // Pin + pending delta keep the viewport moving line-wise into the backlog.
       // Opposite rubber always finishes — do not cancel it for pause flush.
       if (!oppositeRubberBusy()) cancelRubberBand();
       atEdgeRef.current = false;
+      if (onPauseReveal) {
+        armMeteredReveal(deltaY, revealCountFor(overrun));
+        return;
+      }
       flushPinRef.current = true;
       if (!anchorRef.current) captureAnchor();
       pendingFlushScrollDeltaRef.current = deltaY;
       onPauseFlush?.();
       return;
     }
+    detachedFromEdgeRef.current = false;
     enableLiveFollow();
     scheduleRubberBand();
   };
@@ -1095,12 +1216,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // user is working on; it wins while any part of it is inside the viewport, so
   // rows arriving above it (a reload, Time-Delta-Context) can't push it away
   // (#435). Without one on screen, the top-most visible row is pinned (#202).
-  const captureAnchor = (selectedKey: string | null = selectedKeyRef.current) => {
+  const captureAnchor = (
+    selectedKey: string | null = selectedKeyRef.current,
+    opts?: { ignoreSelection?: boolean },
+  ) => {
     const el = parentRef.current;
     if (!el) return;
     const cRect = el.getBoundingClientRect();
     const cTop = cRect.top;
-    if (selectedKey) {
+    if (selectedKey && !opts?.ignoreSelection) {
       const row = el.querySelector<HTMLElement>(`[data-akey="${CSS.escape(selectedKey)}"]`);
       const rr = row?.getBoundingClientRect();
       if (rr && rr.bottom > cTop && rr.top < cRect.bottom) {
@@ -1173,9 +1297,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     thumb.style.height = `${thumbHeight}px`;
   };
 
+  /**
+   * Thumb drag → real scrollTop, clamped to the real scroll range. `raw` is the
+   * unclamped target: how far past the fill hard-stop the thumb was pulled is
+   * the backlog the drag asks for.
+   */
   const mapThumbDeltaToScrollTop = (startScrollTop: number, deltaY: number) => {
     const el = parentRef.current;
-    if (!el) return startScrollTop;
+    if (!el) return { next: startScrollTop, raw: startScrollTop };
     const { clientHeight, scrollHeight } = el;
     const backlogPx = telegramRows.length > 0 ? Math.max(0, pausedCount) * ROW_ESTIMATE : 0;
     const virtSH = scrollHeight + backlogPx;
@@ -1183,13 +1312,10 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const trackTravel = Math.max(0, clientHeight - thumbHeight);
     const maxScroll = Math.max(0, scrollHeight - clientHeight);
     const virtMaxScroll = Math.max(0, virtSH - clientHeight);
-    if (trackTravel <= 0 || maxScroll <= 0) return startScrollTop;
+    if (trackTravel <= 0 || maxScroll <= 0) return { next: startScrollTop, raw: startScrollTop };
     const virtDelta = (deltaY / trackTravel) * virtMaxScroll;
-    if (liveEdge === 'top') {
-      const startVirt = startScrollTop + backlogPx;
-      return Math.max(0, Math.min(maxScroll, startVirt + virtDelta - backlogPx));
-    }
-    return Math.max(0, Math.min(maxScroll, startScrollTop + virtDelta));
+    const raw = startScrollTop + virtDelta;
+    return { next: Math.max(0, Math.min(maxScroll, raw)), raw };
   };
 
   const onSbThumbPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1214,10 +1340,19 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     noteUserScroll();
     const deltaY = e.clientY - drag.startY;
     const before = el.scrollTop;
-    const next = mapThumbDeltaToScrollTop(drag.startScrollTop, deltaY);
+    const { next, raw } = mapThumbDeltaToScrollTop(drag.startScrollTop, deltaY);
     el.scrollTop = next;
     // Thumb dragged further into fill while already at the hard stop.
     const towardFill = liveEdge === 'top' ? deltaY < 0 : deltaY > 0;
+    // Pulled past the fill stop with a backlog waiting: the overhang is the
+    // part of the drag that asks for backlog rows — feed them in steps.
+    if (towardFill && backlogFeedActive() && !flushPinRef.current) {
+      const settled = settledEdgeScrollTop();
+      const overhang = liveEdge === 'top' ? settled - raw : raw - settled;
+      if (overhang > 0) {
+        engageLiveTowardNewer(liveEdge === 'top' ? -overhang : overhang);
+      }
+    }
     if (
       isManualPause
       && towardFill
@@ -1253,13 +1388,17 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     if (maxScroll <= 0) return;
     noteUserScroll();
     // Page toward the click; keep real scroll range (no virtual backlog travel).
+    // A page toward the fill from the live edge feeds the backlog like PageUp/Down.
     const before = el.scrollTop;
     if (y < thumbTop) {
+      // Arm before the native move so the anchor is captured at rest.
+      if (liveEdge === 'top' && backlogFeedActive()) engageLiveTowardNewer(-el.clientHeight);
       el.scrollTop = Math.max(0, el.scrollTop - el.clientHeight);
       if (isManualPause && liveEdge === 'top' && before === el.scrollTop && fillRubberFullyVisible()) {
         pulseFillPauseLabels();
       }
     } else if (y > thumbTop + thumbHeight) {
+      if (liveEdge === 'bottom' && backlogFeedActive()) engageLiveTowardNewer(el.clientHeight);
       el.scrollTop = Math.min(maxScroll, el.scrollTop + el.clientHeight);
       if (isManualPause && liveEdge === 'bottom' && before === el.scrollTop && fillRubberFullyVisible()) {
         pulseFillPauseLabels();
@@ -1278,13 +1417,22 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     syncOverlayScrollbar();
     // Ignore the scrolls our own compensation triggers.
     if (programmaticScrollRef.current || refindingAnchorRef.current) return;
+    // A pending backlog step owns the anchor until its rows land: the native
+    // scroll of the gesture that armed it must not re-anchor or re-follow.
+    if (flushPinRef.current) return;
     markCursorRef.current = null;
-    if (inOppositeRubberZone() || inFillRubberZone() || scrollbarHeldRef.current) {
+    releaseStickySpacerIfFits();
+    if (inOppositeRubberZone() || inFillRubberBand() || scrollbarHeldRef.current) {
       lockScrollGeometry();
     } else {
       unlockScrollGeometryIfSettled();
     }
-    if (inFillRubberZone() || inOppositeRubberZone()) scheduleRubberBand();
+    if (inFillRubberBand() || inOppositeRubberZone()) scheduleRubberBand();
+    if (inFillRubberZone() && backlogFeedActive()) {
+      // The empty fill slot is on screen with a backlog waiting: fill it.
+      engageLiveTowardNewer(0);
+      return;
+    }
     const newestVisible = newestFullyVisible();
 
     if (detachedFromEdgeRef.current) {
@@ -1298,7 +1446,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       return;
     }
 
-    if (newestVisible && !isManualPause) {
+    // Returning to the newest row re-follows — unless a backlog waits, which
+    // would flush all at once; it is fed in by fill-axis gestures instead.
+    if (newestVisible && !isManualPause && !backlogFeedActive()) {
       enableLiveFollow();
       return;
     }
@@ -1375,6 +1525,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     // Pill path wants the jump to the merged newest — not a seamless pin.
     flushPinRef.current = false;
     pendingFlushScrollDeltaRef.current = null;
+    revealRef.current = null;
+    setStickyOppositeSpacerPx(0);
     jumpToLiveRef.current = true;
     enableLiveFollow();
     onJumpToLive?.();
@@ -1467,10 +1619,38 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       // the virtualizer bring it back (it copes with unmeasured rows) and then
       // restore its offset.
       if (refindingAnchorRef.current) return;
-      const inserted = anchorRowsRef.current !== telegramRows && !userScrolling();
+      // A changed row list means rows were inserted, even while the user's
+      // gesture that triggered the flush still counts as scrolling. Only an
+      // unchanged list with a missing anchor is the user having jumped away.
+      const rowsChanged = anchorRowsRef.current !== telegramRows;
+      const inserted = rowsChanged || !userScrolling();
       const idx = inserted ? telegramRows.findIndex(r => anchorKey(r) === anchor.key) : -1;
       if (idx === -1) {
         captureAnchor();
+        return;
+      }
+      // Place the anchor from the virtualizer's layout right now, before paint:
+      // an async scrollToIndex would flash the live edge first. Estimates for
+      // unmeasured rows are corrected by the virtualizer's own first-measure
+      // adjustment and the totalSize pin that follows.
+      const start = virtualizer.measurementsCache[idx]?.start
+        ?? virtualizer.getOffsetForIndex(idx, 'start')?.[0];
+      if (start != null) {
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        markProgrammatic();
+        el.scrollTop = Math.min(max, Math.max(0, start - anchor.offset));
+        anchorRowsRef.current = telegramRows;
+        refindingAnchorRef.current = true;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          refindingAnchorRef.current = false;
+          if (anchorRef.current !== anchor) return;
+          const found = rowOffset(anchor.key);
+          if (found == null) captureAnchor();
+          else if (Math.abs(found - anchor.offset) > 0.5) {
+            markProgrammatic();
+            el.scrollTop += found - anchor.offset;
+          }
+        }));
         return;
       }
       refindingAnchorRef.current = true;
@@ -1588,20 +1768,60 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     firstKey: null, lastKey: null, len: 0,
   });
   const wasPausedRef = useRef(!!isPaused);
-  const applyPendingFlushScroll = () => {
+  /**
+   * Apply the gesture delta held since the flush was armed. Returns the part
+   * the scroll range clamped away (0 when it fit). The anchor is re-captured
+   * at the new position, so later pins (remeasure, totalSize) hold it there
+   * instead of undoing the gesture.
+   */
+  const applyPendingFlushScroll = (): number => {
     const delta = pendingFlushScrollDeltaRef.current;
-    if (delta == null) return;
+    if (delta == null) return 0;
     pendingFlushScrollDeltaRef.current = null;
     const el = parentRef.current;
-    if (!el) return;
+    if (!el) return 0;
     const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const before = el.scrollTop;
+    const target = Math.min(max, Math.max(0, before + delta));
+    if (target === before) return delta;
     markProgrammatic();
-    el.scrollTop = Math.min(max, Math.max(0, el.scrollTop + delta));
+    el.scrollTop = target;
+    const applied = el.scrollTop - before;
+    if (applied !== 0) {
+      // Keep the (already measured) anchor row, at its new offset. Capturing a
+      // freshly inserted row instead would pin an estimate: its remeasure then
+      // shifts everything below it.
+      const anchor = anchorRef.current;
+      const now = anchor ? rowOffset(anchor.key) : null;
+      if (anchor && now != null) anchorRef.current = { key: anchor.key, offset: now };
+      else captureAnchor(null, { ignoreSelection: true });
+    }
+    return delta - applied;
   };
   const pinFlushViewport = () => {
     atEdgeRef.current = false;
-    if (!anchorRef.current) captureAnchor();
+    if (!anchorRef.current) captureAnchor(null, { ignoreSelection: true });
     pinAnchor();
+  };
+  /**
+   * After a metered step landed: top the slice up while the fill slot is still
+   * on screen (gesture outran the rows, or every revealed row was filtered
+   * out). Returns true when another step was requested.
+   */
+  const continueRevealIfSlotOpen = (leftover: number, rowsLanded: boolean): boolean => {
+    if (!backlogFeedActive()) return false;
+    const el = parentRef.current;
+    if (!el) return false;
+    const overshoot = Math.abs(el.scrollTop - settledEdgeScrollTop());
+    if (rowsLanded && !inFillRubberZone() && leftover === 0) return false;
+    // Nothing visible came of the last slice: widen it so a filtered backlog
+    // does not need one render per row.
+    const prevN = revealRef.current?.n ?? 1;
+    const n = rowsLanded
+      ? revealCountFor(overshoot + Math.abs(leftover))
+      : Math.max(1, Math.min(pausedCount, prevN * 2, REVEAL_MAX));
+    requestReveal(leftover, n);
+    return true;
   };
   useLayoutEffect(() => {
     const rows = telegramRows;
@@ -1616,8 +1836,30 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     const pinArmed =
       !jumpingToLive
       && (flushing || flushPinRef.current || pendingFlushScrollDeltaRef.current != null);
+    // A metered slice has landed when the backlog shrank since it was asked for.
+    const reveal = revealRef.current;
+    const revealLanded = reveal != null && pausedCount < reveal.before;
+    const finishFlush = () => {
+      flushPinRef.current = false;
+      revealRef.current = null;
+      syncFollowFromNewestVisibility();
+      releaseStickySpacerIfFits();
+    };
 
     if (rows.length === 0) setStripeOffset(0);
+    if (isTimeSort && prev.len === 0 && rows.length > 0 && restoredRef.current) {
+      // First rows after the list was emptied (buffer clear): the mount-time
+      // restore does not run again, so scrollTop still sits at 0 — inside the
+      // fill padding. Settle on the edge telegram when following or jumping,
+      // otherwise the spacer stays on screen until the next telegram arrives.
+      if (jumpToLiveRef.current || atEdgeRef.current) {
+        jumpToLiveRef.current = false;
+        atEdgeRef.current = true;
+        setStripeOffset(0);
+        scrollToEdge();
+      }
+      return;
+    }
     if (!isTimeSort || prev.len === 0 || rows.length === 0) return;
 
     const edgeKey = liveEdge === 'top' ? firstKey : lastKey;
@@ -1625,6 +1867,15 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     if (!prevEdgeKey || edgeKey === prevEdgeKey) {
       if (jumpingToLive) {
         // Wait for the pause buffer to merge; keep the jump arm.
+        return;
+      }
+      if (pinArmed && revealLanded) {
+        // The slice landed but no row of it is visible (all filtered out):
+        // ask for the next one, or settle the gesture if the backlog is gone.
+        if (continueRevealIfSlotOpen(pendingFlushScrollDeltaRef.current ?? 0, false)) return;
+        pinFlushViewport();
+        applyPendingFlushScroll();
+        finishFlush();
         return;
       }
       if (pinArmed) {
@@ -1692,10 +1943,17 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       // Seamless flush: pin + gesture delta only — never scrollToEdge.
       // Follow only if newest is still fully visible after the delta (user
       // landed on the live edge); a mid-backlog delta must not snap to edge.
+      const el = parentRef.current;
+      const beforePin = el?.scrollTop ?? 0;
       pinFlushViewport();
-      applyPendingFlushScroll();
-      flushPinRef.current = false;
-      syncFollowFromNewestVisibility();
+      // A held scrollbar thumb maps from the drag's start scrollTop: rows
+      // inserted before it shift that origin by the pin.
+      if (el && sbDragRef.current && liveEdge === 'top') {
+        sbDragRef.current.startScrollTop += el.scrollTop - beforePin;
+      }
+      const leftover = applyPendingFlushScroll();
+      if (revealLanded && continueRevealIfSlotOpen(leftover, true)) return;
+      finishFlush();
       return;
     }
 
@@ -1711,16 +1969,51 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     }
 
     pinAnchor();
+    // pausedCount: a metered slice may land without changing the row list
+    // (every revealed row filtered out) and still needs to be continued.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [telegramRows, isPaused]);
+  }, [telegramRows, isPaused, pausedCount]);
 
   const totalSize = virtualizer.getTotalSize();
   useLayoutEffect(() => {
     // Do not fight rubber overscroll / animation when rows remeasure / prepend.
-    if (rubberAnimRef.current || inFillRubberZone() || inOppositeRubberZone()) return;
+    if (rubberAnimRef.current || inFillRubberBand() || inOppositeRubberZone()) return;
     pinAnchor();
+    // Remeasured (shorter) rows can leave the fill slot open again while a
+    // backlog waits: fill it rather than showing blank padding. Not before the
+    // mount-time restore has placed the viewport (scrollTop is 0 until then).
+    if (restoredRef.current && !flushPinRef.current && inFillRubberZone() && backlogFeedActive()) {
+      engageLiveTowardNewer(0);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalSize]);
+
+  // The opposite spacer sits above the rows when the live edge is at the
+  // bottom: a change in its height (short-list pad, sticky release) shifts
+  // every row, so hold the anchor across it.
+  useLayoutEffect(() => {
+    if (liveEdge !== 'bottom') return;
+    if (rubberAnimRef.current || inFillRubberBand() || inOppositeRubberZone()) return;
+    pinAnchor();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oppositeSpacerPx]);
+
+  // Manual → auto pause while the fill spacer is on screen: the held spacer
+  // becomes the slot for the oldest backlog telegram, which slides in next to
+  // the edge row without moving it. The rest stays in the pause buffer and is
+  // fed in line by line as the user keeps scrolling toward the live edge.
+  const prevManualPauseRef = useRef(isManualPause);
+  useLayoutEffect(() => {
+    const wasManual = prevManualPauseRef.current;
+    prevManualPauseRef.current = isManualPause;
+    if (!wasManual || isManualPause) return;
+    if (flushPinRef.current || !isTimeSort) return;
+    if (!inFillRubberZone() || !backlogFeedActive()) return;
+    if (!oppositeRubberBusy()) cancelRubberBand();
+    atEdgeRef.current = false;
+    armMeteredReveal(0, 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManualPause]);
 
   // Visible columns in order, and the matching CSS grid template.
   // The delta column is always shown when enabled, regardless of sort (#311) —
@@ -2409,12 +2702,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
               pulseFillPauseLabels();
             }
           }
-          if (inOppositeRubberZone() || inFillRubberZone()) {
+          // While a backlog step is pending the geometry must stay live.
+          if (flushPinRef.current) return;
+          if (inOppositeRubberZone() || inFillRubberBand()) {
             lockScrollGeometry();
           } else {
             unlockScrollGeometryIfSettled();
           }
-          if (inFillRubberZone() || inOppositeRubberZone()) scheduleRubberBand();
+          if (inFillRubberBand() || inOppositeRubberZone()) scheduleRubberBand();
         }}
         onTouchMove={noteUserScroll}
         // A press on the container itself (not on a row) is the scrollbar.

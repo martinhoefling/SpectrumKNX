@@ -42,6 +42,13 @@ export interface TelegramCache {
   setPaused: (paused: boolean) => void;
   /** Telegrams ingested since the snapshot was frozen. */
   pausedCount: number;
+  /**
+   * Reveal the oldest `n` of the paused backlog while staying paused: the
+   * published snapshot grows by those rows and `pausedCount` shrinks by `n`.
+   * Returns the backlog still hidden. No-op (returns current backlog) when not
+   * paused or `n <= 0`.
+   */
+  revealPaused: (n: number) => number;
   /** Load a time range: cache hits appear immediately, gaps fetch in background. */
   loadRange: (startMs: number, endMs: number) => Promise<void>;
   /** True while any backend history fetch is in flight (#222). */
@@ -112,13 +119,30 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
 
   const [telegrams, setTelegrams] = useState<Telegram[]>([]);
   const [pausedCount, setPausedCount] = useState(0);
+  /** Mirrors `pausedCount` for synchronous reads (addLive / revealPaused). */
+  const pausedCountRef = useRef(0);
   const [activeLoads, setActiveLoads] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const updatePausedCount = useCallback((next: number) => {
+    pausedCountRef.current = next;
+    setPausedCount(next);
+  }, []);
 
   /** Publishes the buffer as a newest-first snapshot unless frozen by pause. */
   const publish = useCallback(() => {
     if (pausedRef.current) return;
     setTelegrams(bufferRef.current!.snapshot.map(e => e.telegram).reverse());
+  }, []);
+
+  /**
+   * Publishes the buffer minus its newest `hidden` entries (the still-paused
+   * backlog). Used for the metered reveal while the snapshot stays frozen.
+   */
+  const publishWithHidden = useCallback((hidden: number) => {
+    const snap = bufferRef.current!.snapshot;
+    const visible = Math.max(0, snap.length - Math.max(0, hidden));
+    setTelegrams(snap.slice(0, visible).map(e => e.telegram).reverse());
   }, []);
 
   const trackRemoved = useCallback((removed: TelegramEntry[]) => {
@@ -391,10 +415,10 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
           () => { pendingStoreCountRef.current--; },
         );
       }
-      if (pausedRef.current) setPausedCount(c => c + 1);
+      if (pausedRef.current) updatePausedCount(pausedCountRef.current + 1);
       else publish();
     },
-    [trackRemoved, publish, saveCoverage],
+    [trackRemoved, publish, saveCoverage, updatePausedCount],
   );
 
   const setConnected = useCallback(
@@ -423,11 +447,23 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
     (paused: boolean) => {
       if (pausedRef.current === paused) return;
       pausedRef.current = paused;
-      setPausedCount(0);
+      updatePausedCount(0);
       // Resuming reveals everything ingested while frozen.
       if (!paused) publish();
     },
-    [publish],
+    [publish, updatePausedCount],
+  );
+
+  const revealPaused = useCallback(
+    (n: number): number => {
+      const backlog = pausedCountRef.current;
+      if (!pausedRef.current || n <= 0 || backlog <= 0) return backlog;
+      const hidden = Math.max(0, backlog - Math.floor(n));
+      updatePausedCount(hidden);
+      publishWithHidden(hidden);
+      return hidden;
+    },
+    [publishWithHidden, updatePausedCount],
   );
 
   const clear = useCallback(async () => {
@@ -440,10 +476,10 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
     saveCoverage();
     // Drop the pause-backlog counter too — cleared telegrams must not keep the
     // jump-to-live pill alive with a count that can never appear in the list.
-    setPausedCount(0);
+    updatePausedCount(0);
     setTelegrams([]);
     await cacheRef.current!.clear().catch(() => {});
-  }, [trackRemoved, saveCoverage]);
+  }, [trackRemoved, saveCoverage, updatePausedCount]);
 
   return {
     telegrams,
@@ -451,6 +487,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
     setConnected,
     setPaused,
     pausedCount,
+    revealPaused,
     loadRange,
     isLoading: activeLoads > 0,
     loadError,
