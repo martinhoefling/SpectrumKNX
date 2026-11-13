@@ -224,7 +224,10 @@ export function useChartData(
             const key = dptOverrides[addr] || formatDpt(match.dpt_main, match.dpt_sub);
             const shown = formatBusValueForDpt(match, key);
             if (!shown.text || shown.text === '—') return null;
-            return shown.unit ? `${shown.text} ${shown.unit}` : shown.text;
+            // Fixed-width text DPTs pad the bus field; a chart label keeps the text.
+            const text = shown.text.trimEnd();
+            if (!text) return null;
+            return shown.unit ? `${text} ${shown.unit}` : text;
           })() : null);
         }
         return { address: addr, name, data, real, labels };

@@ -1410,6 +1410,14 @@ export function WriteToBusPanel({
       return;
     }
 
+    if (cmd.type === 'clearRow') {
+      if (!isLiveJob(jobsByRowIdRef.current[cmd.rowId])) {
+        updateRow(cmd.rowId, clearAllStatusPatch());
+      }
+      finish({ rowId: cmd.rowId, created: false, matched: true });
+      return;
+    }
+
     if (cmd.type === 'writeViaRow') {
       const row = rowsRef.current.find(r => r.id === cmd.rowId);
       if (!row) {
@@ -2667,7 +2675,7 @@ export function WriteToBusPanel({
 }
 
 /**
- * Last bus value for the row's GA: "Last value:" + value (+ unit).
+ * Last bus value for the row's GA: "last value:" + value (+ unit).
  * Text follows the row's effective DPT (same vocabulary as the send buttons).
  * Click the value to toggle decoded ↔ raw hex. Date/time/kind live in Event.
  */
@@ -2683,7 +2691,7 @@ function LastValue({ telegram, dpt }: { telegram: Telegram | undefined; dpt: str
       className="wtb-last-value"
       title={`Last telegram on this group address: ${telegramEventType(telegram)} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${new Date(telegram.timestamp).toLocaleString()}`}
     >
-      <span style={{ color: 'var(--text-dim)' }}>Last value:</span>
+      <span style={{ color: 'var(--text-dim)' }}>last value:</span>
       <BusValueText
         value={telegram}
         dpt={dpt}

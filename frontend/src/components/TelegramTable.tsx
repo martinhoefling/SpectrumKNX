@@ -72,6 +72,7 @@ interface TelegramTableProps {
   ) => void;
   onReadWithSchedule?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onCancelLinked?: (rowId?: string) => void;
+  onClearLinked?: (rowId?: string) => void;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -250,7 +251,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   latestTelegram, onAltSend, onCtrlSend, sendPanelAddresses,
   activeSendJobAddresses,
   gaJobStatuses,
-  linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onReadWithSchedule, onCancelLinked,
+  linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onReadWithSchedule, onCancelLinked, onClearLinked,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -2286,6 +2287,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   onWriteWithSchedule={onWriteWithSchedule}
                   onReadWithSchedule={onReadWithSchedule}
                   onCancelLinked={onCancelLinked}
+                  onClearLinked={onClearLinked}
                 />
               )}
             </div>
@@ -2441,6 +2443,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         onWriteWithSchedule={onWriteWithSchedule}
         onReadWithSchedule={onReadWithSchedule}
         onCancelLinked={onCancelLinked}
+        onClearLinked={onClearLinked}
         onAltSend={onAltSend}
         onCtrlSend={onCtrlSend}
       >

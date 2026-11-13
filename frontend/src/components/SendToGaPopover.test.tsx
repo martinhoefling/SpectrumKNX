@@ -38,7 +38,7 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
   render(<SendToGaPopover address="16/0/1" name="SRV_Alive" dptMain={1} dptSub={11} />);
 
   // Popover is closed initially.
-  expect(screen.queryByText(/Last value/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/last value/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
 
@@ -135,7 +135,7 @@ test('jump button calls onGotoTelegram with the last telegram', async () => {
   }));
   // Jump must not close the popover.
   expect(screen.getByText('16/0/1')).toBeInTheDocument();
-  expect(screen.getByText(/Last value/)).toBeInTheDocument();
+  expect(screen.getByText(/last value/)).toBeInTheDocument();
 });
 
 test('open trigger stays accent-colored while the popover is open', async () => {
@@ -342,7 +342,7 @@ test('triggers a GroupValueRead from the Read button', async () => {
 
   // Non-DPT-1 shows the free value field; no last-value row without a telegram.
   await waitFor(() => expect(screen.getByPlaceholderText(/Value/)).toBeInTheDocument());
-  expect(screen.queryByText(/Last value/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/last value/)).not.toBeInTheDocument();
   expect(screen.getByLabelText('Datapoint type')).toHaveValue('9.004');
   const write = screen.getByRole('button', { name: /Write/ });
   const read = screen.getByRole('button', { name: /Read/ });
@@ -438,7 +438,7 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
     <SendToGaPopover address="1/1/97" name="Helligkeit" dptMain={9} dptSub={4} latestTelegram={null} />,
   );
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
-  await waitFor(() => expect(screen.getByText(/Last value/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/last value/)).toBeInTheDocument());
   expect(screen.getByText('21.5')).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /^Read$/ }));
@@ -495,9 +495,9 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
 
   // Close clears wait: reopen must not show leftover read-wait status.
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
-  expect(screen.queryByText(/Last value/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/last value/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
-  await waitFor(() => expect(screen.getByText(/Last value/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/last value/)).toBeInTheDocument());
   expect(
     (document.querySelector('[data-status-field]') as HTMLElement | null)?.getAttribute('aria-label') ?? '',
   ).not.toMatch(/read request sent/i);
@@ -510,9 +510,9 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
     ).toMatch(/read request sent/i);
   });
   fireEvent.keyDown(window, { key: 'Escape' });
-  expect(screen.queryByText(/Last value/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/last value/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
-  await waitFor(() => expect(screen.getByText(/Last value/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/last value/)).toBeInTheDocument());
   expect(
     (document.querySelector('[data-status-field]') as HTMLElement | null)?.getAttribute('aria-label') ?? '',
   ).not.toMatch(/read request sent/i);
@@ -1504,4 +1504,64 @@ test('clearing delay and every drops the send-panel link', async () => {
     delay: '',
     every: '',
   }));
+});
+
+test('Clear empties a local read status in the popover', async () => {
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/telegrams': { telegrams: [] },
+    '/api/knx/read': { status: 'ok' },
+  }));
+  render(<SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /^Read$/ }));
+  const status = await waitFor(() => {
+    const el = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(el?.getAttribute('aria-label') ?? '').toMatch(/read request sent/i);
+    return el!;
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Clear status' }));
+  expect(status.getAttribute('aria-label') ?? '').toBe('');
+  expect(screen.queryByRole('button', { name: 'Clear status' })).not.toBeInTheDocument();
+});
+
+test('Clear empties a mirrored send-panel status and clears that row', async () => {
+  const onClearLinked = vi.fn();
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+  const linkedStatus = {
+    rowId: 'row-1',
+    job: null,
+    feedback: { ok: true, msg: 'Sent On to 1/1/1' },
+    busy: false,
+    statusTelegram: {
+      timestamp: '2026-07-17T09:00:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      target_address: '1/1/1',
+      value_formatted: 'On',
+    },
+    address: '1/1/1',
+    name: 'Lamp',
+    value: 'On',
+    dpt: '1.001',
+  };
+  render(
+    <SendToGaPopover
+      address="1/1/1"
+      dptMain={1}
+      dptSub={1}
+      linkedStatus={linkedStatus as never}
+      onClearLinked={onClearLinked}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const status = await waitFor(() => {
+    const el = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(el?.getAttribute('aria-label') ?? '').toMatch(/written/i);
+    return el!;
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Clear status' }));
+  expect(onClearLinked).toHaveBeenCalledWith('row-1');
+  expect(status.getAttribute('aria-label') ?? '').toBe('');
+  expect(screen.queryByRole('button', { name: 'Clear status' })).not.toBeInTheDocument();
+  expect(screen.queryByText('WRITE')).not.toBeInTheDocument();
 });

@@ -1181,10 +1181,10 @@ test('shows the last value of the entered group address (#439)', async () => {
   expect(screen.queryByText('Last:')).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
-  await waitFor(() => expect(lastValueOf()).toHaveTextContent('Last value:21.5 °C'));
+  await waitFor(() => expect(lastValueOf()).toHaveTextContent('last value:21.5 °C'));
   expect(lastValueOf().querySelector('[data-bus-pulse="Incoming"]')).toBeTruthy();
   // Prefix + value+unit; event kind and time live in the Event column.
-  expect(lastValueOf()).toHaveTextContent('Last value:');
+  expect(lastValueOf()).toHaveTextContent('last value:');
   expect(lastValueOf()).not.toHaveTextContent('WRITE');
   expect(lastValueOf().textContent).not.toMatch(/\d{2}:\d{2}:\d{2}/);
   expect(document.querySelector('[data-wtb-col="3"]')).toHaveTextContent('WRITE');

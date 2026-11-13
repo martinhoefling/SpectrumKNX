@@ -77,6 +77,7 @@ export function SendToGaHost({
   onWriteWithSchedule,
   onReadWithSchedule,
   onCancelLinked,
+  onClearLinked,
   onAltSend,
   onCtrlSend,
 }: {
@@ -95,6 +96,7 @@ export function SendToGaHost({
   ) => void;
   onReadWithSchedule?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onCancelLinked?: (rowId?: string) => void;
+  onClearLinked?: (rowId?: string) => void;
   onAltSend?: () => void;
   onCtrlSend?: (info: {
     address: string;
@@ -146,6 +148,7 @@ export function SendToGaHost({
           onWriteWithSchedule={onWriteWithSchedule}
           onReadWithSchedule={onReadWithSchedule}
           onCancelLinked={onCancelLinked}
+          onClearLinked={onClearLinked}
         />
       )}
     </SendToGaHostContext.Provider>
@@ -211,6 +214,24 @@ interface Props {
   ) => void;
   onReadWithSchedule?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onCancelLinked?: (rowId?: string) => void;
+  onClearLinked?: (rowId?: string) => void;
+}
+
+function linkedStatusSignature(status: LinkedRowStatus | null | undefined): string {
+  if (!status) return '';
+  const tg = status.statusTelegram;
+  return [
+    status.rowId,
+    status.job?.id ?? '',
+    status.job?.state ?? '',
+    status.feedback?.ok ? '1' : '0',
+    status.feedback?.msg ?? '',
+    status.statusWatch ?? '',
+    status.busy ? '1' : '0',
+    tg?.timestamp ?? '',
+    tg?.telegram_type ?? '',
+    tg?.simplified_type ?? '',
+  ].join('\u001f');
 }
 
 function isReadTelegram(tg: Telegram | null | undefined): boolean {
@@ -391,6 +412,7 @@ export function SendToGaPopover({
   onWriteWithSchedule,
   onReadWithSchedule,
   onCancelLinked,
+  onClearLinked,
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [hovered, setHovered] = useState(false);
@@ -533,6 +555,7 @@ export function SendToGaPopover({
       onWriteWithSchedule={onWriteWithSchedule}
       onReadWithSchedule={onReadWithSchedule}
       onCancelLinked={onCancelLinked}
+      onClearLinked={onClearLinked}
       busPulse={busPulse}
       sendIconEpoch={sendIconEpoch}
     />
@@ -558,6 +581,7 @@ function SendToGaPopoverPanel({
   onWriteWithSchedule,
   onReadWithSchedule,
   onCancelLinked,
+  onClearLinked,
   busPulse = null,
   sendIconEpoch = 0,
 }: Props & { busPulse?: BusPulseDir | null; sendIconEpoch?: number }) {
@@ -631,6 +655,8 @@ function SendToGaPopoverPanel({
   const [awaitingRead, setAwaitingRead] = useState(false);
   /** Bound Read/Response while waiting or just after — for green Response chrome. */
   const [statusTelegram, setStatusTelegram] = useState<Telegram | null>(null);
+  /** Linked panel status hidden by Clear until that snapshot changes. */
+  const [hiddenLinkedSig, setHiddenLinkedSig] = useState<string | null>(null);
 
   const catalogFromCtx = useDptCatalog();
   const dptCatalog = dptCatalogProp ?? catalogFromCtx;
@@ -1148,15 +1174,18 @@ function SendToGaPopoverPanel({
   const readPhase = useGaReadPhase(address);
 
   // Same status shell as the send panel (always mounted; content when active).
-  const statusJob = linkedStatus?.job ?? null;
+  // Clear hides the current linked snapshot until the panel row actually changes.
+  const linkedSig = linkedStatusSignature(linkedStatus);
+  const shownLinked = hiddenLinkedSig != null && hiddenLinkedSig === linkedSig ? null : linkedStatus;
+  const statusJob = shownLinked?.job ?? null;
   // Typing clears feedback, but an open read stays visible until a telegram binds.
   const statusFeedback = (
     feedback
     ?? (awaitingRead && !statusTelegram ? { ok: true, msg: 'Read request sent' } : null)
-  ) ?? linkedStatus?.feedback ?? null;
-  const statusTg = linkedStatus?.job
-    ? (linkedStatus.statusTelegram ?? null)
-    : (statusTelegram ?? linkedStatus?.statusTelegram ?? null);
+  ) ?? shownLinked?.feedback ?? null;
+  const statusTg = shownLinked?.job
+    ? (shownLinked.statusTelegram ?? null)
+    : (statusTelegram ?? shownLinked?.statusTelegram ?? null);
   const statusShowCountdown = Boolean(
     statusJob && (statusJob.next_send_at || statusJob.state === 'waiting'),
   );
@@ -1166,7 +1195,7 @@ function SendToGaPopoverPanel({
     && (statusJob.sends_done ?? 0) > 0,
   );
   const statusHasChrome = Boolean(
-    statusJob || awaitingRead || statusFeedback || statusTg || linkedStatus?.statusWatch === 'read',
+    statusJob || awaitingRead || statusFeedback || statusTg || shownLinked?.statusWatch === 'read',
   );
   const statusShowCancel = Boolean(statusJob);
 
@@ -1260,7 +1289,7 @@ function SendToGaPopoverPanel({
           {lastHasValue && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
               <span>
-                Last value:{' '}
+                last value:{' '}
                 <BusValueText
                   value={last}
                   dpt={dpt}
@@ -1438,17 +1467,21 @@ function SendToGaPopoverPanel({
             showActionCol={statusHasChrome}
             actionWidth={statusShowCancel ? STATUS_ACTION_WIDTH : STATUS_CLEAR_WIDTH}
             statusTelegram={statusTg}
-            address={linkedStatus?.address ?? address}
-            groupName={linkedStatus?.name ?? name ?? ''}
-            value={linkedStatus?.value ?? value}
-            dpt={linkedStatus?.dpt ?? dpt}
+            address={shownLinked?.address ?? address}
+            groupName={shownLinked?.name ?? name ?? ''}
+            value={shownLinked?.value ?? value}
+            dpt={shownLinked?.dpt ?? dpt}
             onCancel={() => {
-              if (statusJob) onCancelLinked?.(linkedStatus?.rowId);
+              if (statusJob) onCancelLinked?.(shownLinked?.rowId);
             }}
             onClear={() => {
               setFeedback(null);
               setStatusTelegram(null);
               setAwaitingRead(false);
+              if (linkedStatus && !linkedStatus.job) {
+                setHiddenLinkedSig(linkedStatusSignature(linkedStatus));
+                onClearLinked?.(linkedStatus.rowId);
+              }
             }}
             onJump={() => {
               if (statusTg && onGotoTelegram) onGotoTelegram(statusTg);

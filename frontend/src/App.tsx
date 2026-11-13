@@ -886,6 +886,17 @@ function App() {
     });
   }, [popoverLinkedRowId]);
 
+  const handleClearLinked = useCallback((rowId?: string) => {
+    const id = rowId ?? popoverLinkedRowId;
+    if (!id) return;
+    sendPanelCmdNonceRef.current += 1;
+    setSendPanelCommand({
+      type: 'clearRow',
+      nonce: sendPanelCmdNonceRef.current,
+      rowId: id,
+    });
+  }, [popoverLinkedRowId]);
+
   const handleSendPanelCommandHandled = useCallback((result: {
     nonce: number;
     rowId: string | null;
@@ -1622,6 +1633,7 @@ function App() {
                     onWriteWithSchedule={handleWriteWithSchedule}
                     onReadWithSchedule={handleReadWithSchedule}
                     onCancelLinked={handleCancelLinked}
+                    onClearLinked={handleClearLinked}
                     latestTelegram={latestTelegram}
                     quickFilterOpen={quickFilterOpen}
                     onQuickFilterOpenChange={setQuickFilterOpen}
