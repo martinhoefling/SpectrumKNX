@@ -8,6 +8,7 @@ import {
   expectedPanelDpt,
   panelAddressesFromRows,
   mergeColTracks,
+  midPaneMinWidth,
   midTracksTemplate,
   resolvePanelHeight,
   scrollLeftOnViewportResize,
@@ -70,6 +71,17 @@ test('status shell keeps its height when cleared and aligns count, time, and eve
     />,
   );
   expect(document.querySelector('[data-status-field]')!.style.height).toBe(filledHeight);
+});
+
+test('midPaneMinWidth is the same sum for every row and drops the value track', () => {
+  const tracks = [90, 100, 20, 30, 40, 50, 60, 70, 80, 10, 11, 12, 13];
+  expect(midPaneMinWidth(tracks, true)).toBe(
+    'calc(100px + 20px + 30px + 40px + 50px + 60px + 70px + 6 * 0.45rem)',
+  );
+  expect(midPaneMinWidth(tracks, false)).toBe(
+    'calc(100px + 20px + 30px + 40px + 50px + 60px + 5 * 0.45rem)',
+  );
+  expect(midPaneMinWidth(null, true)).toBeNull();
 });
 
 test('hiding the value column drops that track, not the DPT track', () => {
@@ -2643,6 +2655,49 @@ test('onPanelAddressesChange reports all row GAs and clears on unmount', () => {
   expect(onPanelAddressesChange).toHaveBeenCalledWith(['1/2/3', '4/5/6']);
   unmount();
   expect(onPanelAddressesChange).toHaveBeenLastCalledWith([]);
+});
+
+test('adding and removing a row keeps every row on the same column template', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '9.001', value: '21', delay: '2', every: '' },
+    { address: '1/2/3', name: 'Short', dpt: '1.001', value: '', delay: '', every: '5' },
+  ]));
+  const { container } = render(<WriteToBusPanel targets={[]} />);
+  const templates = () => Array.from(container.querySelectorAll('.wtb-mid-inner')).map(el => ({
+    columns: (el as HTMLElement).style.gridTemplateColumns,
+    width: (el as HTMLElement).style.width,
+  }));
+  const before = templates();
+  expect(before).toHaveLength(2);
+  expect(before[0]).toEqual(before[1]);
+  expect(before[0].columns).not.toBe('');
+
+  fireEvent.click(screen.getByRole('button', { name: /^Add row at top$/i }));
+  const added = templates();
+  expect(added).toHaveLength(3);
+  expect(new Set(added.map(t => `${t.columns}|${t.width}`)).size).toBe(1);
+
+  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[2]);
+  const removed = templates();
+  expect(removed).toHaveLength(2);
+  expect(removed[0]).toEqual(removed[1]);
+});
+
+test('changing the DPT on one row leaves another row with the same GA alone', () => {
+  const targets = [{ address: '1/2/3', name: 'Dimmer', main: 5, sub: 1 }];
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Dimmer', dpt: '5.001', value: '50', delay: '', every: '' },
+    { address: '1/2/3', name: 'Dimmer', dpt: '5.001', value: '10', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={targets} />);
+  const dpts = () => screen.getAllByLabelText('Datapoint type') as HTMLInputElement[];
+  expect(dpts().map(el => el.value)).toEqual(['5.001', '5.001']);
+
+  fireEvent.change(dpts()[0], { target: { value: '9.001' } });
+  fireEvent.blur(dpts()[0]);
+
+  expect(dpts().map(el => el.value)).toEqual(['9.001', '5.001']);
+  expect(screen.getAllByPlaceholderText('Value').map(el => (el as HTMLInputElement).value)).toEqual(['', '10']);
 });
 
 test('header Add row at top inserts a blank row at index 0', () => {

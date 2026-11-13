@@ -182,7 +182,10 @@ test('the DPT field shows the designation beside the key', () => {
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   expect(dptInput(container)).toHaveValue('5.001');
   const shell = container.querySelector('[data-dpt-field]') as HTMLElement;
-  expect(shell).toContainElement(screen.getByText('Percent (%)'));
+  const designation = [...shell.querySelectorAll('span')].find(el => el.textContent === 'Percent (%)') as HTMLElement;
+  expect(designation).toBeTruthy();
+  expect(designation.style.textAlign).toBe('left');
+  expect(designation.style.marginLeft).toBe('0.35rem');
 });
 
 test('DPT prefills from the project when a GA is chosen', () => {

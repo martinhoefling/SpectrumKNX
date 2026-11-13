@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
-import { resetDiscreteLabelModes } from '../utils/dptValues';
 import { WriteControls, needsValueColumn, readModeButtonMuted, valueSendMuted } from './WriteControls';
 
 beforeEach(() => {
   localStorage.clear();
-  resetDiscreteLabelModes();
 });
 
 test('Response follows the write button that sends the job value', () => {
@@ -800,16 +798,15 @@ test('≤4-bit label mode stays when the DPT changes', () => {
   expect(screen.queryByRole('button', { name: /^up$/i })).not.toBeInTheDocument();
 });
 
-test('≤4-bit label mode is shared across WriteControls of different DPTs', () => {
+test('≤4-bit label mode belongs to one WriteControls, not every row', () => {
   render(
     <>
       <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={() => {}} />
-      <WriteControls dptMain={1} dptKey="1.008" value="" onValueChange={() => {}} onWrite={() => {}} />
+      <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={() => {}} />
     </>,
   );
-  fireEvent.click(screen.getByRole('button', { name: /^on$/i }), { ctrlKey: true });
-  // 1.001 on/off and 1.008 up/down follow the same panel mode.
-  expect(screen.getAllByRole('button', { name: /^0x1$/i })).toHaveLength(2);
-  expect(screen.getAllByRole('button', { name: /^0x0$/i })).toHaveLength(2);
-  expect(screen.queryByRole('button', { name: /^up$/i })).not.toBeInTheDocument();
+  const ons = screen.getAllByRole('button', { name: /^on$/i });
+  fireEvent.click(ons[0], { ctrlKey: true });
+  expect(screen.getAllByRole('button', { name: /^0x1$/i })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: /^on$/i })).toHaveLength(1);
 });

@@ -422,9 +422,28 @@ function leftColWidth(colTracks: number[] | null): string {
 
 function rightPaneWidth(colTracks: number[] | null): string {
   if (!colTracks) return 'max-content';
-  const tracks = colTracks.slice(WTB_RIGHT_START);
-  const gaps = Math.max(0, tracks.length - 1);
-  return `calc(${tracks.map(w => `${w}px`).join(' + ')} + ${gaps} * ${WTB_COL_GAP})`;
+  return paneMinWidth(colTracks.slice(WTB_RIGHT_START));
+}
+
+/** Pixel sum of tracks plus the shared column gap. Same string on every row. */
+function paneMinWidth(widths: number[]): string {
+  if (widths.length === 0) return '0px';
+  const gaps = Math.max(0, widths.length - 1);
+  return `calc(${widths.map(w => `${w}px`).join(' + ')} + ${gaps} * ${WTB_COL_GAP})`;
+}
+
+/**
+ * Minimum width of the scrolling middle (name … value). Every row uses this
+ * same width, so a longer name or DPT on one row cannot shove that row's
+ * later fields out of line with the others.
+ */
+export function midPaneMinWidth(colTracks: number[] | null, showValueCol: boolean): string | null {
+  if (!colTracks) return null;
+  const slice = colTracks.slice(WTB_MID_START, WTB_MID_END);
+  const visible = showValueCol
+    ? slice
+    : slice.filter((_, i) => WTB_MID_START + i !== WTB_VALUE_COL);
+  return paneMinWidth(visible);
 }
 
 function measureIntrinsicWidth(el: HTMLElement): number {
@@ -873,6 +892,10 @@ export function WriteToBusPanel({
   const rightTemplateColumns = useMemo(() => rightTracksTemplate(colTracks), [colTracks]);
   const leftWidth = useMemo(() => leftColWidth(colTracks), [colTracks]);
   const rightWidth = useMemo(() => rightPaneWidth(colTracks), [colTracks]);
+  const midMinWidth = useMemo(
+    () => midPaneMinWidth(colTracks, showValueCol),
+    [colTracks, showValueCol],
+  );
   const paneTemplateColumns = useMemo(
     () => `${leftWidth} minmax(0, 1fr) ${rightWidth}`,
     [leftWidth, rightWidth],
@@ -966,9 +989,15 @@ export function WriteToBusPanel({
 
     const measureMidScroll = () => {
       const clip = midClipRef.current;
-      const inner = midInnerRef.current;
       const view = clip ? clip.clientWidth : null;
-      const content = inner ? Math.ceil(inner.scrollWidth) : null;
+      // Every row shares the track template. The scrollbar follows the widest
+      // inner so a row added below the first is not clipped short.
+      const inners = grid.querySelectorAll('.wtb-mid-inner');
+      let content: number | null = null;
+      inners.forEach(node => {
+        const w = Math.ceil((node as HTMLElement).scrollWidth);
+        content = content == null ? w : Math.max(content, w);
+      });
       if (view != null) {
         const prev = prevMidViewportRef.current;
         // First measure stays left-aligned. A later shrink shifts left only
@@ -1923,12 +1952,13 @@ export function WriteToBusPanel({
           const rowJob = jobsByRowId[row.id] ?? null;
           const showJob = isLiveJob(rowJob);
           const statusTelegram = visibleStatusTelegram(row, showJob ? rowJob : null, lastTelegram);
-          // When the project names a DPT main, the hint stays within that main —
-          // telegram length is fixed (5.001 → 5.010 ok, not 9.001). With no
-          // project DPT the user may pick any known type.
-          const allowedDpts = known?.main == null
+          // Suggestions follow this row's DPT. An empty field starts from the
+          // project main. Another row with the same GA keeps its own list.
+          const rowDptMain = row.dpt.trim() ? parseDptMain(row.dpt) : null;
+          const listMain = rowDptMain ?? known?.main ?? null;
+          const allowedDpts = listMain == null
             ? dptOptions
-            : dptOptions.filter(o => Number(o.key.split('.')[0]) === known.main);
+            : dptOptions.filter(o => Number(o.key.split('.')[0]) === listMain);
           const delayPlaceholder = 'delay';
           const everyPlaceholder = 'every';
           const gridRow = rowIndex + 1;
@@ -2016,7 +2046,7 @@ export function WriteToBusPanel({
                     gridTemplateColumns: midTemplateColumns,
                     columnGap: WTB_COL_GAP,
                     alignItems: 'center',
-                    width: 'max-content',
+                    width: midMinWidth ?? 'max-content',
                     minWidth: '100%',
                   }}
                 >
@@ -2103,6 +2133,7 @@ export function WriteToBusPanel({
               </div>
               <div
                 data-wtb-row-id={row.id}
+                className="wtb-right-grid"
                 style={{
                   gridColumn: 3,
                   gridRow,
@@ -2110,6 +2141,7 @@ export function WriteToBusPanel({
                   gridTemplateColumns: rightTemplateColumns,
                   columnGap: WTB_COL_GAP,
                   alignItems: 'center',
+                  width: '100%',
                   minWidth: 0,
                   ...stickyFirst,
                 }}
@@ -2287,6 +2319,13 @@ export function WriteToBusPanel({
         }
         .wtb-mid-inner {
           transform: translateX(var(--wtb-mid-x, 0px));
+        }
+        /* Content stays inside the shared track. A long name or DPT on one
+           row must not widen only that row and shift the fields beside it. */
+        .wtb-mid-inner > *,
+        .wtb-right-grid > * {
+          min-width: 0;
+          max-width: 100%;
         }
         .wtb-panel-title {
           display: flex;

@@ -1409,7 +1409,7 @@ function SendToGaPopoverPanel({
                   valueColProps={showValue
                     ? {
                         style: { gridArea: 'value', width: '100%', minWidth: 0 },
-                        onBlur: commitScheduleLink,
+                        onBlur: () => commitScheduleLink(),
                       }
                     : { style: { display: 'none' } }}
                   sendColProps={{

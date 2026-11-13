@@ -10,12 +10,12 @@ import {
   type ScheduledSendStatus,
 } from '../utils/knxSend';
 import {
-  cycleDiscreteLabelMode,
   discreteDptValues,
   formatDiscreteChoiceLabel,
-  useDiscreteLabelMode,
+  nextDiscreteLabelMode,
   type BusPayload,
   type DiscreteChoice,
+  type DiscreteLabelMode,
 } from '../utils/dptValues';
 import { boolBtn, primaryBtn } from '../utils/buttonStyles';
 import { focusVisible, useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
@@ -368,13 +368,13 @@ export function WriteControls({
   // The select index belongs to one DPT. A different key reads as the first entry,
   // so changing the DPT does not need an effect to clear a stale pick.
   const [picked, setPicked] = useState({ key: dptKey, index: 0 });
-  /** Panel-wide name / 0x / 0b labels (every row, not one mode per DPT). */
-  const labelMode = useDiscreteLabelMode();
+  /** This control only. Another row, even with the same GA, keeps its own labels. */
+  const [labelMode, setLabelMode] = useState<DiscreteLabelMode>('name');
   const cycleLabelMode = (e: MouseEvent) => {
     if (!(e.ctrlKey || e.metaKey)) return false;
     e.preventDefault();
     e.stopPropagation();
-    cycleDiscreteLabelMode();
+    setLabelMode(mode => nextDiscreteLabelMode(mode));
     return true;
   };
   const discreteButtonLabel = (choice: DiscreteChoice) => (
@@ -1084,7 +1084,7 @@ function ValueChoiceSelect({
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: globalThis.MouseEvent) => {
       const t = e.target as Node;
       if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       setOpen(false);

@@ -74,13 +74,6 @@ function dateKey(y: number, mo: number, d: number) {
   return `${String(y).padStart(4, '0')}-${pad(mo + 1)}-${pad(d)}`;
 }
 
-function parseDateKey(s: string | undefined): { y: number; mo: number; d: number } | null {
-  if (!s) return null;
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  return { y: Number(m[1]), mo: Number(m[2]) - 1, d: Number(m[3]) };
-}
-
 function parseParts(value: string, mode: DatetimeMode): Parts | null {
   const now = new Date();
   if (!value.trim()) {
@@ -256,10 +249,6 @@ const iconBtnStyle = (disabled = false): CSSProperties => ({
   ...iconBtn(disabled),
   pointerEvents: disabled ? 'none' : undefined,
 });
-
-function partsInBounds(p: Parts, minDate?: string, maxDate?: string) {
-  return inRange(p.y, p.mo, p.d, minDate, maxDate);
-}
 
 /** Comparable local instant string for clamping (date / datetime / time). */
 function partsCompareKey(p: Parts, mode: DatetimeMode, withSeconds: boolean): string {

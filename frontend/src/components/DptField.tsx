@@ -413,7 +413,8 @@ export function DptField({
               textOverflow: 'ellipsis',
               minWidth: 0,
               flex: '1 1 auto',
-              textAlign: 'right',
+              textAlign: 'left',
+              marginLeft: '0.35rem',
               pointerEvents: 'none',
             }}
           >
