@@ -308,7 +308,7 @@ function App() {
   );
   const pendingEnsureRef = useRef<{
     nonce: number;
-    kind: 'link' | 'write' | 'read';
+    kind: 'write' | 'read';
     payload?: BusPayload;
     response?: boolean;
   } | null>(null);
@@ -847,16 +847,10 @@ function App() {
     setGaJobStatuses(byAddress);
   }, []);
 
+  // Delay/every commit only drops the link. The panel row is created when Write/Read starts the job.
   const handleScheduleCommit = useCallback((draft: SendCorrespondenceKey & { name?: string | null }) => {
     const key = correspondenceKeyFromDraft(draft);
-    if (!key.delay && !key.every) {
-      setPopoverLinkedRowId(null);
-      return;
-    }
-    sendPanelCmdNonceRef.current += 1;
-    const nonce = sendPanelCmdNonceRef.current;
-    pendingEnsureRef.current = { nonce, kind: 'link' };
-    setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
+    if (!key.delay && !key.every) setPopoverLinkedRowId(null);
   }, []);
 
   const handleWriteWithSchedule = useCallback((
@@ -1623,7 +1617,6 @@ function App() {
                     sendPanelAddresses={sendPanelAddresses}
                     activeSendJobAddresses={activeSendJobAddresses}
                     gaJobStatuses={gaJobStatuses}
-                    linkedRowId={popoverLinkedRowId}
                     linkedStatus={popoverLinkedRowId ? linkedRowStatuses[popoverLinkedRowId] ?? null : null}
                     onScheduleCommit={handleScheduleCommit}
                     onWriteWithSchedule={handleWriteWithSchedule}

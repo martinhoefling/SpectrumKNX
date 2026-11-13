@@ -71,7 +71,6 @@ export function SendToGaHost({
   onGotoTelegram,
   captureListScroll,
   restoreListScroll,
-  linkedRowId = null,
   linkedStatus = null,
   gaJobStatuses,
   onScheduleCommit,
@@ -86,7 +85,6 @@ export function SendToGaHost({
   onGotoTelegram?: (telegram: Telegram) => void;
   captureListScroll?: () => ListScrollSnapshot | null;
   restoreListScroll?: (snap: ListScrollSnapshot) => void | Promise<void>;
-  linkedRowId?: string | null;
   linkedStatus?: LinkedRowStatus | null;
   gaJobStatuses?: Record<string, LinkedRowStatus>;
   onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
@@ -143,7 +141,6 @@ export function SendToGaHost({
           onAltSend={onAltSend}
           onCtrlSend={onCtrlSend}
           jobActive={Boolean(sessionGaStatus?.job || linkedStatus?.job)}
-          linkedRowId={linkedRowId ?? statusForPanel?.rowId ?? null}
           linkedStatus={statusForPanel}
           onScheduleCommit={onScheduleCommit}
           onWriteWithSchedule={onWriteWithSchedule}
@@ -205,7 +202,6 @@ interface Props {
    * Click still opens the popover; focus goes to the value field inside.
    */
   suppressTriggerFocus?: boolean;
-  linkedRowId?: string | null;
   linkedStatus?: LinkedRowStatus | null;
   onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onWriteWithSchedule?: (
@@ -390,7 +386,6 @@ export function SendToGaPopover({
   panelMatched = false,
   jobActive = false,
   suppressTriggerFocus = false,
-  linkedRowId = null,
   linkedStatus = null,
   onScheduleCommit,
   onWriteWithSchedule,
@@ -533,7 +528,6 @@ export function SendToGaPopover({
       panelMatched={panelMatched}
       jobActive={jobActive}
       suppressTriggerFocus={suppressTriggerFocus}
-      linkedRowId={linkedRowId}
       linkedStatus={linkedStatus}
       onScheduleCommit={onScheduleCommit}
       onWriteWithSchedule={onWriteWithSchedule}
@@ -559,7 +553,6 @@ function SendToGaPopoverPanel({
   panelMatched = false,
   jobActive = false,
   suppressTriggerFocus = false,
-  linkedRowId = null,
   linkedStatus = null,
   onScheduleCommit,
   onWriteWithSchedule,
@@ -660,12 +653,14 @@ function SendToGaPopoverPanel({
     return list;
   }, [dptCatalog, dptMain, dptSub]);
 
-  /** Enter/blur on any field: link when delay/every set, else clear link. */
+  /** Enter/blur: drop the panel link only when delay and every are both empty. */
   const commitScheduleLink = (overrides?: Partial<{ dpt: string; value: string; delay: string; every: string }>) => {
     const nextDelay = sanitizeSecondsInput(overrides?.delay ?? delay);
     const nextEvery = sanitizeSecondsInput(overrides?.every ?? every);
     if (nextDelay !== delay) setDelay(nextDelay);
     if (nextEvery !== every) setEvery(nextEvery);
+    // A filled schedule waits for Write/Read to start the job and create the panel row.
+    if (nextDelay || nextEvery) return;
     onScheduleCommit?.({
       ...correspondenceKeyFromDraft({
         address,
@@ -1086,8 +1081,8 @@ function SendToGaPopoverPanel({
     if (nextDelay !== delay) setDelay(nextDelay);
     if (nextEvery !== every) setEvery(nextEvery);
     const scheduled = Boolean(nextDelay || nextEvery);
-    // Scheduled or already linked → panel row owns the job / append-on-miss.
-    if (onWriteWithSchedule && (scheduled || linkedRowId)) {
+    // A delay/every starts a job. Only then does the send panel get a row.
+    if (onWriteWithSchedule && scheduled) {
       onWriteWithSchedule({
         ...correspondenceKeyFromDraft({
           address, dpt, value, delay: nextDelay, every: nextEvery,
@@ -1119,7 +1114,7 @@ function SendToGaPopoverPanel({
     if (nextDelay !== delay) setDelay(nextDelay);
     if (nextEvery !== every) setEvery(nextEvery);
     const scheduled = Boolean(nextDelay || nextEvery);
-    if (onReadWithSchedule && (scheduled || linkedRowId)) {
+    if (onReadWithSchedule && scheduled) {
       onReadWithSchedule({
         ...correspondenceKeyFromDraft({
           address, dpt, value, delay: nextDelay, every: nextEvery,
@@ -1145,9 +1140,10 @@ function SendToGaPopoverPanel({
   };
 
   // Read wait must not lock DPT / value / send — only the in-flight request does.
-  // A live panel job locks Write, Read, delay, and every until Cancel.
+  // A live job locks every input the same way a send-panel row does; Cancel stays usable.
   const controlsDisabled = busy;
-  const { retainClickFocus: retainReadFocus } = useRetainFocusThroughDisabled(controlsDisabled);
+  const inputsLocked = controlsDisabled || jobLocked;
+  const { retainClickFocus: retainReadFocus } = useRetainFocusThroughDisabled(inputsLocked);
   const showValueField = needsValueColumn(dpt || null, parseDptMain(dpt));
   const readPhase = useGaReadPhase(address);
 
@@ -1291,14 +1287,14 @@ function SendToGaPopoverPanel({
                 onClick={e => {
                   retainReadFocus(e);
                   if (e.ctrlKey || e.metaKey) {
-                    if (jobLocked || controlsDisabled) return;
+                    if (inputsLocked) return;
                     setRespond(v => !v);
                     return;
                   }
                   void read();
                 }}
-                disabled={controlsDisabled || jobLocked}
-                style={secondaryBtn(controlsDisabled || jobLocked, modeMuted)}
+                disabled={inputsLocked}
+                style={secondaryBtn(inputsLocked, modeMuted)}
                 title={
                   jobLocked
                     ? `${respond ? 'Response' : 'Read'} (locked while this job is running)`
@@ -1312,7 +1308,7 @@ function SendToGaPopoverPanel({
                   showIcon
                   phase={readPhase}
                   iconDim={
-                    controlsDisabled || jobLocked
+                    inputsLocked
                       ? (modeMuted ? 'muted' : 'disabled')
                       : undefined
                   }
@@ -1320,7 +1316,6 @@ function SendToGaPopoverPanel({
                 />
               </button>
             );
-            const scheduleLocked = Boolean(linkedStatus?.job);
             return (
               <div
                 style={{
@@ -1346,12 +1341,14 @@ function SendToGaPopoverPanel({
                   <DptField
                     value={dpt}
                     options={dptOptions}
-                    disabled={controlsDisabled}
+                    disabled={inputsLocked}
                     overridden={overridden}
                     title={
-                      overridden
-                        ? `Overriding project DPT ${projectDpt}`
-                        : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
+                      jobLocked
+                        ? 'Datapoint type (locked while this job is running)'
+                        : overridden
+                          ? `Overriding project DPT ${projectDpt}`
+                          : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
                     }
                     onChange={onDptChange}
                     onReset={() => { setDpt(projectDpt); setValue(''); setFeedback(null); }}
@@ -1373,9 +1370,9 @@ function SendToGaPopoverPanel({
                     placeholder="delay"
                     value={delay}
                     onChange={setDelay}
-                    disabled={controlsDisabled || scheduleLocked}
+                    disabled={inputsLocked}
                     title={
-                      scheduleLocked
+                      jobLocked
                         ? 'delay (locked while this job is running)'
                         : 'delay'
                     }
@@ -1386,9 +1383,9 @@ function SendToGaPopoverPanel({
                     placeholder="every"
                     value={every}
                     onChange={setEvery}
-                    disabled={controlsDisabled || scheduleLocked}
+                    disabled={inputsLocked}
                     title={
-                      scheduleLocked
+                      jobLocked
                         ? 'every (locked while this job is running)'
                         : 'every'
                     }
@@ -1404,7 +1401,7 @@ function SendToGaPopoverPanel({
                   onValueChange={v => { setValue(v); setFeedback(null); }}
                   onWrite={payload => void write(payload)}
                   onError={msg => setFeedback({ ok: false, msg })}
-                  disabled={controlsDisabled}
+                  disabled={inputsLocked}
                   sendLocked={jobLocked}
                   activeJob={statusJob}
                   unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}

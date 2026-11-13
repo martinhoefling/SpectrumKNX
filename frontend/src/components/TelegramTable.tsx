@@ -62,8 +62,7 @@ interface TelegramTableProps {
   activeSendJobAddresses?: ReadonlySet<string>;
   /** Live job status by GA — popover shows panel-like status when a job is active. */
   gaJobStatuses?: Record<string, LinkedRowStatus>;
-  /** Linked send-panel row for popover schedule status. */
-  linkedRowId?: string | null;
+  /** Linked send-panel row status while a popover job is active. */
   linkedStatus?: LinkedRowStatus | null;
   onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onWriteWithSchedule?: (
@@ -251,7 +250,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   latestTelegram, onAltSend, onCtrlSend, sendPanelAddresses,
   activeSendJobAddresses,
   gaJobStatuses,
-  linkedRowId = null, linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onReadWithSchedule, onCancelLinked,
+  linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onReadWithSchedule, onCancelLinked,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -2282,7 +2281,6 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   jobActive={Boolean(
                     t.target_address && activeSendJobAddresses?.has(t.target_address),
                   )}
-                  linkedRowId={linkedRowId}
                   linkedStatus={linkedStatus}
                   onScheduleCommit={onScheduleCommit}
                   onWriteWithSchedule={onWriteWithSchedule}
@@ -2437,7 +2435,6 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         onGotoTelegram={onGotoTelegram}
         captureListScroll={captureListScroll}
         restoreListScroll={restoreListScroll}
-        linkedRowId={linkedRowId}
         linkedStatus={linkedStatus}
         gaJobStatuses={gaJobStatuses}
         onScheduleCommit={onScheduleCommit}

@@ -1064,7 +1064,7 @@ test('active GA job shows panel-like status below the controls with Cancel', asy
       gaJobStatuses={{ '2/3/4': jobStatus }}
       onCancelLinked={onCancelLinked}
     >
-      <SendToGaPopover address="2/3/4" triggerId="t1" dptMain={1} dptSub={1} />
+      <SendToGaPopover address="2/3/4" triggerId="t1" dptMain={9} dptSub={1} />
     </SendToGaHost>,
   );
 
@@ -1081,6 +1081,9 @@ test('active GA job shows panel-like status below the controls with Cancel', asy
   }
   expect(screen.getByPlaceholderText('delay')).toBeDisabled();
   expect(screen.getByPlaceholderText('every')).toBeDisabled();
+  expect(screen.getByLabelText('Datapoint type')).toBeDisabled();
+  expect(screen.getByLabelText('Value')).toBeDisabled();
+  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeEnabled();
   const cancel = screen.getByRole('button', { name: /^Cancel$/ });
   fireEvent.click(cancel);
   expect(onCancelLinked).toHaveBeenCalledWith('row-job-1');
@@ -1421,4 +1424,84 @@ test('a delayed Read is handed to the linked send-panel row', async () => {
     every: '',
   }));
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/knx/read'))).toBe(false);
+});
+
+test('a delay commit does not create a send-panel row until Write starts the job', async () => {
+  const onScheduleCommit = vi.fn();
+  const onWriteWithSchedule = vi.fn();
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/telegrams': { telegrams: [] },
+    '/api/knx/send': { status: 'sent' },
+  }));
+  render(
+    <SendToGaPopover
+      address="16/0/1"
+      dptMain={1}
+      dptSub={11}
+      onScheduleCommit={onScheduleCommit}
+      onWriteWithSchedule={onWriteWithSchedule}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const delay = await screen.findByPlaceholderText('delay');
+  fireEvent.change(delay, { target: { value: '5' } });
+  fireEvent.blur(delay);
+  fireEvent.keyDown(delay, { key: 'Enter' });
+  expect(onScheduleCommit).not.toHaveBeenCalled();
+  expect(onWriteWithSchedule).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: /^active$/i }));
+  expect(onWriteWithSchedule).toHaveBeenCalledWith(
+    expect.objectContaining({ address: '16/0/1', delay: '5', every: '' }),
+    true,
+    undefined,
+  );
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/knx/send'))).toBe(false);
+});
+
+test('an immediate Write stays in the popover and does not create a send-panel row', async () => {
+  const onWriteWithSchedule = vi.fn();
+  const fetchMock = mockFetch({
+    '/api/telegrams': { telegrams: [] },
+    '/api/knx/send': { status: 'sent' },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <SendToGaPopover
+      address="16/0/1"
+      dptMain={1}
+      dptSub={11}
+      onWriteWithSchedule={onWriteWithSchedule}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /^active$/i }));
+  expect(onWriteWithSchedule).not.toHaveBeenCalled();
+  await waitFor(() => {
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/knx/send'))).toBe(true);
+  });
+});
+
+test('clearing delay and every drops the send-panel link', async () => {
+  const onScheduleCommit = vi.fn();
+  render(
+    <SendToGaPopover
+      address="16/0/1"
+      dptMain={1}
+      dptSub={11}
+      onScheduleCommit={onScheduleCommit}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const delay = await screen.findByPlaceholderText('delay');
+  fireEvent.change(delay, { target: { value: '5' } });
+  fireEvent.blur(delay);
+  expect(onScheduleCommit).not.toHaveBeenCalled();
+  fireEvent.change(delay, { target: { value: '' } });
+  fireEvent.blur(delay);
+  expect(onScheduleCommit).toHaveBeenCalledWith(expect.objectContaining({
+    address: '16/0/1',
+    delay: '',
+    every: '',
+  }));
 });
