@@ -55,6 +55,7 @@ test('write row renders inactive/active for a DPT 1.011 GA and sends a boolean, 
 
   // DPT-aware controls instead of a free value field that would cause a ConversionError.
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
+  // DPT 1.011 (state) offers inactive/active, not On/Off.
   fireEvent.click(screen.getByText('active'));
 
   await waitFor(() => {
