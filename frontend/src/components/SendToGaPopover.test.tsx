@@ -78,8 +78,11 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body).toMatchObject({ address: '16/0/1', payload: true, dpt: '1.011' });
   });
-  await waitFor(() => expect(screen.getByText(/Sent .+ to 16\/0\/1/)).toBeInTheDocument());
-  expect(document.querySelector('[data-status-field] .lucide-send')).not.toBeNull();
+  await waitFor(() => {
+    const status = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(status?.querySelector('.lucide-send')).not.toBeNull();
+    expect(status?.getAttribute('aria-label') ?? '').toMatch(/written .+ to 16\/0\/1/i);
+  });
 });
 
 test('jump button calls onGotoTelegram with the last telegram', async () => {
@@ -299,11 +302,13 @@ test('triggers a GroupValueRead from the Read button', async () => {
     expect(call).toBeTruthy();
     expect(JSON.parse((call![1] as RequestInit).body as string)).toMatchObject({ address: '1/1/97' });
   });
-  // Wait chrome: orange "read request sent"; popover stays open; no Cancel.
-  await waitFor(() => expect(screen.getByLabelText(/^read request sent$/i)).toBeInTheDocument());
-  expect(screen.getByText(/^read request sent$/i)).toBeInTheDocument();
-  expect(document.querySelector('[data-status-field] .lucide-radio')).not.toBeNull();
-  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+  // Panel-like status: orange radio + read-wait tip; Cancel ends the wait.
+  await waitFor(() => {
+    const status = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(status?.querySelector('.lucide-radio')).not.toBeNull();
+    expect(status?.getAttribute('aria-label') ?? '').toMatch(/read request sent/i);
+  });
+  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
   expect(screen.getByLabelText('Datapoint type')).toBeInTheDocument();
   expect(read).toHaveClass('wtb-read-btn');
   await waitFor(() => expect(screen.getByRole('button', { name: /^Read$/ })).toHaveFocus());
@@ -329,9 +334,12 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
   expect(screen.getByText('21.5')).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /^Read$/ }));
-  await waitFor(() => expect(screen.getByLabelText(/^read request sent$/i)).toBeInTheDocument());
+  await waitFor(() => {
+    const status = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(status?.getAttribute('aria-label') ?? '').toMatch(/read request sent/i);
+  });
   expect(screen.getByText('21.5')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
   // Wait must not lock write controls (Write itself still needs a value).
   expect(screen.getByLabelText('Datapoint type')).not.toBeDisabled();
   expect(screen.getByLabelText('Value')).not.toBeDisabled();
@@ -350,7 +358,9 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
     <SendToGaPopover address="1/1/97" name="Helligkeit" dptMain={9} dptSub={4} latestTelegram={writeTg as never} />,
   );
   // Write updates last value/timestamp but must not end the wait.
-  expect(screen.getByLabelText(/^read request sent$/i)).toBeInTheDocument();
+  expect(
+    (document.querySelector('[data-status-field]') as HTMLElement).getAttribute('aria-label') ?? '',
+  ).toMatch(/read request sent/i);
   expect(screen.getByText('99')).toBeInTheDocument();
   expect(screen.queryByText('21.5')).not.toBeInTheDocument();
   expect(screen.getByText(format(new Date('2026-07-17T09:05:01Z'), 'yyyy-MM-dd HH:mm:ss'))).toBeInTheDocument();
@@ -366,28 +376,38 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
   rerender(
     <SendToGaPopover address="1/1/97" name="Helligkeit" dptMain={9} dptSub={4} latestTelegram={response as never} />,
   );
-  await waitFor(() => expect(screen.getByLabelText(/^read response detected$/i)).toBeInTheDocument());
+  await waitFor(() => {
+    const status = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(status?.querySelector('.lucide-radio')).not.toBeNull();
+    expect(status?.getAttribute('aria-label') ?? '').toMatch(/Response on /i);
+    expect(status?.getAttribute('aria-label') ?? '').not.toMatch(/read request sent/i);
+  });
   expect(screen.getByText('22.3')).toBeInTheDocument();
-  expect(screen.getByText('RESPONSE')).toBeInTheDocument();
-  expect(screen.getByText(/^read response detected$/i)).toBeInTheDocument();
-  expect(document.querySelector('[data-status-field] .lucide-radio')).not.toBeNull();
-  expect(screen.queryByLabelText(/^read request sent$/i)).not.toBeInTheDocument();
+  expect(screen.getAllByText('RESPONSE').length).toBeGreaterThanOrEqual(1);
 
-  // Close clears wait: reopen must not show leftover status.
+  // Close clears wait: reopen must not show leftover read-wait status.
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
   expect(screen.queryByText(/Last value/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
   await waitFor(() => expect(screen.getByText(/Last value/)).toBeInTheDocument());
-  expect(screen.queryByLabelText(/^read request sent$/i)).not.toBeInTheDocument();
+  expect(
+    (document.querySelector('[data-status-field]') as HTMLElement | null)?.getAttribute('aria-label') ?? '',
+  ).not.toMatch(/read request sent/i);
 
   // Escape during wait also clears.
   fireEvent.click(screen.getByRole('button', { name: /^Read$/ }));
-  await waitFor(() => expect(screen.getByLabelText(/^read request sent$/i)).toBeInTheDocument());
+  await waitFor(() => {
+    expect(
+      (document.querySelector('[data-status-field]') as HTMLElement).getAttribute('aria-label') ?? '',
+    ).toMatch(/read request sent/i);
+  });
   fireEvent.keyDown(window, { key: 'Escape' });
   expect(screen.queryByText(/Last value/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
   await waitFor(() => expect(screen.getByText(/Last value/)).toBeInTheDocument());
-  expect(screen.queryByLabelText(/^read request sent$/i)).not.toBeInTheDocument();
+  expect(
+    (document.querySelector('[data-status-field]') as HTMLElement | null)?.getAttribute('aria-label') ?? '',
+  ).not.toMatch(/read request sent/i);
 });
 
 test('DPT suggestions include project catalog subtypes for the GA main', async () => {
@@ -418,7 +438,7 @@ test('DPT suggestions include project catalog subtypes for the GA main', async (
   expect(options.some(t => t.includes('5.001'))).toBe(false); // other main filtered out
 });
 
-test('still opens when send overlap cannot be fully cleared inside the boundary', async () => {
+test('still opens when the trigger sits near the table edge', async () => {
   vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
 
   const { container } = render(
@@ -437,8 +457,7 @@ test('still opens when send overlap cannot be fully cleared inside the boundary'
     toJSON() { return this; },
   });
   trigger.getBoundingClientRect = () => ({
-    // Near the bottom-right corner — clearing this trigger fully would leave
-    // the narrow table, but the popover must still open (no auto-dismiss).
+    // Near the bottom-right corner — must still open (no auto-dismiss).
     x: 360, y: 300, top: 300, left: 360, right: 384, bottom: 324, width: 24, height: 24,
     toJSON() { return this; },
   });
@@ -577,108 +596,6 @@ test('list scroll does not move the open popover when nothing overlaps', async (
 
   expect(card.style.top).toBe(top);
   expect(card.style.left).toBe(left);
-});
-
-test('list scroll nudges the card right past a partially overlapping send button', async () => {
-  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
-
-  const { container } = render(
-    <div data-telegram-table style={{ position: 'fixed', top: 100, left: 100, width: 520, height: 300 }}>
-      <SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />
-      <button data-send-to-ga-trigger="" title="other send" type="button" />
-    </div>,
-  );
-  const table = container.querySelector('[data-telegram-table]') as HTMLElement;
-  const trigger = screen.getByRole('button', { name: /Send to this GA/ });
-  const other = screen.getByRole('button', { name: /other send/ });
-  table.getBoundingClientRect = () => ({
-    x: 100, y: 100, top: 100, left: 100, right: 620, bottom: 400, width: 520, height: 300,
-    toJSON() { return this; },
-  });
-  trigger.getBoundingClientRect = () => ({
-    x: 120, y: 160, top: 160, left: 120, right: 144, bottom: 184, width: 24, height: 24,
-    toJSON() { return this; },
-  });
-  // Starts clear of the card (above it).
-  other.getBoundingClientRect = () => ({
-    x: 200, y: 40, top: 40, left: 200, right: 224, bottom: 64, width: 24, height: 24,
-    toJSON() { return this; },
-  });
-
-  fireEvent.click(trigger);
-  const card = await waitFor(() => {
-    const el = screen.getByText('1/1/1').parentElement?.parentElement as HTMLElement | null;
-    expect(el?.style.position).toBe('fixed');
-    return el!;
-  });
-  Object.defineProperty(card, 'offsetWidth', { configurable: true, get: () => 280 });
-  Object.defineProperty(card, 'offsetHeight', { configurable: true, get: () => 160 });
-  fireEvent.resize(window);
-  await waitFor(() => expect(Number.parseFloat(card.style.left)).toBe(150));
-  const topBefore = card.style.top;
-
-  // Scroll brings the other send button into a partial overlap with the card.
-  other.getBoundingClientRect = () => ({
-    x: 200, y: 170, top: 170, left: 200, right: 224, bottom: 194, width: 24, height: 24,
-    toJSON() { return this; },
-  });
-  fireEvent.scroll(table);
-
-  await waitFor(() => {
-    expect(Number.parseFloat(card.style.left)).toBe(230); // other.right + gap
-    expect(card.style.top).toBe(topBefore);
-    expect(screen.getByText('1/1/1')).toBeInTheDocument();
-  });
-});
-
-test('list scroll keeps the popover open when a send overlap cannot be fully cleared', async () => {
-  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
-
-  const { container } = render(
-    <div data-telegram-table style={{ position: 'fixed', top: 100, left: 100, width: 520, height: 300 }}>
-      <SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />
-      <button data-send-to-ga-trigger="" title="blocking send" type="button" />
-    </div>,
-  );
-  const table = container.querySelector('[data-telegram-table]') as HTMLElement;
-  const trigger = screen.getByRole('button', { name: /Send to this GA/ });
-  const other = screen.getByRole('button', { name: /blocking send/ });
-  table.getBoundingClientRect = () => ({
-    x: 100, y: 100, top: 100, left: 100, right: 620, bottom: 400, width: 520, height: 300,
-    toJSON() { return this; },
-  });
-  trigger.getBoundingClientRect = () => ({
-    x: 120, y: 160, top: 160, left: 120, right: 144, bottom: 184, width: 24, height: 24,
-    toJSON() { return this; },
-  });
-  other.getBoundingClientRect = () => ({
-    x: 120, y: 40, top: 40, left: 120, right: 144, bottom: 64, width: 24, height: 24,
-    toJSON() { return this; },
-  });
-
-  fireEvent.click(trigger);
-  const card = await waitFor(() => {
-    const el = screen.getByText('1/1/1').parentElement?.parentElement as HTMLElement | null;
-    expect(el?.style.position).toBe('fixed');
-    return el!;
-  });
-  Object.defineProperty(card, 'offsetWidth', { configurable: true, get: () => 280 });
-  Object.defineProperty(card, 'offsetHeight', { configurable: true, get: () => 160 });
-  fireEvent.resize(window);
-  await waitFor(() => expect(Number.parseFloat(card.style.left)).toBe(150));
-
-  // Wide blocker: clearing to its right would leave the table — clamp, stay open.
-  other.getBoundingClientRect = () => ({
-    x: 200, y: 170, top: 170, left: 200, right: 400, bottom: 194, width: 200, height: 24,
-    toJSON() { return this; },
-  });
-  fireEvent.scroll(table);
-
-  await waitFor(() => {
-    expect(screen.getByText('1/1/1')).toBeInTheDocument();
-    // maxLeft = bounds.right - width - pad = 620 - 280 - 8 = 332
-    expect(Number.parseFloat(card.style.left)).toBe(332);
-  });
 });
 
 test('status-line growth nudges the card up inside the table boundary', async () => {

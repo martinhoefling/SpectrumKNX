@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Radio, AlertTriangle, LocateFixed } from 'lucide-react';
+import { Send, Radio, LocateFixed } from 'lucide-react';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -22,6 +22,7 @@ import {
 import {
   SendJobStatusField,
   STATUS_ACTION_WIDTH,
+  STATUS_CLEAR_WIDTH,
   type LinkedRowStatus,
 } from './WriteToBusPanel';
 import { useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
@@ -233,47 +234,11 @@ function isReadRequestFeedback(feedback: { ok: boolean; msg: string } | null): b
   return Boolean(feedback?.ok && /^Read request/i.test(feedback.msg));
 }
 
-function isSentFeedback(feedback: { ok: boolean; msg: string } | null): boolean {
-  return Boolean(feedback?.ok && /^Sent /i.test(feedback.msg));
-}
-
 function rectsOverlap(
   a: { left: number; top: number; right: number; bottom: number },
   b: { left: number; top: number; right: number; bottom: number },
 ): boolean {
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
-}
-
-/**
- * Push `left` right past any send trigger that intersects the proposed card
- * rect (even partially). Clamps to the table boundary; may still overlap when
- * there is no room — callers never auto-close for that.
- */
-function clearSendOverlaps(
-  table: Element,
-  left: number,
-  top: number,
-  width: number,
-  height: number,
-  pad: number,
-  gap: number,
-): number {
-  const bounds = table.getBoundingClientRect();
-  const maxLeft = Math.max(bounds.left + pad, bounds.right - width - pad);
-  const triggers = table.querySelectorAll('[data-send-to-ga-trigger]');
-  let next = left;
-  for (let guard = 0; guard < 8; guard += 1) {
-    const card = { left: next, top, right: next + width, bottom: top + height };
-    let nudged = next;
-    triggers.forEach(el => {
-      const r = el.getBoundingClientRect();
-      if (rectsOverlap(card, r)) nudged = Math.max(nudged, r.right + gap);
-    });
-    if (nudged === next) break;
-    next = nudged;
-  }
-  if (next + width > bounds.right - pad) next = maxLeft;
-  return next;
 }
 
 /**
@@ -358,8 +323,7 @@ function clearOverlaps(
   pad: number,
   gap: number,
 ): { left: number; top: number } {
-  const afterSend = clearSendOverlaps(table, left, top, width, height, pad, gap);
-  return clearPillOverlaps(table, afterSend, top, width, height, pad, gap);
+  return clearPillOverlaps(table, left, top, width, height, pad, gap);
 }
 
 /** Dimmed green while a scheduled send-job owns this GA. */
@@ -693,7 +657,7 @@ function SendToGaPopoverPanel({
   /**
    * `full`: place from the trigger (open / window resize) — prefer right-below
    * the send button when that fits; otherwise keep the previous right/left +
-   * top-align fallback, then clear overlaps with send triggers / TT pills.
+   * top-align fallback, then clear overlaps with TT pills.
    * `bounds`: refresh max dims and nudge when card growth would leave the
    * table; may also shift to clear overlaps. List scroll does not re-anchor.
    * Never auto-closes — the popover stays until outside click / Escape / toggle.
@@ -912,7 +876,7 @@ function SendToGaPopoverPanel({
   }, [panelOnly, open, panelTriggerId, panelAnchor, panelListSnapshot]);
 
   // Outside/Escape close only — never auto-dismiss on scroll/resize/overlap.
-  // List scroll keeps top frozen; may shift left right to clear send overlaps.
+  // List scroll keeps top frozen; may nudge to clear TT pill overlaps.
   useLayoutEffect(() => {
     if (!open) return;
     place('full');
@@ -1050,40 +1014,28 @@ function SendToGaPopoverPanel({
     }
   };
 
-  const unansweredRead = awaitingRead || isReadRequestFeedback(feedback);
-  const pendingReadTip = 'read request sent';
-  const responseOk = !awaitingRead && isResponseTelegram(statusTelegram);
-  const responseTip = 'read response detected';
-  const showStatus = Boolean(feedback || awaitingRead || statusTelegram);
   // Read wait must not lock DPT / value / send — only the in-flight request does.
   const controlsDisabled = busy;
   const { retainClickFocus: retainReadFocus } = useRetainFocusThroughDisabled(controlsDisabled);
   const showValueField = needsValueColumn(dpt || null, parseDptMain(dpt));
 
-  let statusIcon = null;
-  let statusColor = 'var(--success)';
-  let statusText: string | null = null;
-  if (feedback && !feedback.ok) {
-    statusIcon = <AlertTriangle size={13} style={{ flexShrink: 0 }} />;
-    statusColor = 'var(--error)';
-    statusText = feedback.msg;
-  } else if (unansweredRead) {
-    statusIcon = <Radio size={13} style={{ color: 'var(--warning)', flexShrink: 0 }} />;
-    statusColor = 'var(--warning)';
-    statusText = pendingReadTip;
-  } else if (responseOk) {
-    statusIcon = <Radio size={13} style={{ color: 'var(--success)', flexShrink: 0 }} />;
-    statusColor = 'var(--success)';
-    statusText = responseTip;
-  } else if (isSentFeedback(feedback)) {
-    statusIcon = <Send size={13} style={{ color: 'var(--success)', flexShrink: 0 }} />;
-    statusColor = 'var(--success)';
-    statusText = feedback!.msg;
-  } else if (feedback?.ok) {
-    statusIcon = <Send size={13} style={{ color: 'var(--success)', flexShrink: 0 }} />;
-    statusColor = 'var(--success)';
-    statusText = feedback.msg;
-  }
+  // Same status shell as the send panel (always mounted; content when active).
+  const statusJob = linkedStatus?.job ?? null;
+  const statusFeedback = feedback ?? linkedStatus?.feedback ?? null;
+  const statusAwaiting = awaitingRead || linkedStatus?.statusWatch === 'read';
+  const statusTg = statusTelegram ?? linkedStatus?.statusTelegram ?? null;
+  const statusShowCountdown = Boolean(
+    statusJob && (statusJob.next_send_at || statusJob.state === 'waiting'),
+  );
+  const statusShowSendCount = Boolean(
+    statusJob?.interval_seconds
+    && statusJob.state === 'running'
+    && (statusJob.sends_done ?? 0) > 0,
+  );
+  const statusHasChrome = Boolean(
+    statusJob || statusAwaiting || statusFeedback || statusTg,
+  );
+  const statusShowCancel = Boolean(statusJob || statusAwaiting);
 
   const lastHasValue = last != null && last.simplified_type !== 'Read';
 
@@ -1312,56 +1264,39 @@ function SendToGaPopoverPanel({
             );
           })()}
 
-          {linkedStatus?.job ? (
-            <SendJobStatusField
-              feedback={linkedStatus.feedback ?? feedback}
-              awaiting={awaitingRead || linkedStatus.statusWatch === 'read'}
-              job={linkedStatus.job}
-              showCountdownCol={Boolean(
-                linkedStatus.job.next_send_at || linkedStatus.job.state === 'waiting',
-              )}
-              showSendCountCol={Boolean(
-                linkedStatus.job.interval_seconds
-                && linkedStatus.job.state === 'running'
-                && (linkedStatus.job.sends_done ?? 0) > 0,
-              )}
-              showActionCol
-              actionWidth={STATUS_ACTION_WIDTH}
-              statusTelegram={linkedStatus.statusTelegram ?? statusTelegram}
-              address={linkedStatus.address ?? address}
-              groupName={linkedStatus.name ?? name ?? ''}
-              value={linkedStatus.value ?? value}
-              dpt={linkedStatus.dpt ?? dpt}
-              onCancel={() => onCancelLinked?.(linkedStatus.rowId)}
-              onStopAwait={() => {
+          <SendJobStatusField
+            feedback={statusFeedback}
+            awaiting={statusAwaiting}
+            job={statusJob}
+            showCountdownCol={statusShowCountdown}
+            showSendCountCol={statusShowSendCount}
+            showActionCol={statusHasChrome}
+            actionWidth={statusShowCancel ? STATUS_ACTION_WIDTH : STATUS_CLEAR_WIDTH}
+            statusTelegram={statusTg}
+            address={linkedStatus?.address ?? address}
+            groupName={linkedStatus?.name ?? name ?? ''}
+            value={linkedStatus?.value ?? value}
+            dpt={linkedStatus?.dpt ?? dpt}
+            onCancel={() => {
+              if (statusJob) onCancelLinked?.(linkedStatus?.rowId);
+              else {
                 setAwaitingRead(false);
                 setFeedback(prev => (isReadRequestFeedback(prev) ? prev : null));
-              }}
-              onClear={() => {
-                setFeedback(null);
-                setStatusTelegram(null);
-                setAwaitingRead(false);
-              }}
-              onJump={() => {
-                const tg = linkedStatus.statusTelegram ?? statusTelegram;
-                if (tg && onGotoTelegram) onGotoTelegram(tg);
-              }}
-            />
-          ) : showStatus && (statusIcon || statusText) ? (
-            <div
-              data-status-field
-              aria-label={unansweredRead ? pendingReadTip : responseOk ? responseTip : undefined}
-              title={unansweredRead ? pendingReadTip : responseOk ? responseTip : undefined}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap',
-                fontSize: '0.72rem',
-                color: statusColor,
-              }}
-            >
-              {statusIcon}
-              {statusText ? <span>{statusText}</span> : null}
-            </div>
-          ) : null}
+              }
+            }}
+            onStopAwait={() => {
+              setAwaitingRead(false);
+              setFeedback(prev => (isReadRequestFeedback(prev) ? prev : null));
+            }}
+            onClear={() => {
+              setFeedback(null);
+              setStatusTelegram(null);
+              setAwaitingRead(false);
+            }}
+            onJump={() => {
+              if (statusTg && onGotoTelegram) onGotoTelegram(statusTg);
+            }}
+          />
         </div>,
         document.body
       )}

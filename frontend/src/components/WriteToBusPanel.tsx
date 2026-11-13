@@ -184,7 +184,7 @@ const STATUS_SHELL_MIN_WIDTH_COMPACT = '5.75rem';
 /** Fits the Cancel label + divider; used when any row shows Cancel. */
 export const STATUS_ACTION_WIDTH = '4.25rem';
 /** Fits the Clear X / empty spacer when no Cancel is on the panel. */
-const STATUS_CLEAR_WIDTH = '11px';
+export const STATUS_CLEAR_WIDTH = '11px';
 
 /** Row has anything that warrants Cancel/Clear or fills the status body. */
 function rowHasStatusChrome(
