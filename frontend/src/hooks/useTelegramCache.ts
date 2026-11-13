@@ -34,6 +34,31 @@ const HISTORY_CHUNK_SIZE = 2000;
 /** Gap / loadRange paging direction. Default remains backward (newest-first). */
 export type FillDirection = 'backward' | 'forward';
 
+/**
+ * Full-buffer early-break decision for gap paging (#313).
+ * Overflow always evicts the oldest rows, so:
+ * - backward below `oldestTs` → stop (discardable)
+ * - forward below `oldestTs` → skip ahead to `oldestTs` (leave the older
+ *   remainder uncovered; rows above the window are kept)
+ * - forward above `newestTs` → keep paging (those rows stick)
+ */
+export type FullBufferPagingAction =
+  | { action: 'continue' }
+  | { action: 'break' }
+  | { action: 'skip'; cursor: number };
+
+export function resolveFullBufferPaging(opts: {
+  forward: boolean;
+  bufferFull: boolean;
+  cursor: number;
+  oldestTs: number | null;
+}): FullBufferPagingAction {
+  if (!opts.bufferFull || opts.oldestTs === null) return { action: 'continue' };
+  if (opts.cursor >= opts.oldestTs) return { action: 'continue' };
+  if (opts.forward) return { action: 'skip', cursor: opts.oldestTs };
+  return { action: 'break' };
+}
+
 export interface TelegramCache {
   /** Current buffer contents, newest first. Frozen while paused. */
   telegrams: Telegram[];
@@ -207,14 +232,23 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
       let cursor = forward ? gapStart : gapEnd;
       let fetched = 0;
       while ((forward ? cursor <= gapEnd : cursor >= gapStart) && fetched < budget) {
-        // Once the buffer is full, rows outside its span are evicted the instant
-        // they arrive. Stop paging that way instead of fetching discardable
-        // chunks (#313). User-initiated loads bypass this (#317).
+        // Once the buffer is full, overflow drops the oldest rows. Backward
+        // paging below oldestTs would only fetch discardable chunks — stop.
+        // Forward paging below oldestTs skips ahead (leave that remainder
+        // uncovered); paging above newestTs is kept, so it continues (#313).
+        // User-initiated loads bypass this (#317).
         if (!skipBufferFullBreak) {
           const buf = bufferRef.current!;
-          if (buf.length >= maxSize) {
-            if (!forward && buf.oldestTs !== null && cursor < buf.oldestTs) break;
-            if (forward && buf.newestTs !== null && cursor > buf.newestTs) break;
+          const decision = resolveFullBufferPaging({
+            forward,
+            bufferFull: buf.length >= maxSize,
+            cursor,
+            oldestTs: buf.oldestTs,
+          });
+          if (decision.action === 'break') break;
+          if (decision.action === 'skip') {
+            cursor = decision.cursor;
+            continue;
           }
         }
         const limit = Math.min(HISTORY_CHUNK_SIZE, budget - fetched);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useTelegramCache } from './useTelegramCache';
+import { resolveFullBufferPaging, useTelegramCache } from './useTelegramCache';
 import { makeTelegram } from '../test/telegramFactory';
 import { toEntry } from '../utils/telegramId';
 import { COVERAGE_STORAGE_KEY } from '../services/telegram-coverage-service';
@@ -80,6 +80,46 @@ afterEach(() => {
 const settle = async (result: { current: { isLoading: boolean } }) => {
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 };
+
+describe('resolveFullBufferPaging (#313)', () => {
+  it('continues when the buffer is not full', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: false, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+    expect(resolveFullBufferPaging({
+      forward: true, bufferFull: false, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+  });
+
+  it('continues when oldestTs is unknown', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: true, cursor: 100, oldestTs: null,
+    })).toEqual({ action: 'continue' });
+  });
+
+  it('continues once the cursor is inside or above the buffer window', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: true, cursor: 500, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+    expect(resolveFullBufferPaging({
+      forward: true, bufferFull: true, cursor: 900, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+  });
+
+  it('breaks backward when the cursor is below oldestTs', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: true, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'break' });
+  });
+
+  it('skips forward ahead to oldestTs when the cursor is below it', () => {
+    // Mirror of #313 for forward: discardable [cursor, oldestTs) stays
+    // uncovered; paging resumes at the kept window. Do not break above newestTs.
+    expect(resolveFullBufferPaging({
+      forward: true, bufferFull: true, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'skip', cursor: 500 });
+  });
+});
 
 describe('useTelegramCache', () => {
   it('starts empty and fetches nothing without prior coverage or cache', async () => {
