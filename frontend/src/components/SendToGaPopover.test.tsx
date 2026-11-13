@@ -54,14 +54,20 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
   const read = screen.getByRole('button', { name: /^Read$/i });
   expect(inactive.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(active.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // Hug send row: content-sized wrapping flex; Read lives in the same slot.
+  // Hug send row sits in grid area "write" (right of every); Read shares the slot.
   const send = inactive.parentElement as HTMLElement;
   expect(send.style.gridArea).toBe('write');
   expect(send.style.display).toBe('flex');
   expect(send.style.flexWrap).toBe('wrap');
-  expect(send.style.width).toBe('100%');
+  expect(send.style.width).toBe('max-content');
   expect(inactive.style.width).not.toBe('100%');
   expect(read.parentElement).toBe(send);
+  // Schedule row: delay, every, then the send slot to the right of every.
+  const scheduleInputs = screen.getAllByPlaceholderText('s');
+  expect(scheduleInputs).toHaveLength(2);
+  expect(
+    scheduleInputs[1].compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 
   fireEvent.click(active);
 
@@ -233,7 +239,12 @@ test('triggers a GroupValueRead from the Read button', async () => {
   const read = screen.getByRole('button', { name: /Read/ });
   expect(write.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect((write.parentElement as HTMLElement).style.gridArea).toBe('write');
-  expect(read.parentElement).toBe(write.parentElement);
+  // Value under DPT + Write; Read sits in its own cell right of every (same column as Write).
+  expect((read.parentElement as HTMLElement).style.gridArea).toBe('read');
+  const value = screen.getByPlaceholderText(/Value/);
+  expect(value.compareDocumentPosition(write) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const scheduleInputs = screen.getAllByPlaceholderText('s');
+  expect(scheduleInputs[1].compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(read);
 
   await waitFor(() => {

@@ -10,7 +10,7 @@ import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
 import { useDptCatalog } from './DptCatalogContext';
 import { DptField } from './DptField';
-import { WriteControls } from './WriteControls';
+import { WriteControls, needsValueColumn } from './WriteControls';
 import { BusValueText } from './BusValueText';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { secondaryBtn } from '../utils/buttonStyles';
@@ -20,6 +20,7 @@ import {
   type SendCorrespondenceKey,
 } from '../utils/sendCorrespondence';
 import type { LinkedRowStatus } from './WriteToBusPanel';
+import { useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
 
 /** Stable list position: telegram identity + its viewport offset at open time. */
 export type ListScrollSnapshot = {
@@ -878,6 +879,8 @@ function SendToGaPopoverPanel({
   const showStatus = Boolean(feedback || awaitingRead || statusTelegram);
   // Read wait must not lock DPT / value / send — only the in-flight request does.
   const controlsDisabled = busy;
+  const { retainClickFocus: retainReadFocus } = useRetainFocusThroughDisabled(controlsDisabled);
+  const showValueField = needsValueColumn(dpt || null, parseDptMain(dpt));
 
   let statusIcon = null;
   let statusColor = 'var(--success)';
@@ -987,99 +990,149 @@ function SendToGaPopoverPanel({
             </div>
           )}
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(11rem, max-content) max-content',
-              gridTemplateAreas: `
-                "dpt value"
-                "write write"
-              `,
-              columnGap: '0.4rem',
-              rowGap: '0.65rem',
-              alignItems: 'center',
-              justifyContent: 'start',
-              width: 'max-content',
-              maxWidth: '100%',
-            }}
-          >
-            <div style={{ gridArea: 'dpt', minWidth: '11rem', width: 'max-content' }}>
-              <DptField
-                value={dpt}
-                options={dptOptions}
+          {(() => {
+            const showValue = showValueField;
+            const readBtn = (
+              <button
+                type="button"
+                className="wtb-read-btn"
+                onClick={e => {
+                  retainReadFocus(e);
+                  void read();
+                }}
                 disabled={controlsDisabled}
-                overridden={overridden}
-                title={
-                  overridden
-                    ? `Overriding project DPT ${projectDpt}`
-                    : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
-                }
-                onChange={onDptChange}
-                onReset={() => { setDpt(projectDpt); setValue(''); setFeedback(null); }}
-                resetTitle={`Reset to project DPT ${projectDpt}`}
-              />
-            </div>
-            <WriteControls
-              dptMain={parseDptMain(dpt)}
-              dptKey={dpt || null}
-              address={address}
-              value={value}
-              onValueChange={v => { setValue(v); setFeedback(null); }}
-              onWrite={payload => void write(payload)}
-              onError={msg => setFeedback({ ok: false, msg })}
-              disabled={controlsDisabled}
-              unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
-              sendFit="hug"
-              focusToken={focusToken}
-              valueColProps={{
-                style: { gridArea: 'value', width: 'max-content' },
-                onBlur: commitScheduleLink,
-              }}
-              sendColProps={{ style: { gridArea: 'write', width: '100%' } }}
-              reserveValueSlot={false}
-              sendEnd={(
-                <button
-                  type="button"
-                  className="wtb-read-btn"
-                  onClick={() => void read()}
-                  disabled={controlsDisabled}
-                  style={secondaryBtn(controlsDisabled)}
-                  title="Send a GroupValueRead; the response updates last value"
-                >
-                  <Radio size={13} /> Read
-                </button>
-              )}
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-              delay
-              <input
-                className="glass-input"
-                value={delay}
-                disabled={controlsDisabled || Boolean(linkedStatus?.job)}
-                placeholder="s"
-                title="Delay before first send (seconds)"
-                style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
-                onChange={e => setDelay(e.target.value)}
-                {...scheduleFieldProps}
-              />
-            </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-              every
-              <input
-                className="glass-input"
-                value={every}
-                disabled={controlsDisabled || Boolean(linkedStatus?.job)}
-                placeholder="s"
-                title="Cyclic interval (seconds)"
-                style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
-                onChange={e => setEvery(e.target.value)}
-                {...scheduleFieldProps}
-              />
-            </label>
-          </div>
+                style={secondaryBtn(controlsDisabled)}
+                title="Send a GroupValueRead; the response updates last value"
+              >
+                <Radio size={13} /> Read
+              </button>
+            );
+            const scheduleFields = (
+              <div
+                style={{
+                  gridArea: 'sched',
+                  display: 'flex',
+                  gap: '0.4rem',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  width: 'max-content',
+                }}
+              >
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                  delay
+                  <input
+                    className="glass-input"
+                    value={delay}
+                    disabled={controlsDisabled || Boolean(linkedStatus?.job)}
+                    placeholder="s"
+                    title="Delay before first send (seconds)"
+                    style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
+                    onChange={e => setDelay(e.target.value)}
+                    {...scheduleFieldProps}
+                  />
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                  every
+                  <input
+                    className="glass-input"
+                    value={every}
+                    disabled={controlsDisabled || Boolean(linkedStatus?.job)}
+                    placeholder="s"
+                    title="Cyclic interval (seconds)"
+                    style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
+                    onChange={e => setEvery(e.target.value)}
+                    {...scheduleFieldProps}
+                  />
+                </label>
+              </div>
+            );
+            return (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(11rem, max-content) max-content',
+                  gridTemplateAreas: showValue
+                    ? `
+                      "dpt dpt"
+                      "value write"
+                      "sched read"
+                    `
+                    : `
+                      "dpt dpt"
+                      "sched write"
+                    `,
+                  columnGap: '0.4rem',
+                  rowGap: '0.65rem',
+                  alignItems: 'center',
+                  justifyContent: 'start',
+                  width: 'max-content',
+                  maxWidth: '100%',
+                }}
+              >
+                <div style={{ gridArea: 'dpt', minWidth: '11rem', width: 'max-content' }}>
+                  <DptField
+                    value={dpt}
+                    options={dptOptions}
+                    disabled={controlsDisabled}
+                    overridden={overridden}
+                    title={
+                      overridden
+                        ? `Overriding project DPT ${projectDpt}`
+                        : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
+                    }
+                    onChange={onDptChange}
+                    onReset={() => { setDpt(projectDpt); setValue(''); setFeedback(null); }}
+                    resetTitle={`Reset to project DPT ${projectDpt}`}
+                  />
+                </div>
+                {showValue && (
+                  <WriteControls
+                    dptMain={parseDptMain(dpt)}
+                    dptKey={dpt || null}
+                    address={address}
+                    value={value}
+                    onValueChange={v => { setValue(v); setFeedback(null); }}
+                    onWrite={payload => void write(payload)}
+                    onError={msg => setFeedback({ ok: false, msg })}
+                    disabled={controlsDisabled}
+                    unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
+                    sendFit="hug"
+                    focusToken={focusToken}
+                    valueColProps={{
+                      style: { gridArea: 'value', width: 'max-content' },
+                      onBlur: commitScheduleLink,
+                    }}
+                    sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
+                    reserveValueSlot={false}
+                  />
+                )}
+                {scheduleFields}
+                {showValue ? (
+                  <div style={{ gridArea: 'read', width: 'max-content' }}>
+                    {readBtn}
+                  </div>
+                ) : (
+                  <WriteControls
+                    dptMain={parseDptMain(dpt)}
+                    dptKey={dpt || null}
+                    address={address}
+                    value={value}
+                    onValueChange={v => { setValue(v); setFeedback(null); }}
+                    onWrite={payload => void write(payload)}
+                    onError={msg => setFeedback({ ok: false, msg })}
+                    disabled={controlsDisabled}
+                    unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
+                    sendFit="hug"
+                    focusToken={focusToken}
+                    valueColProps={{ style: { display: 'none' } }}
+                    sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
+                    reserveValueSlot={false}
+                    sendEnd={readBtn}
+                  />
+                )}
+              </div>
+            );
+          })()}
 
           {linkedStatus?.job && (
             <div
