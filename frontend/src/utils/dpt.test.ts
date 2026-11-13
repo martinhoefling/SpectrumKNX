@@ -2,13 +2,15 @@ import { describe, expect, test } from 'vitest';
 import { buildWriteDptOptions, COMMON_DPTS } from './dpt';
 
 describe('buildWriteDptOptions', () => {
-  test('seeds common types when the catalog is empty', () => {
+  test('seeds common subtypes and bare main types when the catalog is empty', () => {
     const keys = buildWriteDptOptions().map(o => o.key);
-    expect(keys).toEqual([...COMMON_DPTS].sort((a, b) => {
-      const [am, as = 0] = a.split('.').map(Number);
-      const [bm, bs = 0] = b.split('.').map(Number);
-      return am - bm || as - bs;
-    }));
+    for (const key of COMMON_DPTS) expect(keys).toContain(key);
+    // Bare Haupttypen sit before their subtypes.
+    expect(keys).toContain('1');
+    expect(keys).toContain('5');
+    expect(keys).toContain('9');
+    expect(keys.indexOf('5')).toBeLessThan(keys.indexOf('5.001'));
+    expect(keys.indexOf('9')).toBeLessThan(keys.indexOf('9.001'));
   });
 
   test('merges project catalog subtypes with designations', () => {
@@ -22,10 +24,13 @@ describe('buildWriteDptOptions', () => {
     expect(byKey['9.005']).toBe('Wind speed');
     expect(byKey['9.004']).toBe('Illuminance (lx)'); // from COMMON_DPTS
     expect(byKey['5.001']).toBe('Percent');
+    expect(byKey['5']).toMatch(/subtypes/i);
+    expect(byKey['9']).toMatch(/subtypes/i);
   });
 
   test('adds extras that are missing from the catalog', () => {
     const options = buildWriteDptOptions([], [{ main: 9, sub: 20 }]);
     expect(options.some(o => o.key === '9.020')).toBe(true);
+    expect(options.some(o => o.key === '9')).toBe(true);
   });
 });

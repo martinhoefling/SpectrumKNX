@@ -66,6 +66,11 @@ test('the DPT suggestions sit with the field and name each type', () => {
   const option = screen.getByRole('option', { name: /5\.001/ });
   expect(option).toHaveTextContent('Percent (%)');
   expect(screen.getByRole('option', { name: /5\.010/ })).toBeInTheDocument();
+  // Bare Haupttyp for this GA's main, but not other mains' subtypes.
+  const bareMain = [...list.querySelectorAll('[role="option"]')]
+    .find(el => (el.textContent ?? '').trim().startsWith('5 ') || (el.textContent ?? '').trim() === '5'
+      || /^\s*5(?!\.)/.test(el.textContent ?? ''));
+  expect(bareMain).toBeTruthy();
   expect(screen.queryByRole('option', { name: /1\.001/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('option', { name: /9\.001/ })).not.toBeInTheDocument();
   expect(list).toContainElement(option);
@@ -73,6 +78,16 @@ test('the DPT suggestions sit with the field and name each type', () => {
   expect(list.style.position).toBe('fixed');
   expect(list.style.left).toBe(`${rect.left}px`);
   expect(Number.parseFloat(list.style.top)).toBeCloseTo(rect.bottom + 4, 0);
+});
+
+test('opening the DPT suggestions highlights and reveals the current value', () => {
+  const { container } = render(<WriteToBusPanel targets={TARGETS} onClose={() => {}} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  const input = dptInput(container);
+  expect(input).toHaveValue('5.001');
+  fireEvent.focus(input);
+  const current = screen.getByRole('option', { name: /5\.001/ });
+  expect(current).toHaveAttribute('aria-selected', 'true');
 });
 
 test('a GA with no project DPT offers every known DPT', () => {

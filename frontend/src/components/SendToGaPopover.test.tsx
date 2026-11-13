@@ -431,11 +431,14 @@ test('DPT suggestions include project catalog subtypes for the GA main', async (
   fireEvent.click(screen.getByRole('button', { name: 'Toggle datapoint type list' }));
   const list = await screen.findByRole('listbox', { name: 'Datapoint types' });
   const options = [...list.querySelectorAll('[role="option"]')].map(o => o.textContent ?? '');
+  expect(options.some(t => /^9(?!\.\d)/.test(t.trim()))).toBe(true);
   expect(options.some(t => t.includes('9.001'))).toBe(true);
   expect(options.some(t => t.includes('9.004'))).toBe(true); // COMMON
   expect(options.some(t => t.includes('9.005'))).toBe(true);
   expect(options.some(t => t.includes('9.020'))).toBe(true);
   expect(options.some(t => t.includes('5.001'))).toBe(false); // other main filtered out
+  // Open jumps to the current draft value.
+  expect(screen.getByRole('option', { name: /9\.001/ })).toHaveAttribute('aria-selected', 'true');
 });
 
 test('still opens when the trigger sits near the table edge', async () => {

@@ -87,6 +87,17 @@ export function DptField({ value, options, disabled, overridden, title, onChange
     return options.filter(o => o.key.toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
   }, [draft, options]);
 
+  /** Index of the draft / closest match in a suggestion list (for open jump). */
+  const indexForDraft = (list: DptChoice[], draftText: string) => {
+    const q = draftText.trim().toLowerCase();
+    if (!q || list.length === 0) return 0;
+    const exact = list.findIndex(o => o.key.toLowerCase() === q);
+    if (exact >= 0) return exact;
+    const prefix = list.findIndex(o => o.key.toLowerCase().startsWith(q));
+    if (prefix >= 0) return prefix;
+    return 0;
+  };
+
   // Designation beside the key (catalog/common name); not part of the editable value.
   const designation = useMemo(() => {
     const key = draft.trim();
@@ -117,6 +128,24 @@ export function DptField({ value, options, disabled, overridden, title, onChange
       window.removeEventListener('resize', place);
     };
   }, [open, matches.length]);
+
+  // Opening the list jumps highlight + scroll to the currently entered value.
+  const wasOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (open && !wasOpen.current) {
+      const idx = indexForDraft(matches, draftRef.current);
+      setHighlight(idx);
+    }
+    wasOpen.current = open;
+  }, [open, matches]);
+
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current) return;
+    const selected = menuRef.current.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    if (typeof selected?.scrollIntoView === 'function') {
+      selected.scrollIntoView({ block: 'nearest' });
+    }
+  }, [open, active, matches]);
 
   useEffect(() => {
     if (!open) return;
@@ -188,7 +217,6 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           // in the shell still focuses it and opens the list.
           if (e.target !== inputRef.current) e.preventDefault();
           keyboardNav.current = false;
-          setHighlight(0);
           setOpen(true);
           inputRef.current?.focus();
         }}
@@ -218,7 +246,7 @@ export function DptField({ value, options, disabled, overridden, title, onChange
             setOpen(true);
             setHighlight(0);
           }}
-          onFocus={() => { if (!disabled) { setOpen(true); setHighlight(0); } }}
+          onFocus={() => { if (!disabled) setOpen(true); }}
           onBlur={() => {
             if (pickedRef.current) { pickedRef.current = false; setOpen(false); return; }
             commitDraft();
@@ -249,12 +277,15 @@ export function DptField({ value, options, disabled, overridden, title, onChange
               textOverflow: 'ellipsis',
               minWidth: 0,
               flex: '1 1 auto',
+              textAlign: 'right',
               pointerEvents: 'none',
             }}
           >
             {designation}
           </span>
-        ) : null}
+        ) : (
+          <span aria-hidden style={{ flex: '1 1 auto', minWidth: 0 }} />
+        )}
         <button
           type="button"
           className="icon-button"
@@ -271,7 +302,6 @@ export function DptField({ value, options, disabled, overridden, title, onChange
             visibility: overridden ? 'visible' : 'hidden',
             pointerEvents: overridden ? 'auto' : 'none',
             flexShrink: 0,
-            marginLeft: 'auto',
           }}
         >
           <RotateCcw size={12} />

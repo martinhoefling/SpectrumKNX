@@ -70,9 +70,9 @@ export interface DptChoice {
 }
 
 /**
- * Suggestion list for write DPT fields: common types plus every entry from the
- * project catalog (and optional extras such as GA targets). Shared by the send
- * panel and the send-to-GA popover so both offer the same subtypes.
+ * Suggestion list for write DPT fields: common subtypes, every project-catalog
+ * / extras entry, and bare main types ("5" = all 5.x). Shared by the send
+ * panel and the send-to-GA popover so both offer the same choices.
  */
 export function buildWriteDptOptions(
   catalog: DptCatalogEntry[] = [],
@@ -92,11 +92,28 @@ export function buildWriteDptOptions(
     if (name) byKey.set(key, name);
     else if (!byKey.has(key)) byKey.set(key, '');
   }
+  // Bare mains (Haupttypen) — from the spec table and every main already present.
+  const mains = new Set<number>(Object.keys(DPT_MAIN_WIDTHS).map(Number));
+  for (const key of byKey.keys()) {
+    const main = Number(key.split('.')[0]);
+    if (Number.isFinite(main)) mains.add(main);
+  }
+  for (const main of mains) {
+    const key = String(main);
+    if (!byKey.has(key)) {
+      const width = dptWidthLabel(main);
+      byKey.set(key, width ? `all ${width} subtypes` : 'all subtypes');
+    }
+  }
   return [...byKey.entries()]
     .map(([key, name]) => ({ key, name }))
     .sort((a, b) => {
-      const [am, asub = 0] = a.key.split('.').map(Number);
-      const [bm, bsub = 0] = b.key.split('.').map(Number);
+      const [am, asub = -1] = a.key.includes('.')
+        ? a.key.split('.').map(Number)
+        : [Number(a.key), -1];
+      const [bm, bsub = -1] = b.key.includes('.')
+        ? b.key.split('.').map(Number)
+        : [Number(b.key), -1];
       return am - bm || asub - bsub;
     });
 }
