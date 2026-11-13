@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Clock, RefreshCw, Search, ToggleLeft, ToggleRight, Radio, Send, Filter, LineChart } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { X, Clock, RefreshCw, Search, ToggleLeft, ToggleRight, Send, Filter, LineChart } from 'lucide-react';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { FilterOptions } from '../types/filters';
@@ -11,8 +11,24 @@ import { compareKnxAddress } from '../utils/knxAddress';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
 import { secondaryBtn, rowIconBtnStyle } from '../utils/buttonStyles';
+import { answeredReadIds } from '../utils/telegramCellStyles';
+import { EventTypeLabel } from './EventTypeLabel';
+import { GaReadPhaseProvider, useGaReadPhaseFor } from './GaReadPhase';
 
 const LIMITS = [10, 20, 50, 100] as const;
+
+function ReadButtonLabel({ addresses, inactive = false }: { addresses: string[]; inactive?: boolean }) {
+  const phase = useGaReadPhaseFor(addresses);
+  return (
+    <EventTypeLabel
+      kind="Read"
+      showIcon
+      phase={phase}
+      iconDim={inactive ? 'disabled' : undefined}
+      iconSize={13}
+    />
+  );
+}
 
 interface LastSeenOverlayProps {
   filterOptions: FilterOptions;
@@ -39,15 +55,6 @@ interface LastSeenOverlayProps {
   /** Jump from the send popover's last-value timestamp to the telegram list. */
   onGotoTelegram?: (telegram: Telegram) => void;
 }
-
-const getTypeColor = (type?: string | null) => {
-  switch (type) {
-    case 'Write': return 'var(--accent-primary)';
-    case 'Read': return 'var(--warning-text)';
-    case 'Response': return 'var(--success)';
-    default: return 'var(--text-dim)';
-  }
-};
 
 const thStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
@@ -276,7 +283,10 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
     return `+${(diffMs / 3_600_000).toFixed(1)}h`;
   };
 
+  const answeredReads = useMemo(() => answeredReadIds(telegrams), [telegrams]);
+
   return (
+    <GaReadPhaseProvider rows={telegrams}>
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
@@ -505,7 +515,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                   border: '1px solid var(--accent-primary)', background: 'var(--bg-subtle)', color: 'var(--accent-primary)',
                 }}
               >
-                <Radio size={13} /> Read
+                <ReadButtonLabel addresses={selectedAddresses} />
               </button>
             )}
 
@@ -554,7 +564,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
               style={secondaryBtn(busy)}
               title="Send a GroupValueRead; the response updates the last value"
             >
-              <Radio size={13} /> Read
+              <ReadButtonLabel addresses={selectedAddresses} inactive={busy} />
             </button>
             <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>
               DPT {formatDpt(selectedInfo?.main, selectedInfo?.sub) || '—'}
@@ -699,9 +709,11 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                       {(mode === 'ga' ? t.source_name : t.target_name) || '—'}
                     </td>
                     <td style={tdStyle}>
-                      <span style={{ color: getTypeColor(t.simplified_type), fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase' }}>
-                        {t.simplified_type || t.telegram_type}
-                      </span>
+                      <EventTypeLabel
+                        kind={t.simplified_type || t.telegram_type || ''}
+                        answered={t.simplified_type === 'Read' && answeredReads.has(`${t.timestamp}|${t.target_address}`)}
+                        style={{ fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase' }}
+                      />
                     </td>
                     <td style={tdStyle}>
                       <BusValueText
@@ -726,5 +738,6 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
+    </GaReadPhaseProvider>
   );
 };

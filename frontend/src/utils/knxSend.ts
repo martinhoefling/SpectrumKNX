@@ -252,6 +252,12 @@ export interface ScheduledSendStatus {
   state: 'idle' | 'waiting' | 'running' | 'done' | 'cancelled' | 'failed';
   id?: string;
   address?: string;
+  /** GroupValueRead job. Absent or false is a Write/Response job. */
+  read?: boolean;
+  /** Value a write job sends. Null for a GroupValueRead job. */
+  payload?: unknown;
+  /** GroupValueResponse instead of GroupValueWrite. Ignored when `read` is set. */
+  response?: boolean;
   delay_seconds?: number;
   interval_seconds?: number | null;
   sends_done?: number;
@@ -265,15 +271,25 @@ export function startScheduledSend(
   address: string,
   payload: unknown,
   dpt: string | undefined,
-  opts: { delaySeconds?: number; intervalSeconds?: number },
+  opts: { delaySeconds?: number; intervalSeconds?: number; read?: boolean; response?: boolean },
 ): Promise<ScheduledSendStatus> {
+  const schedule = {
+    delay_seconds: opts.delaySeconds ?? 0,
+    interval_seconds: opts.intervalSeconds ?? null,
+  };
+  if (opts.read) {
+    return post<ScheduledSendStatus>('/api/knx/send/scheduled', {
+      address,
+      read: true,
+      ...schedule,
+    });
+  }
   return post<ScheduledSendStatus>('/api/knx/send/scheduled', {
     address,
     payload,
     dpt: dpt || null,
-    response: false,
-    delay_seconds: opts.delaySeconds ?? 0,
-    interval_seconds: opts.intervalSeconds ?? null,
+    response: Boolean(opts.response),
+    ...schedule,
   });
 }
 

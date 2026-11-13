@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 
 import { COMMON_DPTS, dptDesignation, type DptChoice } from '../utils/dpt';
+import { selectAllMouseDown, selectInputText } from '../utils/selectInputText';
 
 export { COMMON_DPTS, type DptChoice };
 
@@ -30,12 +31,25 @@ function resolveDptDraft(raw: string, options: DptChoice[]): string | null {
   return null;
 }
 
+/** Index of the draft / closest match in a suggestion list (for open jump). */
+function indexForDraft(list: DptChoice[], draftText: string) {
+  const q = draftText.trim().toLowerCase();
+  if (!q || list.length === 0) return 0;
+  const exact = list.findIndex(o => o.key.toLowerCase() === q);
+  if (exact >= 0) return exact;
+  const prefix = list.findIndex(o => o.key.toLowerCase().startsWith(q));
+  if (prefix >= 0) return prefix;
+  return 0;
+}
+
 /**
  * DPT entry for one row. Editable only once that row has a group address.
  * The suggestion list is portaled and pinned under this field. Reset and the
  * chevron live inside the field so showing the reset does not shift the row.
  */
-export function DptField({ value, options, disabled, overridden, title, onChange, onReset, resetTitle }: {
+export function DptField({
+  value, options, disabled, overridden, title, onChange, onReset, resetValue, resetTitle,
+}: {
   value: string;
   options: DptChoice[];
   disabled: boolean;
@@ -43,11 +57,15 @@ export function DptField({ value, options, disabled, overridden, title, onChange
   title: string;
   onChange: (next: string) => void;
   onReset: () => void;
+  /** Project DPT restored by the reset control — applied like a committed Eingabe. */
+  resetValue: string;
   resetTitle: string;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  /** Filter only after the user types while the list is open. */
+  const [typedWhileOpen, setTypedWhileOpen] = useState(false);
   // The field shows a draft. The row DPT (and the write widget) changes only
   // when a valid draft is committed: blur, Enter, or a list pick.
   const [draft, setDraft] = useState(value);
@@ -63,40 +81,37 @@ export function DptField({ value, options, disabled, overridden, title, onChange
   const [prevDisabled, setPrevDisabled] = useState(disabled);
   if (disabled !== prevDisabled) {
     setPrevDisabled(disabled);
-    if (disabled) setOpen(false);
+    if (disabled) {
+      setOpen(false);
+      setTypedWhileOpen(false);
+    }
   }
   const shellRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // A list pick commits through onChange. The blur that follows must not
   // also commit or revert the text from before the pick.
   const pickedRef = useRef(false);
-  // Arrow navigation moves the highlight; Enter with an open list always
-  // picks the highlighted row. Enter with the list closed commits the draft.
-  const keyboardNav = useRef(false);
+  // After a pick that keeps DPT focus, select() may call focus() and must not reopen.
+  const skipOpenOnFocusRef = useRef(false);
 
   const setDraftValue = (next: string) => {
     draftRef.current = next;
     setDraft(next);
   };
 
-  const matches = useMemo(() => {
-    const q = draft.trim().toLowerCase();
-    const exact = options.some(o => o.key.toLowerCase() === q);
-    if (!q || exact) return options;
-    return options.filter(o => o.key.toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
-  }, [draft, options]);
-
-  /** Index of the draft / closest match in a suggestion list (for open jump). */
-  const indexForDraft = (list: DptChoice[], draftText: string) => {
-    const q = draftText.trim().toLowerCase();
-    if (!q || list.length === 0) return 0;
-    const exact = list.findIndex(o => o.key.toLowerCase() === q);
-    if (exact >= 0) return exact;
-    const prefix = list.findIndex(o => o.key.toLowerCase().startsWith(q));
-    if (prefix >= 0) return prefix;
-    return 0;
+  const closeList = () => {
+    setOpen(false);
+    setTypedWhileOpen(false);
   };
+
+  const matches = useMemo(() => {
+    if (!typedWhileOpen) return options;
+    const q = draft.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(o => o.key.toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
+  }, [draft, options, typedWhileOpen]);
 
   // Designation beside the key (catalog/common name); not part of the editable value.
   const designation = useMemo(() => {
@@ -115,7 +130,16 @@ export function DptField({ value, options, disabled, overridden, title, onChange
     const width = Math.max(r.width, 240);
     let left = r.left;
     if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
-    setBox({ top: r.bottom + 4, left, width });
+    const top = r.bottom + 4;
+    const menu = menuRef.current;
+    // Avoid setState after mount — re-renders clear select-on-focus.
+    if (menu) {
+      menu.style.top = `${top}px`;
+      menu.style.left = `${left}px`;
+      menu.style.width = `${width}px`;
+      return;
+    }
+    setBox({ top, left, width });
   };
 
   useLayoutEffect(() => {
@@ -139,24 +163,48 @@ export function DptField({ value, options, disabled, overridden, title, onChange
     wasOpen.current = open;
   }, [open, matches]);
 
+  // Scroll only inside the menu — scrollIntoView on the page clears input selection.
   useLayoutEffect(() => {
     if (!open || !menuRef.current) return;
-    const selected = menuRef.current.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
-    if (typeof selected?.scrollIntoView === 'function') {
-      selected.scrollIntoView({ block: 'nearest' });
-    }
+    const menu = menuRef.current;
+    const selected = menu.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    if (!selected) return;
+    const m = menu.getBoundingClientRect();
+    const o = selected.getBoundingClientRect();
+    if (o.bottom > m.bottom) menu.scrollTop += o.bottom - m.bottom;
+    else if (o.top < m.top) menu.scrollTop -= m.top - o.top;
   }, [open, active, matches]);
+
+  // Re-assert select-on-focus after the Werthilfe mounts / repositions.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = inputRef.current;
+    if (el && document.activeElement === el) el.select();
+  }, [open, box]);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
       if (shellRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
+      closeList();
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
+
+  const selectInput = (opts?: { keepClosed?: boolean }) => {
+    const el = inputRef.current;
+    if (!el) return;
+    if (opts?.keepClosed) skipOpenOnFocusRef.current = true;
+    el.focus();
+    selectInputText(el);
+  };
+
+  /** After a Werthilfe pick, land on the chevron (list stays closed). */
+  const focusAfterCommit = () => {
+    queueMicrotask(() => chevronRef.current?.focus());
+  };
 
   const commitDraft = () => {
     const next = resolveDptDraft(draftRef.current, options);
@@ -168,27 +216,80 @@ export function DptField({ value, options, disabled, overridden, title, onChange
     if (next !== value) onChange(next);
   };
 
-  const pick = (choice: DptChoice) => {
+  const applyChoice = (choice: DptChoice, opts?: { keepListOpen?: boolean }) => {
     pickedRef.current = true;
-    keyboardNav.current = false;
     setDraftValue(choice.key);
-    onChange(choice.key);
-    setOpen(false);
-    // Drop focus so the next click opens the list again instead of only
-    // placing a caret in an already-focused field.
-    inputRef.current?.blur();
+    if (choice.key !== value) onChange(choice.key);
+    if (opts?.keepListOpen) {
+      pickedRef.current = false;
+      return;
+    }
+    closeList();
+    focusAfterCommit();
+  };
+
+  const pick = (choice: DptChoice) => applyChoice(choice);
+
+  /**
+   * Restore the project DPT like a committed field Eingabe / Werthilfe pick:
+   * apply the key, close any open list, ignore a following blur revert, land on the chevron.
+   */
+  const applyReset = () => {
+    if (!overridden || !resetValue) return;
+    pickedRef.current = true;
+    setDraftValue(resetValue);
+    closeList();
+    onReset();
+    focusAfterCommit();
+  };
+
+  /**
+   * Step to the adjacent DPT and commit it.
+   * - Input: current (possibly filtered) list, clamped ends, focus stays in the input.
+   * - Chevron: full unfiltered options, wraps, focus stays on the chevron.
+   */
+  const stepDpt = (
+    dir: 1 | -1,
+    opts: { list: DptChoice[]; wrap: boolean; focus: 'input' | 'chevron' },
+  ) => {
+    const { list, wrap, focus } = opts;
+    if (list.length === 0) return;
+    const currentKey = (draftRef.current || value).trim();
+    let idx = list.findIndex(o => o.key === currentKey);
+    if (idx < 0) idx = indexForDraft(list, currentKey);
+    const next = wrap
+      ? (idx + dir + list.length) % list.length
+      : Math.max(0, Math.min(list.length - 1, idx + dir));
+    const choice = list[next];
+    if (!choice) return;
+    if (focus === 'chevron') setTypedWhileOpen(false);
+    setOpen(true);
+    setHighlight(next);
+    applyChoice(choice, { keepListOpen: true });
+    if (focus === 'chevron') {
+      queueMicrotask(() => chevronRef.current?.focus());
+    } else {
+      selectInput();
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { setOpen(false); return; }
+    if (e.key === 'Escape') {
+      // Consume Escape while the Werthilfe is open so a parent (send popover)
+      // does not dismiss on the same keypress.
+      if (open) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeList();
+      }
+      return;
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      keyboardNav.current = true;
-      if (!open) { setOpen(true); return; }
-      const dir = e.key === 'ArrowDown' ? 1 : -1;
-      setHighlight(h => {
-        const current = Math.min(h, Math.max(matches.length - 1, 0));
-        return Math.max(0, Math.min(matches.length - 1, current + dir));
+      stepDpt(e.key === 'ArrowDown' ? 1 : -1, {
+        list: matches,
+        wrap: false,
+        focus: 'input',
       });
       return;
     }
@@ -199,7 +300,27 @@ export function DptField({ value, options, disabled, overridden, title, onChange
         return;
       }
       commitDraft();
-      setOpen(false);
+      closeList();
+      focusAfterCommit();
+    }
+  };
+
+  const onChevronKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      if (open) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeList();
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepDpt(e.key === 'ArrowDown' ? 1 : -1, {
+        list: options,
+        wrap: true,
+        focus: 'chevron',
+      });
     }
   };
 
@@ -213,12 +334,13 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           if (disabled) return;
           const target = e.target as HTMLElement;
           if (target.closest('[data-dpt-reset], [data-dpt-chevron]')) return;
-          // Keep the caret when the press lands in the input; anywhere else
-          // in the shell still focuses it and opens the list.
-          if (e.target !== inputRef.current) e.preventDefault();
-          keyboardNav.current = false;
+          if (e.defaultPrevented) return;
+          const input = inputRef.current;
+          if (e.target === input && document.activeElement === input) return;
+          e.preventDefault();
+          setTypedWhileOpen(false);
           setOpen(true);
-          inputRef.current?.focus();
+          input?.focus();
         }}
         style={{
           position: 'relative',
@@ -240,17 +362,31 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           disabled={disabled}
           placeholder="—"
           title={title}
+          onMouseDown={selectAllMouseDown}
           onChange={e => {
-            keyboardNav.current = false;
+            if (disabled) return;
             setDraftValue(e.target.value);
+            setTypedWhileOpen(true);
             setOpen(true);
             setHighlight(0);
           }}
-          onFocus={() => { if (!disabled) setOpen(true); }}
+          onFocus={e => {
+            if (disabled) return;
+            const el = e.currentTarget;
+            if (skipOpenOnFocusRef.current) {
+              skipOpenOnFocusRef.current = false;
+              selectInputText(el);
+              return;
+            }
+            setTypedWhileOpen(false);
+            setOpen(true);
+            selectInputText(el);
+          }}
           onBlur={() => {
-            if (pickedRef.current) { pickedRef.current = false; setOpen(false); return; }
+            if (disabled) { closeList(); return; }
+            if (pickedRef.current) { pickedRef.current = false; closeList(); return; }
             commitDraft();
-            setOpen(false);
+            closeList();
           }}
           onKeyDown={onKeyDown}
           style={{
@@ -294,7 +430,7 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           aria-hidden={!overridden}
           disabled={disabled || !overridden}
           onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
-          onClick={() => { if (overridden) onReset(); }}
+          onClick={applyReset}
           title={overridden ? resetTitle : undefined}
           style={{
             color: overridden ? 'var(--warning)' : 'var(--text-dim)',
@@ -307,6 +443,7 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           <RotateCcw size={12} />
         </button>
         <button
+          ref={chevronRef}
           type="button"
           className="icon-button"
           data-dpt-chevron
@@ -314,10 +451,11 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           disabled={disabled}
           tabIndex={disabled ? -1 : 0}
           onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+          onKeyDown={onChevronKeyDown}
           onClick={() => {
             if (disabled) return;
             if (open) {
-              setOpen(false);
+              closeList();
               inputRef.current?.blur();
             } else {
               inputRef.current?.focus();

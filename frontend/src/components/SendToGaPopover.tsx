@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Radio, ChevronLeft } from 'lucide-react';
+import { Send, ChevronLeft } from 'lucide-react';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -13,7 +13,10 @@ import { DptField } from './DptField';
 import { WriteControls, needsValueColumn } from './WriteControls';
 import { BusValueText } from './BusValueText';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
+import { EventTypeLabel } from './EventTypeLabel';
+import { useGaReadPhase } from './GaReadPhase';
 import { secondaryBtn } from '../utils/buttonStyles';
+import { SecondsField } from './SecondsField';
 import {
   sanitizeSecondsInput,
   correspondenceKeyFromDraft,
@@ -53,7 +56,7 @@ type HostApi = {
   open: (session: HostSession) => void;
   close: () => void;
   captureListScroll: (() => ListScrollSnapshot | null) | null;
-  restoreListScroll: ((snap: ListScrollSnapshot) => void) | null;
+  restoreListScroll: ((snap: ListScrollSnapshot) => void | Promise<void>) | null;
 };
 
 const SendToGaHostContext = createContext<HostApi | null>(null);
@@ -73,6 +76,7 @@ export function SendToGaHost({
   gaJobStatuses,
   onScheduleCommit,
   onWriteWithSchedule,
+  onReadWithSchedule,
   onCancelLinked,
   onAltSend,
   onCtrlSend,
@@ -81,7 +85,7 @@ export function SendToGaHost({
   latestTelegram?: Telegram | null;
   onGotoTelegram?: (telegram: Telegram) => void;
   captureListScroll?: () => ListScrollSnapshot | null;
-  restoreListScroll?: (snap: ListScrollSnapshot) => void;
+  restoreListScroll?: (snap: ListScrollSnapshot) => void | Promise<void>;
   linkedRowId?: string | null;
   linkedStatus?: LinkedRowStatus | null;
   gaJobStatuses?: Record<string, LinkedRowStatus>;
@@ -89,7 +93,9 @@ export function SendToGaHost({
   onWriteWithSchedule?: (
     draft: SendCorrespondenceKey & { name?: string | null },
     payload: BusPayload,
+    opts?: { response?: boolean },
   ) => void;
+  onReadWithSchedule?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onCancelLinked?: (rowId?: string) => void;
   onAltSend?: () => void;
   onCtrlSend?: (info: {
@@ -141,6 +147,7 @@ export function SendToGaHost({
           linkedStatus={statusForPanel}
           onScheduleCommit={onScheduleCommit}
           onWriteWithSchedule={onWriteWithSchedule}
+          onReadWithSchedule={onReadWithSchedule}
           onCancelLinked={onCancelLinked}
         />
       )}
@@ -189,9 +196,9 @@ interface Props {
     dptMain?: number | null;
     dptSub?: number | null;
   }) => void;
-  /** Send panel top-row matches this GA — keep the icon blue while the panel is open. */
+  /** Send panel has at least one row for this GA — keep the icon opaque/blue. */
   panelMatched?: boolean;
-  /** A live send-panel job targets this GA — keep the icon visible (dim green). */
+  /** A live send-panel job targets this GA — keep the icon opaque/green. */
   jobActive?: boolean;
   /**
    * Keep the trigger out of Tab / field focus (telegram-table scroll body).
@@ -204,7 +211,9 @@ interface Props {
   onWriteWithSchedule?: (
     draft: SendCorrespondenceKey & { name?: string | null },
     payload: BusPayload,
+    opts?: { response?: boolean },
   ) => void;
+  onReadWithSchedule?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onCancelLinked?: (rowId?: string) => void;
 }
 
@@ -228,10 +237,6 @@ function isWriteTelegram(tg: Telegram | null | undefined): boolean {
 /** Value-bearing bus event that should refresh the popover's last value/timestamp. */
 function isLastValueTelegram(tg: Telegram | null | undefined): boolean {
   return isWriteTelegram(tg) || isResponseTelegram(tg);
-}
-
-function isReadRequestFeedback(feedback: { ok: boolean; msg: string } | null): boolean {
-  return Boolean(feedback?.ok && /^Read request/i.test(feedback.msg));
 }
 
 function rectsOverlap(
@@ -326,8 +331,50 @@ function clearOverlaps(
   return clearPillOverlaps(table, left, top, width, height, pad, gap);
 }
 
-/** Dimmed green while a scheduled send-job owns this GA. */
-const JOB_ACTIVE_COLOR = 'color-mix(in srgb, var(--success) 62%, var(--text-dim))';
+type BusPulseDir = 'Incoming' | 'Outgoing';
+
+/** Must match `animation: bus-pulse 0.42s` in index.css. */
+const BUS_PULSE_MS = 420;
+
+/** TT direction colors: Incoming sky, Outgoing fuchsia — not traffic-light colors. */
+function busPulseColor(dir: BusPulseDir): string {
+  return dir === 'Outgoing' ? 'var(--tt-outgoing)' : 'var(--tt-incoming)';
+}
+
+/**
+ * Trigger color: bus pulse uses that direction's TT color; live job uses
+ * Outgoing color; otherwise blue when lit, else dim.
+ */
+function sendTriggerColor(opts: {
+  busPulse: BusPulseDir | null;
+  jobActive: boolean;
+  lit: boolean;
+  fallback?: string;
+}): string {
+  if (opts.busPulse) return busPulseColor(opts.busPulse);
+  if (opts.jobActive) return 'var(--tt-outgoing)';
+  if (opts.lit) return 'var(--accent-primary)';
+  return opts.fallback || 'var(--text-dim)';
+}
+
+/**
+ * Drop pulse keyframe leftovers so CSS opacity/color rules apply cleanly again.
+ * `transition: all` would otherwise ease filter/transform off the button and
+ * leave the send glyph blank after the keyframes end.
+ */
+function clearSendWritePulseStyles(el: HTMLElement | null | undefined) {
+  if (!el) return;
+  el.style.transition = 'none';
+  el.style.animation = 'none';
+  el.style.filter = 'none';
+  el.style.transform = 'none';
+  void el.offsetWidth;
+  el.style.removeProperty('transition');
+  el.style.removeProperty('animation');
+  el.style.removeProperty('filter');
+  el.style.removeProperty('transform');
+}
+
 export function SendToGaPopover({
   address, name, dptMain, dptSub, dptCatalog: dptCatalogProp,
   title = 'Send to this GA',
@@ -347,40 +394,66 @@ export function SendToGaPopover({
   linkedStatus = null,
   onScheduleCommit,
   onWriteWithSchedule,
+  onReadWithSchedule,
   onCancelLinked,
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [hovered, setHovered] = useState(false);
-  const [outgoingFlash, setOutgoingFlash] = useState(false);
+  const [busPulse, setBusPulse] = useState<BusPulseDir | null>(null);
+  /** Bumped when a pulse ends so the send glyph mounts fresh after the keyframes. */
+  const [sendIconEpoch, setSendIconEpoch] = useState(0);
   const btnRef = useRef<HTMLButtonElement>(null);
   const flashGenRef = useRef(0);
+  const pulseTimerRef = useRef(0);
+  const addressRef = useRef(address);
 
-  // Brief green flash when an outgoing Write for this GA hits the live feed.
+  useEffect(() => () => window.clearTimeout(pulseTimerRef.current), []);
+
+  // Brief pulse in that direction's TT color when a bus event for this GA arrives.
+  // The button stays mounted, so the attribute has to come off for the resting color.
+  // A later telegram for another GA must not cancel the timer: the list updates
+  // latestTelegram constantly, and clearing here left the pulse attribute on
+  // after the keyframes finished. A recycled row (new GA) drops the pulse at once.
   useEffect(() => {
+    if (addressRef.current !== address) {
+      addressRef.current = address;
+      flashGenRef.current += 1;
+      window.clearTimeout(pulseTimerRef.current);
+      setBusPulse(null);
+      setSendIconEpoch(epoch => epoch + 1);
+    }
     if (!latestTelegram) return;
     if (latestTelegram.target_address !== address) return;
-    if (latestTelegram.direction !== 'Outgoing') return;
-    if (!isWriteTelegram(latestTelegram)) return;
+    const dir = latestTelegram.direction;
+    if (dir !== 'Outgoing' && dir !== 'Incoming') return;
     const gen = ++flashGenRef.current;
-    setOutgoingFlash(true);
-    const t = window.setTimeout(() => {
-      if (flashGenRef.current === gen) setOutgoingFlash(false);
-    }, 420);
-    return () => window.clearTimeout(t);
+    setBusPulse(dir);
+    window.clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = window.setTimeout(() => {
+      if (flashGenRef.current !== gen) return;
+      setBusPulse(null);
+      setSendIconEpoch(epoch => epoch + 1);
+    }, BUS_PULSE_MS);
   }, [latestTelegram, address]);
+
+  // After the pulse attribute drops, hard-reset animation leftovers before paint
+  // so panel-match / job / hover opacity and color rules apply to a visible icon.
+  useLayoutEffect(() => {
+    if (busPulse != null) return;
+    clearSendWritePulseStyles(btnRef.current);
+  }, [busPulse]);
 
   // Inside a host: only the trigger lives in the (virtualized) row. The panel
   // is rendered by SendToGaHost so scrolling the list cannot unmount it.
   if (host && !panelOnly) {
     const active = host.activeAddress === address;
     const lit = active || panelMatched || hovered;
-    const color = outgoingFlash
-      ? 'var(--success)'
-      : lit
-        ? 'var(--accent-primary)'
-        : jobActive
-          ? JOB_ACTIVE_COLOR
-          : (buttonStyle?.color || 'var(--text-dim)');
+    const color = sendTriggerColor({
+      busPulse,
+      jobActive,
+      lit,
+      fallback: buttonStyle?.color,
+    });
     return (
       <button
         ref={btnRef}
@@ -388,7 +461,7 @@ export function SendToGaPopover({
         {...(active ? { 'data-send-popover-open': '' } : {})}
         {...(panelMatched ? { 'data-send-panel-match': '' } : {})}
         {...(jobActive ? { 'data-send-job-active': '' } : {})}
-        {...(outgoingFlash ? { 'data-send-outgoing-flash': '' } : {})}
+        {...(busPulse ? { 'data-bus-pulse': busPulse } : {})}
         className={buttonClassName}
         tabIndex={suppressTriggerFocus ? -1 : undefined}
         style={{
@@ -432,7 +505,7 @@ export function SendToGaPopover({
         }}
         title={title}
       >
-        <Send size={12} />
+        <Send key={sendIconEpoch} size={12} />
       </button>
     );
   }
@@ -463,8 +536,10 @@ export function SendToGaPopover({
       linkedStatus={linkedStatus}
       onScheduleCommit={onScheduleCommit}
       onWriteWithSchedule={onWriteWithSchedule}
+      onReadWithSchedule={onReadWithSchedule}
       onCancelLinked={onCancelLinked}
-      outgoingFlash={outgoingFlash}
+      busPulse={busPulse}
+      sendIconEpoch={sendIconEpoch}
     />
   );
 }
@@ -487,9 +562,11 @@ function SendToGaPopoverPanel({
   linkedStatus = null,
   onScheduleCommit,
   onWriteWithSchedule,
+  onReadWithSchedule,
   onCancelLinked,
-  outgoingFlash = false,
-}: Props & { outgoingFlash?: boolean }) {
+  busPulse = null,
+  sendIconEpoch = 0,
+}: Props & { busPulse?: BusPulseDir | null; sendIconEpoch?: number }) {
   const host = useContext(SendToGaHostContext);
   const [open, setOpen] = useState(panelOnly);
   const [hovered, setHovered] = useState(false);
@@ -497,11 +574,20 @@ function SendToGaPopoverPanel({
   const btnRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<AnchorRect | null>(panelAnchor ?? null);
+
+  // Standalone trigger (no host): the button lives here, so clear leftovers here.
+  useLayoutEffect(() => {
+    if (busPulse != null) return;
+    clearSendWritePulseStyles(btnRef.current);
+  }, [busPulse]);
   const [pos, setPos] = useState<{ top: number; left: number; maxWidth: number; maxHeight: number } | null>(null);
   /** List position captured when this popover opened (restore jump). */
   const [listSnapshot, setListSnapshot] = useState<ListScrollSnapshot | null>(panelListSnapshot);
   /** True once the list scrollTop differs from the open snapshot. */
   const [listScrollAway, setListScrollAway] = useState(false);
+  /** True once the card has left the position place('full') anchored. */
+  const [posAway, setPosAway] = useState(false);
+  const anchoredPosRef = useRef<{ top: number; left: number } | null>(null);
   const listSnapshotRef = useRef(listSnapshot);
   listSnapshotRef.current = listSnapshot;
   const dragRef = useRef<{
@@ -539,6 +625,8 @@ function SendToGaPopoverPanel({
   const [value, setValue] = useState('');
   const [delay, setDelay] = useState('');
   const [every, setEvery] = useState('');
+  /** Ctrl/cmd-click on Read switches this. Write buttons then send a GroupValueResponse. */
+  const [respond, setRespond] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [last, setLast] = useState<Telegram | null>(null);
@@ -596,14 +684,11 @@ function SendToGaPopoverPanel({
     commitScheduleLink({ dpt: next });
   };
 
-  const scheduleFieldProps = {
-    onBlur: commitScheduleLink,
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commitScheduleLink();
-      }
-    },
+  const scheduleEnter = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitScheduleLink();
+    }
   };
 
   const tableEl = () => (
@@ -626,6 +711,8 @@ function SendToGaPopoverPanel({
     setAwaitingRead(false);
     setStatusTelegram(null);
     adoptListSnapshot(null);
+    anchoredPosRef.current = null;
+    setPosAway(false);
     onPanelClose?.();
   };
 
@@ -643,15 +730,17 @@ function SendToGaPopoverPanel({
   };
 
   const restoreOpenScroll = () => {
-    if (!listSnapshot) return;
-    if (host?.restoreListScroll) {
-      host.restoreListScroll(listSnapshot);
-      setListScrollAway(false);
-      return;
-    }
-    const scrollEl = listScrollEl();
-    if (scrollEl) scrollEl.scrollTop = listSnapshot.scrollTop;
+    const snap = listSnapshot;
     setListScrollAway(false);
+    const done = snap == null
+      ? undefined
+      : host?.restoreListScroll
+        ? host.restoreListScroll(snap)
+        : (() => {
+            const scrollEl = listScrollEl();
+            if (scrollEl) scrollEl.scrollTop = snap.scrollTop;
+          })();
+    void Promise.resolve(done).then(() => { place('full'); });
   };
 
   /**
@@ -750,6 +839,8 @@ function SendToGaPopoverPanel({
     }
 
     const next = { top, left, maxWidth, maxHeight };
+    anchoredPosRef.current = { top: next.top, left: next.left };
+    setPosAway(false);
     setPos(prev => (
       prev
       && prev.top === next.top
@@ -761,6 +852,15 @@ function SendToGaPopoverPanel({
     ));
     return true;
   };
+
+  // Drag and overlap nudges move `pos` without re-anchoring. The chevron
+  // shows until Restore runs place('full') again.
+  useEffect(() => {
+    if (!open || !pos || !anchoredPosRef.current) return;
+    const a = anchoredPosRef.current;
+    const away = a.top !== pos.top || a.left !== pos.left;
+    setPosAway(prev => (prev === away ? prev : away));
+  }, [open, pos]);
 
   const clampDragPos = (left: number, top: number) => {
     const pad = 8;
@@ -886,7 +986,14 @@ function SendToGaPopoverPanel({
       : null;
     if (card && ro) ro.observe(card);
     const onResize = () => place('full');
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closePopover(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Werthilfe (DPT / value suggestions) first — field handlers stopPropagation
+      // when they close one; this covers the same-tick case where the menu is
+      // still mounted after the field scheduled its close.
+      if (document.querySelector('[data-portaled-menu]')) return;
+      closePopover();
+    };
     const onDown = (e: MouseEvent) => {
       const n = e.target as Node;
       if (n instanceof Element && n.closest('[data-portaled-menu]')) return;
@@ -952,7 +1059,8 @@ function SendToGaPopoverPanel({
         loadLastGenRef.current += 1;
         setLast(latestTelegram);
       }
-      if (awaitingRead) {
+      // A linked job's status jump comes from the row, not this local wait.
+      if (awaitingRead && !linkedStatus?.job) {
         if (isReadTelegram(latestTelegram)) {
           setStatusTelegram(latestTelegram);
         } else if (isResponseTelegram(latestTelegram)) {
@@ -965,7 +1073,10 @@ function SendToGaPopoverPanel({
     }
   }
 
-  const write = async (payload: BusPayload) => {
+  const jobLocked = Boolean(linkedStatus?.job);
+
+  const write = async (payload: BusPayload, response = respond) => {
+    if (jobLocked) return;
     const nextDelay = sanitizeSecondsInput(delay);
     const nextEvery = sanitizeSecondsInput(every);
     if (nextDelay !== delay) setDelay(nextDelay);
@@ -978,7 +1089,7 @@ function SendToGaPopoverPanel({
           address, dpt, value, delay: nextDelay, every: nextEvery,
         }),
         name,
-      }, payload);
+      }, payload, response ? { response: true } : undefined);
       return;
     }
     setBusy(true);
@@ -986,9 +1097,9 @@ function SendToGaPopoverPanel({
     setAwaitingRead(false);
     setStatusTelegram(null);
     try {
-      await sendTelegram(address, payload, dpt || undefined);
+      await sendTelegram(address, payload, dpt || undefined, response);
       const shown = describeBusPayload(payload, dpt);
-      setFeedback({ ok: true, msg: `Sent ${shown} to ${address}` });
+      setFeedback({ ok: true, msg: `${response ? 'Response' : 'Sent'} ${shown} to ${address}` });
       setTimeout(() => void loadLast(), 700);
     } catch (err) {
       setFeedback({ ok: false, msg: err instanceof Error ? err.message : 'Send failed' });
@@ -998,6 +1109,21 @@ function SendToGaPopoverPanel({
   };
 
   const read = async () => {
+    if (jobLocked || respond) return;
+    const nextDelay = sanitizeSecondsInput(delay);
+    const nextEvery = sanitizeSecondsInput(every);
+    if (nextDelay !== delay) setDelay(nextDelay);
+    if (nextEvery !== every) setEvery(nextEvery);
+    const scheduled = Boolean(nextDelay || nextEvery);
+    if (onReadWithSchedule && (scheduled || linkedRowId)) {
+      onReadWithSchedule({
+        ...correspondenceKeyFromDraft({
+          address, dpt, value, delay: nextDelay, every: nextEvery,
+        }),
+        name,
+      });
+      return;
+    }
     // Arm before the API returns so a fast bus Response still binds.
     setBusy(true);
     setFeedback(null);
@@ -1015,15 +1141,22 @@ function SendToGaPopoverPanel({
   };
 
   // Read wait must not lock DPT / value / send — only the in-flight request does.
+  // A live panel job locks Write, Read, delay, and every until Cancel.
   const controlsDisabled = busy;
   const { retainClickFocus: retainReadFocus } = useRetainFocusThroughDisabled(controlsDisabled);
   const showValueField = needsValueColumn(dpt || null, parseDptMain(dpt));
+  const readPhase = useGaReadPhase(address);
 
   // Same status shell as the send panel (always mounted; content when active).
   const statusJob = linkedStatus?.job ?? null;
-  const statusFeedback = feedback ?? linkedStatus?.feedback ?? null;
-  const statusAwaiting = awaitingRead || linkedStatus?.statusWatch === 'read';
-  const statusTg = statusTelegram ?? linkedStatus?.statusTelegram ?? null;
+  // Typing clears feedback, but an open read stays visible until a telegram binds.
+  const statusFeedback = (
+    feedback
+    ?? (awaitingRead && !statusTelegram ? { ok: true, msg: 'Read request sent' } : null)
+  ) ?? linkedStatus?.feedback ?? null;
+  const statusTg = linkedStatus?.job
+    ? (linkedStatus.statusTelegram ?? null)
+    : (statusTelegram ?? linkedStatus?.statusTelegram ?? null);
   const statusShowCountdown = Boolean(
     statusJob && (statusJob.next_send_at || statusJob.state === 'waiting'),
   );
@@ -1033,9 +1166,9 @@ function SendToGaPopoverPanel({
     && (statusJob.sends_done ?? 0) > 0,
   );
   const statusHasChrome = Boolean(
-    statusJob || statusAwaiting || statusFeedback || statusTg,
+    statusJob || awaitingRead || statusFeedback || statusTg || linkedStatus?.statusWatch === 'read',
   );
-  const statusShowCancel = Boolean(statusJob || statusAwaiting);
+  const statusShowCancel = Boolean(statusJob);
 
   const lastHasValue = last != null && last.simplified_type !== 'Read';
 
@@ -1048,18 +1181,17 @@ function SendToGaPopoverPanel({
           {...(open ? { 'data-send-popover-open': '' } : {})}
           {...(panelMatched ? { 'data-send-panel-match': '' } : {})}
           {...(jobActive ? { 'data-send-job-active': '' } : {})}
-          {...(outgoingFlash ? { 'data-send-outgoing-flash': '' } : {})}
+          {...(busPulse ? { 'data-bus-pulse': busPulse } : {})}
           className={buttonClassName}
           tabIndex={suppressTriggerFocus ? -1 : undefined}
           style={{
             ...buttonStyle,
-            color: outgoingFlash
-              ? 'var(--success)'
-              : (open || panelMatched || hovered)
-                ? 'var(--accent-primary)'
-                : jobActive
-                  ? JOB_ACTIVE_COLOR
-                  : (buttonStyle?.color || 'var(--text-dim)'),
+            color: sendTriggerColor({
+              busPulse,
+              jobActive,
+              lit: open || panelMatched || hovered,
+              fallback: buttonStyle?.color,
+            }),
           }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
@@ -1078,7 +1210,7 @@ function SendToGaPopoverPanel({
           }}
           title={title}
         >
-          <Send size={12} />
+          <Send key={sendIconEpoch} size={12} />
         </button>
       )}
 
@@ -1111,7 +1243,7 @@ function SendToGaPopoverPanel({
           >
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-primary)' }}>{address}</span>
             {name && <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{name}</span>}
-            {listSnapshot != null && listScrollAway && (
+            {(listScrollAway || posAway) && (
               <button
                 type="button"
                 className="quick-filter-bar-toggle"
@@ -1129,7 +1261,13 @@ function SendToGaPopoverPanel({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
               <span>
                 Last value:{' '}
-                <BusValueText value={last} dpt={dpt} as="span" />
+                <BusValueText
+                  value={last}
+                  dpt={dpt}
+                  as="span"
+                  pulse={last.direction === 'Incoming' || last.direction === 'Outgoing' ? last.direction : null}
+                  pulseKey={last.timestamp}
+                />
               </span>
               <TelegramWhenJump
                 timestamp={last.timestamp}
@@ -1147,69 +1285,51 @@ function SendToGaPopoverPanel({
                 className="wtb-read-btn"
                 onClick={e => {
                   retainReadFocus(e);
+                  if (e.ctrlKey || e.metaKey) {
+                    if (jobLocked || controlsDisabled) return;
+                    setRespond(v => !v);
+                    return;
+                  }
                   void read();
                 }}
-                disabled={controlsDisabled}
-                style={secondaryBtn(controlsDisabled)}
-                title="Send a GroupValueRead; the response updates last value"
+                disabled={controlsDisabled || jobLocked}
+                style={secondaryBtn(controlsDisabled || jobLocked, Boolean(statusJob && !statusJob.read))}
+                title={
+                  jobLocked
+                    ? `${respond ? 'Response' : 'Read'} (locked while this job is running)`
+                    : respond
+                      ? 'Write buttons send a GroupValueResponse · ctrl/cmd-click to switch to Read'
+                      : 'Send a GroupValueRead; the response updates last value · ctrl/cmd-click so Write buttons send a Response'
+                }
               >
-                <Radio size={13} /> Read
+                <EventTypeLabel
+                  kind={respond ? 'Response' : 'Read'}
+                  showIcon
+                  phase={readPhase}
+                  iconDim={
+                    controlsDisabled || jobLocked
+                      ? (statusJob && !statusJob.read ? 'muted' : 'disabled')
+                      : undefined
+                  }
+                  iconSize={13}
+                />
               </button>
             );
-            const scheduleFields = (
-              <div
-                style={{
-                  gridArea: 'sched',
-                  display: 'flex',
-                  gap: '0.4rem',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  width: 'max-content',
-                }}
-              >
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                  delay
-                  <input
-                    className="glass-input"
-                    value={delay}
-                    disabled={controlsDisabled || Boolean(linkedStatus?.job)}
-                    placeholder="s"
-                    title="Delay before first send (seconds)"
-                    style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
-                    onChange={e => setDelay(e.target.value)}
-                    {...scheduleFieldProps}
-                  />
-                </label>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                  every
-                  <input
-                    className="glass-input"
-                    value={every}
-                    disabled={controlsDisabled || Boolean(linkedStatus?.job)}
-                    placeholder="s"
-                    title="Cyclic interval (seconds)"
-                    style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
-                    onChange={e => setEvery(e.target.value)}
-                    {...scheduleFieldProps}
-                  />
-                </label>
-              </div>
-            );
+            const scheduleLocked = Boolean(linkedStatus?.job);
             return (
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) max-content',
+                  gridTemplateColumns: 'max-content minmax(0, 1fr)',
                   gridTemplateAreas: showValue
                     ? `
-                      "dpt dpt"
-                      "value write"
-                      "sched read"
+                      "dpt sched"
+                      "value value"
+                      "write read"
                     `
                     : `
-                      "dpt dpt"
-                      "write write"
-                      "sched read"
+                      "dpt sched"
+                      "write read"
                     `,
                   columnGap: '0.4rem',
                   rowGap: '0.65rem',
@@ -1230,7 +1350,45 @@ function SendToGaPopoverPanel({
                     }
                     onChange={onDptChange}
                     onReset={() => { setDpt(projectDpt); setValue(''); setFeedback(null); }}
+                    resetValue={projectDpt}
                     resetTitle={`Reset to project DPT ${projectDpt}`}
+                  />
+                </div>
+                <div
+                  style={{
+                    gridArea: 'sched',
+                    display: 'flex',
+                    alignItems: 'center',
+                    columnGap: '0.4rem',
+                    width: 'max-content',
+                    justifySelf: 'start',
+                  }}
+                >
+                  <SecondsField
+                    placeholder="delay"
+                    value={delay}
+                    onChange={setDelay}
+                    disabled={controlsDisabled || scheduleLocked}
+                    title={
+                      scheduleLocked
+                        ? 'delay (locked while this job is running)'
+                        : 'delay'
+                    }
+                    onBlur={sanitized => commitScheduleLink({ delay: sanitized })}
+                    onKeyDown={scheduleEnter}
+                  />
+                  <SecondsField
+                    placeholder="every"
+                    value={every}
+                    onChange={setEvery}
+                    disabled={controlsDisabled || scheduleLocked}
+                    title={
+                      scheduleLocked
+                        ? 'every (locked while this job is running)'
+                        : 'every'
+                    }
+                    onBlur={sanitized => commitScheduleLink({ every: sanitized })}
+                    onKeyDown={scheduleEnter}
                   />
                 </div>
                 <WriteControls
@@ -1242,6 +1400,8 @@ function SendToGaPopoverPanel({
                   onWrite={payload => void write(payload)}
                   onError={msg => setFeedback({ ok: false, msg })}
                   disabled={controlsDisabled}
+                  sendLocked={jobLocked}
+                  activeJob={statusJob}
                   unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
                   sendFit="hug"
                   focusToken={focusToken}
@@ -1255,13 +1415,11 @@ function SendToGaPopoverPanel({
                     style: {
                       gridArea: 'write',
                       width: 'max-content',
-                      // Same right column as Read when a value field is shown.
-                      ...(showValue ? { justifySelf: 'end' as const } : null),
+                      justifySelf: 'start',
                     },
                   }}
                   reserveValueSlot={false}
                 />
-                {scheduleFields}
                 <div style={{ gridArea: 'read', width: 'max-content', justifySelf: 'end' }}>
                   {readBtn}
                 </div>
@@ -1271,10 +1429,10 @@ function SendToGaPopoverPanel({
 
           <SendJobStatusField
             feedback={statusFeedback}
-            awaiting={statusAwaiting}
             job={statusJob}
             showCountdownCol={statusShowCountdown}
             showSendCountCol={statusShowSendCount}
+            showEventCols={statusTg != null}
             showActionCol={statusHasChrome}
             actionWidth={statusShowCancel ? STATUS_ACTION_WIDTH : STATUS_CLEAR_WIDTH}
             statusTelegram={statusTg}
@@ -1284,14 +1442,6 @@ function SendToGaPopoverPanel({
             dpt={linkedStatus?.dpt ?? dpt}
             onCancel={() => {
               if (statusJob) onCancelLinked?.(linkedStatus?.rowId);
-              else {
-                setAwaitingRead(false);
-                setFeedback(prev => (isReadRequestFeedback(prev) ? prev : null));
-              }
-            }}
-            onStopAwait={() => {
-              setAwaitingRead(false);
-              setFeedback(prev => (isReadRequestFeedback(prev) ? prev : null));
             }}
             onClear={() => {
               setFeedback(null);

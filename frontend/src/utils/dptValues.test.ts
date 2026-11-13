@@ -1,11 +1,18 @@
-import { expect, test } from 'vitest';
+import { beforeEach, expect, test } from 'vitest';
 import {
+  cycleDiscreteLabelMode,
   discreteDptValues,
   discretePayloadRawBits,
   formatBusValueForDpt,
   formatDiscreteChoiceLabel,
+  getDiscreteLabelMode,
   nextDiscreteLabelMode,
+  resetDiscreteLabelModes,
 } from './dptValues';
+
+beforeEach(() => {
+  resetDiscreteLabelModes();
+});
 
 test('discreteDptValues labels are lowercase', () => {
   expect(discreteDptValues('1.001')?.map(c => c.label)).toEqual(['off', 'on']);
@@ -99,4 +106,13 @@ test('formatDiscreteChoiceLabel cycles name / hex / bin', () => {
   expect(nextDiscreteLabelMode('name')).toBe('hex');
   expect(nextDiscreteLabelMode('hex')).toBe('bin');
   expect(nextDiscreteLabelMode('bin')).toBe('name');
+});
+
+test('discrete label mode is one panel-wide state, not per DPT', () => {
+  expect(getDiscreteLabelMode()).toBe('name');
+  expect(cycleDiscreteLabelMode()).toBe('hex');
+  expect(getDiscreteLabelMode()).toBe('hex');
+  expect(cycleDiscreteLabelMode()).toBe('bin');
+  expect(getDiscreteLabelMode()).toBe('bin');
+  expect(cycleDiscreteLabelMode()).toBe('name');
 });

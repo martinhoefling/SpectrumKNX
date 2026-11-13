@@ -51,7 +51,8 @@ export function rowsEqualForCorrespondence(
 export type SendPanelCommand =
   | { type: 'ensureRow'; nonce: number; key: SendCorrespondenceKey; name?: string | null }
   | { type: 'cancelRow'; nonce: number; rowId: string }
-  | { type: 'writeViaRow'; nonce: number; rowId: string; payload: BusPayload };
+  | { type: 'writeViaRow'; nonce: number; rowId: string; payload: BusPayload; response?: boolean }
+  | { type: 'readViaRow'; nonce: number; rowId: string };
 
 export type SendPanelCommandResult = {
   nonce: number;

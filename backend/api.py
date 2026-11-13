@@ -25,7 +25,7 @@ from fastapi.responses import StreamingResponse
 from knx_telegram_store import KnxTelegramStoreException, TelegramQuery
 from knx_telegram_store.backends.sqlite import SqliteStore
 from knx_telegram_store.formats import COMMUNICATION_LOG_FOOTER, COMMUNICATION_LOG_HEADER, format_telegram_element
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from xknx.exceptions import ConversionError, CouldNotParseAddress
 from xknx.telegram.address import GroupAddress, IndividualAddress
@@ -611,13 +611,36 @@ async def api_v1_knx_read(request: ApiReadRequest):
 
 class KnxScheduledSendRequest(BaseModel):
     address: str
-    payload: Any
+    # Omitted for a GroupValueRead (read=true); required for Write/Response.
+    payload: Any = None
     dpt: str | None = None
     response: bool = False
+    # GroupValueRead instead of Write/Response. The panel allows one job per
+    # row; this endpoint does not.
+    read: bool = False
     # One-shot delay before the (first) send.
     delay_seconds: float = Field(0, ge=0, le=86400)
     # Repeat interval; 1s floor keeps a runaway job from flooding the bus.
     interval_seconds: float | None = Field(None, ge=1.0, le=86400)
+
+    @model_validator(mode="after")
+    def job_kind_fields_consistent(self):
+        """Reject mixed read/write fields so the job kind is unambiguous."""
+        if self.read:
+            extras = [
+                name
+                for name, present in (
+                    ("payload", self.payload is not None),
+                    ("dpt", self.dpt is not None),
+                    ("response", self.response),
+                )
+                if present
+            ]
+            if extras:
+                raise ValueError(f"read job must not include {', '.join(extras)}")
+        elif self.payload is None:
+            raise ValueError("payload is required for write/response jobs")
+        return self
 
 
 class KnxScheduledCancelRequest(BaseModel):
@@ -626,14 +649,16 @@ class KnxScheduledCancelRequest(BaseModel):
 
 @router.post("/api/knx/send/scheduled")
 async def knx_send_scheduled(request: KnxScheduledSendRequest):
-    """Start a delayed and/or cyclic send job (#167). Multiple jobs may run at once."""
+    """Start a delayed and/or cyclic write or read job (#167). Multiple jobs may run at once."""
     _require_bus_write()
     if request.delay_seconds == 0 and request.interval_seconds is None:
-        raise HTTPException(status_code=400, detail="Set a delay or interval; use /api/knx/send for immediate sends")
-    # Validate address and payload up front so the background job can't fail on bad input
+        immediate = "/api/knx/read" if request.read else "/api/knx/send"
+        raise HTTPException(status_code=400, detail=f"Set a delay or interval; use {immediate} for immediate sends")
+    # Validate address (and payload, for writes) up front so the background job can't fail on bad input.
     try:
         GroupAddress(request.address)
-        knx_daemon._encode_payload(request.payload, request.dpt)
+        if not request.read:
+            knx_daemon._encode_payload(request.payload, request.dpt)
     except (ConversionError, CouldNotParseAddress, ValueError) as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     job = cyclic_send.start_send(
@@ -643,6 +668,7 @@ async def knx_send_scheduled(request: KnxScheduledSendRequest):
         request.response,
         request.delay_seconds,
         request.interval_seconds,
+        request.read,
     )
     return job.to_dict()
 

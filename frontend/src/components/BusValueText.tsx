@@ -23,6 +23,10 @@ interface Props {
    * telegram-table scroll body where field focus is not allowed.
    */
   allowFocus?: boolean;
+  /** Incoming/Outgoing color + one-shot pulse. The node stays mounted in that color. */
+  pulse?: 'Incoming' | 'Outgoing' | null;
+  /** New key restarts the pulse animation without resetting decoded/hex state. */
+  pulseKey?: string | number | null;
 }
 
 /**
@@ -35,6 +39,8 @@ export function BusValueText({
   value, dpt, style, rawStyle, className, rawClassName, as = 'strong',
   defaultShowHex = false,
   allowFocus = true,
+  pulse = null,
+  pulseKey = null,
 }: Props) {
   const [showHex, setShowHex] = useState(defaultShowHex);
   const hex = (value.raw_hex ?? '').trim();
@@ -47,6 +53,7 @@ export function BusValueText({
     : style;
 
   const Tag = as;
+  const pulseProps = pulse ? { 'data-bus-pulse': pulse } : {};
   const decodedClass = className ?? TT.value;
   const hexClass = rawClassName ?? TT.rawBadge;
   const decodedLabel = `${decoded.text}${decoded.unit ? ` ${decoded.unit}` : ''}`;
@@ -59,7 +66,7 @@ export function BusValueText({
 
   if (!canToggle) {
     return (
-      <Tag className={decodedClass} style={textStyle}>
+      <Tag key={pulseKey ?? undefined} className={decodedClass} style={textStyle} {...pulseProps}>
         {decodedBody}
       </Tag>
     );
@@ -67,6 +74,8 @@ export function BusValueText({
 
   return (
     <Tag
+      key={pulseKey ?? undefined}
+      {...pulseProps}
       className={TT.valueToggle}
       role="button"
       tabIndex={allowFocus ? 0 : -1}

@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { Clock } from 'lucide-react';
 
 import type { Telegram } from '../hooks/useWebSocket';
+import { EventTypeLabel } from './EventTypeLabel';
 
 /** Shared event timestamp shape used by send panel, popover, and building views. */
 // eslint-disable-next-line react-refresh/only-export-components -- shared timestamp helper
@@ -27,6 +28,8 @@ interface Props {
   timestamp?: string | Date | null;
   /** Optional event kind shown after the jump (READ / WRITE / RESPONSE). */
   eventType?: string | null;
+  /** When the kind is a Read, color it green once a later Response has answered it. */
+  readAnswered?: boolean;
   /** When set, render the jump button immediately right of the timestamp. */
   onJump?: () => void;
   /** aria-label / title for the jump button. */
@@ -46,6 +49,7 @@ interface Props {
 export function TelegramWhenJump({
   timestamp,
   eventType,
+  readAnswered = false,
   onJump,
   jumpLabel = 'Go to telegram',
   empty = false,
@@ -100,7 +104,9 @@ export function TelegramWhenJump({
       ) : (
         jump
       )}
-      {typeLabel ? <span style={{ flexShrink: 0 }}>{typeLabel}</span> : null}
+      {typeLabel ? (
+        <EventTypeLabel kind={typeLabel} answered={readAnswered} style={{ flexShrink: 0 }} />
+      ) : null}
     </span>
   );
 }

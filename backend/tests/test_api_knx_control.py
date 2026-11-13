@@ -107,7 +107,43 @@ def test_scheduled_send_starts_job():
         )
     assert response.status_code == 200
     assert response.json()["state"] == "waiting"
-    start.assert_called_once_with("1/2/3", 50, "5.001", False, 2.0, 5.0)
+    start.assert_called_once_with("1/2/3", 50, "5.001", False, 2.0, 5.0, False)
+
+
+def test_scheduled_read_starts_job_without_payload():
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(cyclic_send, "start_send", return_value=SendJob(address="1/2/3", read=True)) as start,
+    ):
+        response = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "read": True, "delay_seconds": 2},
+        )
+    assert response.status_code == 200
+    assert response.json()["read"] is True
+    start.assert_called_once_with("1/2/3", None, None, False, 2.0, None, True)
+
+
+def test_scheduled_read_and_write_same_address_both_start():
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(cyclic_send, "start_send", side_effect=lambda *args: SendJob(address=args[0], read=args[6])) as start,
+    ):
+        write = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "payload": True, "dpt": "1.001", "interval_seconds": 5},
+        )
+        read = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "read": True, "interval_seconds": 5},
+        )
+    assert write.status_code == 200
+    assert read.status_code == 200
+    assert start.call_count == 2
+    assert start.call_args_list[0].args[6] is False
+    assert start.call_args_list[1].args[6] is True
 
 
 def test_scheduled_send_without_delay_or_interval_returns_400():
@@ -117,6 +153,63 @@ def test_scheduled_send_without_delay_or_interval_returns_400():
     ):
         response = client.post("/api/knx/send/scheduled", json={"address": "1/2/3", "payload": True, "dpt": "1.001"})
     assert response.status_code == 400
+
+
+def test_scheduled_read_with_payload_returns_422():
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(cyclic_send, "start_send") as start,
+    ):
+        response = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "read": True, "payload": 50, "dpt": "5.001", "interval_seconds": 5},
+        )
+    assert response.status_code == 422
+    start.assert_not_called()
+
+
+def test_scheduled_read_with_response_returns_422():
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(cyclic_send, "start_send") as start,
+    ):
+        response = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "read": True, "response": True, "interval_seconds": 5},
+        )
+    assert response.status_code == 422
+    start.assert_not_called()
+
+
+def test_scheduled_write_without_payload_returns_422():
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(cyclic_send, "start_send") as start,
+    ):
+        response = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "interval_seconds": 5},
+        )
+    assert response.status_code == 422
+    start.assert_not_called()
+
+
+def test_scheduled_write_with_false_payload_starts_job():
+    """False/0 are valid write payloads and must not be treated as missing."""
+    with (
+        patch.object(knx_daemon, "ALLOW_WRITE", True),
+        patch.object(knx_daemon, "is_connected", return_value=True),
+        patch.object(cyclic_send, "start_send", return_value=SendJob(address="1/2/3")) as start,
+    ):
+        response = client.post(
+            "/api/knx/send/scheduled",
+            json={"address": "1/2/3", "payload": False, "dpt": "1.001", "interval_seconds": 5},
+        )
+    assert response.status_code == 200
+    start.assert_called_once_with("1/2/3", False, "1.001", False, 0.0, 5.0, False)
 
 
 def test_scheduled_send_invalid_payload_returns_400():

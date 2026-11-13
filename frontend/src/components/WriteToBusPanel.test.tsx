@@ -1,10 +1,11 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { GaReadPhaseProvider } from './GaReadPhase';
 import {
   WriteToBusPanel,
+  SendJobStatusField,
   expectedPanelDpt,
-  topRowHintFromRow,
-  topRowHintMatches,
+  panelAddressesFromRows,
   mergeColTracks,
   midTracksTemplate,
   resolvePanelHeight,
@@ -12,16 +13,74 @@ import {
   shouldAutoGrowPanelHeight,
 } from './WriteToBusPanel';
 
+test('status shell keeps its height when cleared and aligns count, time, and event', () => {
+  const base = {
+    feedback: null,
+    job: { state: 'running' as const, interval_seconds: 5, sends_done: 3, address: '1/2/3' },
+    showCountdownCol: false,
+    showSendCountCol: true,
+    showEventCols: true,
+    showActionCol: true,
+    actionWidth: '11px',
+    address: '1/2/3',
+    groupName: '',
+    value: '',
+    dpt: '',
+    onCancel: () => {},
+    onClear: () => {},
+    onJump: () => {},
+  };
+  const readTg = telegramOn('1/2/3', {
+    telegram_type: 'GroupValueRead',
+    simplified_type: 'Read',
+    value_numeric: null,
+    value_formatted: null,
+  });
+  const responseTg = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T11:00:00.000000+00:00',
+    telegram_type: 'GroupValueResponse',
+    simplified_type: 'Response',
+  });
+  const { rerender } = render(
+    <>
+      <SendJobStatusField {...base} statusTelegram={readTg} />
+      <SendJobStatusField {...base} statusTelegram={responseTg} />
+    </>,
+  );
+  const shells = () => Array.from(document.querySelectorAll('[data-status-field]'));
+  const filledHeight = shells()[0].style.height;
+  expect(filledHeight).toBe(shells()[0].style.minHeight);
+  expect(shells()[1].style.height).toBe(filledHeight);
+  const grids = document.querySelectorAll('[data-status-grid]');
+  expect(grids[0].style.gridTemplateColumns).toBe(grids[1].style.gridTemplateColumns);
+  expect(grids[0].style.gridTemplateColumns).toContain('4ch');
+  expect(grids[0].querySelector('[data-status-metric="count"]')).not.toBeNull();
+  expect(grids[0].querySelector('[data-status-metric="when"]')).not.toBeNull();
+  expect(grids[0].querySelector('[data-status-metric="event"]')?.textContent).toBe('READ');
+  expect(grids[1].querySelector('[data-status-metric="event"]')?.textContent).toBe('RESPONSE');
+
+  rerender(
+    <SendJobStatusField
+      {...base}
+      statusTelegram={null}
+      showEventCols={false}
+      showSendCountCol={false}
+      job={null}
+    />,
+  );
+  expect(document.querySelector('[data-status-field]')!.style.height).toBe(filledHeight);
+});
+
 test('hiding the value column drops that track, not the DPT track', () => {
-  const tracks = [90, 100, 20, 30, 40, 50, 60, 70, 80, 90];
+  const tracks = [90, 100, 20, 30, 40, 50, 60, 70];
   expect(midTracksTemplate(tracks, true)).toBe(
-    'minmax(100px, 1fr) 20px 30px 40px 50px 60px 70px 80px 90px',
+    'minmax(100px, 1fr) 20px 30px 40px 50px 60px 70px',
   );
-  // 40px is DPT. 50px is Value and is the track that goes away.
+  // 60px is DPT, directly before Value. 70px is Value and is the track that goes away.
   expect(midTracksTemplate(tracks, false)).toBe(
-    'minmax(100px, 1fr) 20px 30px 40px 60px 70px 80px 90px',
+    'minmax(100px, 1fr) 20px 30px 40px 50px 60px',
   );
-  expect(midTracksTemplate(null, false).split(' ').filter(part => part !== '1fr)')).toHaveLength(8);
+  expect(midTracksTemplate(null, false).split(' ').filter(part => part !== '1fr)')).toHaveLength(6);
 });
 
 test('mergeColTracks grows only unless shrink is allowed', () => {
@@ -155,9 +214,9 @@ test('the value column is hidden when every row is a button DPT', () => {
     { address: '4/5/6', dpt: '1.001', value: '', delay: '', every: '' },
   ]));
   const { container } = render(<WriteToBusPanel targets={[]} />);
-  expect(container.querySelector('[data-wtb-col="5"]')).toBeNull();
+  expect(container.querySelector('[data-wtb-col="7"]')).toBeNull();
   expect(screen.getAllByRole('button', { name: /^on$/i })).toHaveLength(2);
-  expect(midTrackCount(container)).toBe(8);
+  expect(midTrackCount(container)).toBe(6);
 });
 
 test('the value column stays when one row needs a value field', () => {
@@ -166,13 +225,13 @@ test('the value column stays when one row needs a value field', () => {
     { address: '4/5/6', dpt: '9.001', value: '21', delay: '', every: '' },
   ]));
   const { container } = render(<WriteToBusPanel targets={[]} />);
-  const cells = Array.from(container.querySelectorAll('[data-wtb-col="5"]'));
+  const cells = Array.from(container.querySelectorAll('[data-wtb-col="7"]'));
   expect(cells).toHaveLength(2);
   expect(cells.filter(el => el.querySelector('input'))).toHaveLength(1);
   expect(cells.filter(el => !el.querySelector('input'))).toHaveLength(1);
   expect(screen.getByRole('button', { name: /^on$/i })).toBeInTheDocument();
   expect(screen.getByPlaceholderText('Value')).toHaveValue('21');
-  expect(midTrackCount(container)).toBe(9);
+  expect(midTrackCount(container)).toBe(7);
 });
 
 /** Pixel widths of the mid tracks. The name track is `minmax(Npx, 1fr)`. */
@@ -210,19 +269,19 @@ test('changing a row DPT reoptimizes column tracks', () => {
     const { container } = render(<WriteToBusPanel targets={[]} />);
     const template = () => (container.querySelector('.wtb-mid-inner') as HTMLElement).style.gridTemplateColumns;
     const before = midTrackPx(template());
-    const dptBefore = before[3];
-    const valueBefore = before[4];
+    const dptBefore = before[5];
+    const valueBefore = before[6];
     expect(dptBefore).toBeGreaterThan(valueBefore);
 
     fireEvent.change(screen.getByLabelText('Value'), { target: { value: '1' } });
     const afterValue = midTrackPx(template());
-    expect(afterValue[4]).toBeGreaterThanOrEqual(valueBefore);
+    expect(afterValue[6]).toBeGreaterThanOrEqual(valueBefore);
 
     fireEvent.change(screen.getByLabelText('Datapoint type'), { target: { value: '1.001' } });
     fireEvent.blur(screen.getByLabelText('Datapoint type'));
     const afterDpt = midTrackPx(template());
-    expect(afterDpt[3]).toBeLessThan(dptBefore);
-    expect(container.querySelector('[data-wtb-col="5"]')).toBeNull();
+    expect(afterDpt[5]).toBeLessThan(dptBefore);
+    expect(container.querySelector('[data-wtb-col="7"]')).toBeNull();
   } finally {
     spy.mockRestore();
   }
@@ -241,6 +300,42 @@ test('sends immediately from a row when no delay or interval is set', async () =
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
 
   await waitFor(() => expect(screen.getByLabelText(/written '50' to 1\/2\/3/)).toBeInTheDocument());
+});
+
+test('ctrl-click Read switches to Response mode so Write sends a response', async () => {
+  const fetchMock = mockFetch({
+    '/api/knx/send/scheduled/status': IDLE,
+    '/api/knx/send': { status: 'sent' },
+    '/api/knx/read': { status: 'sent' },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  render(<WriteToBusPanel targets={[]} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
+
+  fireEvent.click(screen.getByRole('button', { name: /^Read$/ }), { ctrlKey: true });
+  const responseBtn = screen.getByRole('button', { name: /^Response$/ });
+  const sentToBus = (url: string) =>
+    (url.includes('/api/knx/send') && !url.includes('scheduled')) || url.includes('/api/knx/read');
+  expect(fetchMock.mock.calls.some(([u]) => sentToBus(String(u)))).toBe(false);
+
+  fireEvent.click(responseBtn);
+  expect(fetchMock.mock.calls.some(([u]) => sentToBus(String(u)))).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/knx/send') && !String(u).includes('scheduled'));
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toMatchObject({
+      address: '1/2/3',
+      payload: 50,
+      response: true,
+    });
+  });
+  expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/knx/read'))).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: /^Response$/ }), { metaKey: true });
+  expect(screen.getByRole('button', { name: /^Read$/ })).toBeInTheDocument();
 });
 
 test('adds and removes rows, sending to multiple GAs independently (#215)', async () => {
@@ -307,26 +402,26 @@ test('plus inserts a row below the clicked one and minus removes that row', asyn
   });
 });
 
-test('ctrl-click minus resets the row instead of removing it', async () => {
+test('minus removes only the clicked row, including with ctrl held', async () => {
   render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('every'), { target: { value: '5' } });
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   fireEvent.change(screen.getAllByPlaceholderText('GA')[1], { target: { value: '4/5/6' } });
+  fireEvent.click(screen.getAllByRole('button', { name: /Add a row below/ })[1]);
+  fireEvent.change(screen.getAllByPlaceholderText('GA')[2], { target: { value: '7/8/9' } });
 
-  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[0], { ctrlKey: true });
+  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[1], { ctrlKey: true });
 
   await waitFor(() => {
-    expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
-    const addresses = screen.getAllByPlaceholderText('GA');
-    expect(addresses.map(el => (el as HTMLInputElement).value)).toEqual(['', '4/5/6']);
+    expect(screen.getAllByPlaceholderText('GA').map(el => (el as HTMLInputElement).value))
+      .toEqual(['1/2/3', '7/8/9']);
   });
-  expect((screen.getAllByPlaceholderText(/Value/)[0] as HTMLInputElement).value).toBe('');
-  expect((screen.getAllByPlaceholderText('every')[0] as HTMLInputElement).value).toBe('');
+  expect((screen.getAllByPlaceholderText(/Value/)[0] as HTMLInputElement).value).toBe('50');
 });
 
-test('ctrl-click on aria-disabled minus still initializes the sole row', () => {
+test('minus on the only row does not clear it', () => {
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '1.001', value: '1', delay: '2', every: '5' },
   ]));
@@ -334,9 +429,9 @@ test('ctrl-click on aria-disabled minus still initializes the sole row', () => {
   const minus = screen.getByRole('button', { name: /At least one row is required/ });
   expect(minus).toHaveAttribute('aria-disabled', 'true');
   fireEvent.click(minus, { ctrlKey: true });
-  expect(screen.getByPlaceholderText('GA')).toHaveValue('');
-  expect(screen.getByPlaceholderText('delay')).toHaveValue('');
-  expect(screen.getByPlaceholderText('every')).toHaveValue('');
+  expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3');
+  expect(screen.getByPlaceholderText('delay')).toHaveValue('2');
+  expect(screen.getByPlaceholderText('every')).toHaveValue('5');
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
 });
 
@@ -357,7 +452,7 @@ test('ctrl-click plus duplicates the row without an active job', async () => {
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3 every 5s/)).toBeInTheDocument());
   expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
   // One Cancel row — header Cancel stays hidden.
-  expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Cancel all jobs')).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }), { ctrlKey: true });
 
@@ -392,7 +487,7 @@ test('starts a single scheduled job from a row and shows the cancel control', as
   expect(body.interval_seconds).toBe(5);
 });
 
-test('minus removes a row and cancels its running scheduled job by id', async () => {
+test('minus deletes a row with an active job and cancels that job', async () => {
   const cancelBodies: unknown[] = [];
   const activeJobs: Record<string, unknown> = { [RUNNING_JOB.id]: { ...RUNNING_JOB } };
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -410,24 +505,42 @@ test('minus removes a row and cancels its running scheduled job by id', async ()
     throw new Error(`Unexpected fetch: ${url}`);
   }));
   localStorage.setItem(ROWS_KEY, JSON.stringify([
-    { address: '1/2/3', dpt: '', value: '50', delay: '', every: '5', scheduledJobId: RUNNING_JOB.id },
+    { address: '1/2/3', name: 'Light', dpt: '5.001', value: '50', delay: '', every: '5', scheduledJobId: RUNNING_JOB.id },
     { address: '4/5/6', dpt: '', value: '', delay: '', every: '' },
   ]));
 
   render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
-  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
 
-  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[0]);
-  await waitFor(() => expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1));
+  const gas = screen.getAllByPlaceholderText('GA') as HTMLInputElement[];
+  const names = screen.getAllByPlaceholderText('Group name') as HTMLInputElement[];
+  const values = screen.getAllByRole('textbox', { name: 'Value' }) as HTMLInputElement[];
+  const dpts = screen.getAllByRole('textbox', { name: 'Datapoint type' }) as HTMLInputElement[];
+  const deletes = screen.getAllByRole('button', { name: /Delete this row/ });
+  expect(gas[0]).toBeDisabled();
+  expect(names[0]).toBeDisabled();
+  expect(values[0]).toBeDisabled();
+  expect(dpts[0]).toBeDisabled();
+  expect(deletes[0]).toBeEnabled();
+  fireEvent.change(gas[0], { target: { value: '9/9/9' } });
+  fireEvent.change(names[0], { target: { value: 'Other' } });
+  fireEvent.change(values[0], { target: { value: '1' } });
+  fireEvent.change(dpts[0], { target: { value: '1.001' } });
+  expect(gas[0]).toHaveValue('1/2/3');
+  expect(names[0]).toHaveValue('Light');
+  expect(values[0]).toHaveValue('50');
+  expect(dpts[0]).toHaveValue('5.001');
+  expect(gas[1]).toBeEnabled();
+  expect(deletes[1]).toBeEnabled();
+
+  fireEvent.click(deletes[0], { ctrlKey: true });
+  await waitFor(() => expect(cancelBodies).toEqual([{ id: RUNNING_JOB.id }]));
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
   expect(screen.getByPlaceholderText('GA')).toHaveValue('4/5/6');
-  await waitFor(() => {
-    expect(cancelBodies.some(b => b && typeof b === 'object' && (b as { id?: string }).id === RUNNING_JOB.id)).toBe(true);
-  });
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
 });
 
-test('removing a row while start is pending cancels the job once the server returns an id', async () => {
+test('minus deletes a row while start is pending and cancels the job', async () => {
   let release!: () => void;
   const gate = new Promise<void>(r => { release = r; });
   const cancelBodies: unknown[] = [];
@@ -455,14 +568,16 @@ test('removing a row while start is pending cancels the job once the server retu
   fireEvent.click(screen.getAllByRole('button', { name: /Write/ })[0]);
 
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
-  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[0]);
+  const minus = screen.getAllByRole('button', { name: /Delete this row/ })[0];
+  expect(minus).toBeEnabled();
+  fireEvent.click(minus);
   await waitFor(() => expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1));
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
 
   release();
-  await waitFor(() => {
-    expect(cancelBodies.some(b => b && typeof b === 'object' && (b as { id?: string }).id === RUNNING_JOB.id)).toBe(true);
-  });
+  await waitFor(() => expect(cancelBodies).toEqual([{ id: RUNNING_JOB.id }]));
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
 });
 
 test('delay and every are locked while that row job is waiting or running', async () => {
@@ -510,7 +625,7 @@ test('picks up an already-running job on mount', async () => {
   expect(screen.getByLabelText(/Sends done 3/)).toHaveTextContent('3');
 });
 
-test('a status error cancels only that row\'s active job', async () => {
+test('a locked row ignores Write and leaves both jobs running', async () => {
   const jobA = { ...RUNNING_JOB, id: 'job-a', address: '1/2/3' };
   const jobB = { ...RUNNING_JOB, id: 'job-b', address: '4/5/6' };
   const cancelBodies: unknown[] = [];
@@ -532,17 +647,15 @@ test('a status error cancels only that row\'s active job', async () => {
 
   render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
+  expect(screen.getAllByRole('button', { name: /Write/ })[0]).toBeDisabled();
 
   fireEvent.click(screen.getAllByRole('button', { name: /Write/ })[0]);
 
-  const err = await screen.findByText('Invalid value: abc');
-  expect(err.closest('[data-status-field]')).toHaveAttribute('aria-label', 'Invalid value: abc');
-  await waitFor(() => {
-    expect(cancelBodies).toEqual([{ id: 'job-a' }]);
-  });
-  expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(1);
+  expect(screen.queryByText('Invalid value: abc')).not.toBeInTheDocument();
+  expect(cancelBodies).toEqual([]);
+  expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2);
+  expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument();
   expect(screen.getByLabelText(/cyclic send to 4\/5\/6/)).toBeInTheDocument();
-  expect(screen.queryByLabelText(/cyclic send to 1\/2\/3/)).not.toBeInTheDocument();
 });
 
 test('count column stays hidden until a cyclic job has sent at least once', async () => {
@@ -746,6 +859,14 @@ test('delay and every show unit s beside the value inside the field shell', () =
   expect(every.nextElementSibling).toBe(units[1]);
   expect(delay).toHaveStyle({ textAlign: 'right' });
   expect(every).toHaveStyle({ textAlign: 'right' });
+  const dpt = screen.getByLabelText('Datapoint type');
+  const value = screen.getByLabelText('Value');
+  expect(every.compareDocumentPosition(dpt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(dpt.compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(delay.closest('[data-wtb-col]')?.getAttribute('data-wtb-col')).toBe('4');
+  expect(every.closest('[data-wtb-col]')?.getAttribute('data-wtb-col')).toBe('5');
+  expect(dpt.closest('[data-wtb-col]')?.getAttribute('data-wtb-col')).toBe('6');
+  expect(value.closest('[data-wtb-col]')?.getAttribute('data-wtb-col')).toBe('7');
 });
 
 test('delay and every are disabled until a GA is entered', () => {
@@ -825,7 +946,7 @@ test('persists row edits so toggling the panel keeps them (#254)', async () => {
       {
         address: '7/0/1', name: '', dpt: '', value: '42', delay: '3', every: '',
         feedback: null, readBaseline: null, statusWatch: null, statusTelegram: null,
-        lastSentTelegram: null, scheduledJobId: null,
+        lastSentTelegram: null, scheduledJobId: null, respond: false,
       },
     ]);
   });
@@ -939,6 +1060,7 @@ test('shows the last value of the entered group address (#439)', async () => {
 
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('Last value:21.5 °C'));
+  expect(lastValueOf().querySelector('[data-bus-pulse="Incoming"]')).toBeTruthy();
   // Prefix + value+unit; event kind and time live in the Event column.
   expect(lastValueOf()).toHaveTextContent('Last value:');
   expect(lastValueOf()).not.toHaveTextContent('WRITE');
@@ -1005,6 +1127,7 @@ test('last value keeps decoded/raw when a new telegram arrives', async () => {
       targets={[]}
       latestTelegram={telegramOn('1/2/3', {
         timestamp: '2026-01-01T10:00:05.000000+00:00',
+        direction: 'Outgoing',
         value_formatted: '22.0',
         value_numeric: 22,
         raw_hex: '0x0c4c',
@@ -1012,6 +1135,7 @@ test('last value keeps decoded/raw when a new telegram arrives', async () => {
     />,
   );
   await waitFor(() => expect(lastValueOf().querySelector('strong')).toHaveAttribute('aria-label', '0x0c4c'));
+  expect(lastValueOf().querySelector('[data-bus-pulse="Outgoing"]')).toBeTruthy();
 });
 
 test('bare DPT main 2 sends hex and binary and refuses values outside 0-3', async () => {
@@ -1136,7 +1260,7 @@ test('leaves last empty when the group address has no recorded value', async () 
   expect(screen.queryByText(/no value yet/)).not.toBeInTheDocument();
 });
 
-test('a read waits for the response, ignoring the read request itself (#439)', async () => {
+test('a read shows READ until a Response replaces it, ignoring the read request value (#439)', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
     '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
@@ -1147,22 +1271,15 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('21.5 °C'));
 
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
-  // Status: orange Radio + Cancel; last stays value-only. Tooltip on stable shell.
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
   expect(lastValueOf()).toHaveTextContent('21.5 °C');
   expect(lastValueOf()).not.toHaveTextContent('waiting for response');
-  expect(screen.queryByText(/waiting for response/)).not.toBeInTheDocument();
-  const waitingShell = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
-  expect(waitingShell).toHaveAttribute('data-status-field');
-  expect(waitingShell.querySelector('svg')).toHaveStyle({ color: 'var(--warning)' });
-  const waitingCancel = screen.getByRole('button', { name: /^Cancel$/ });
-  expect(waitingCancel.style.color).toBe('var(--accent-primary)');
-  expect(waitingCancel.style.background).toBe('transparent');
-  expect(waitingCancel.style.borderLeft).toBe('1px solid var(--border-color)');
-  expect(screen.queryByRole('button', { name: 'Clear status' })).not.toBeInTheDocument();
+  const sentShell = screen.getByLabelText(/Read request sent to 1\/2\/3/);
+  expect(sentShell).toHaveAttribute('data-status-field');
+  expect(sentShell.querySelector('.lucide-radio')).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Clear status' })).toBeInTheDocument();
 
-  // Our own read request comes back on the live feed: it has no value and must
-  // neither replace the shown one nor end the wait — but Status binds its bus time.
   const onGotoTelegram = vi.fn();
   const readRequest = telegramOn('1/2/3', {
     timestamp: '2026-01-01T10:05:00.000000+00:00', telegram_type: 'GroupValueRead', simplified_type: 'Read',
@@ -1170,20 +1287,17 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   });
   rerender(<WriteToBusPanel targets={[]} latestTelegram={readRequest} onGotoTelegram={onGotoTelegram} />);
   expect(lastValueOf()).toHaveTextContent('21.5 °C');
-  expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
   const statusJump = await screen.findByRole('button', { name: 'Go to status telegram' });
   const statusShell = statusJump.closest('[data-status-field]')!;
   expect(statusShell.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
   expect(statusShell.textContent).toMatch(/READ/);
-  expect(statusShell.querySelector('.lucide-radio')).not.toBeNull();
-  // Bound Read request must keep the orange wait icon until a Response arrives.
-  expect(statusShell.querySelector('svg')).toHaveStyle({ color: 'var(--warning)' });
+  expect(statusShell.querySelector('.lucide-radio')).toBeNull();
+  expect(screen.getByText('READ')).toHaveStyle({ color: 'var(--warning-text)' });
   fireEvent.click(statusJump);
   expect(onGotoTelegram).toHaveBeenCalledWith(expect.objectContaining({
     simplified_type: 'Read', timestamp: readRequest.timestamp,
   }));
 
-  // A telegram for another address changes nothing.
   rerender(<WriteToBusPanel targets={[]} latestTelegram={telegramOn('9/9/9', { value_formatted: '99' })} />);
   expect(lastValueOf()).toHaveTextContent('21.5 °C');
 
@@ -1193,18 +1307,14 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   });
   rerender(<WriteToBusPanel targets={[]} latestTelegram={response} />);
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('22.3 °C'));
-  // Event column and Status both show the Response once the wait ends.
   expect(screen.getAllByText('RESPONSE').length).toBeGreaterThanOrEqual(1);
   expect(lastValueOf()).not.toHaveTextContent('RESPONSE');
-  expect(screen.queryByLabelText(/read request sent to 1\/2\/3 without response/)).not.toBeInTheDocument();
-  // Pending-read chrome is gone; Response keeps a green Radio.
-  expect(screen.queryByLabelText(/read request sent/i)).not.toBeInTheDocument();
-  const statusAfter = document.querySelector('[data-status-field]');
-  expect(statusAfter?.textContent).toMatch(/RESPONSE/);
-  expect(statusAfter?.querySelector('.lucide-radio')).not.toBeNull();
-  expect(statusAfter?.querySelector('svg')).toHaveStyle({ color: 'var(--success)' });
+  expect(screen.queryByLabelText(/Read request sent/i)).not.toBeInTheDocument();
+  const statusAfter = document.querySelector('[data-status-field]') as HTMLElement;
+  expect(statusAfter.textContent).toMatch(/RESPONSE/);
+  expect(statusAfter.querySelector('.lucide-radio')).toBeNull();
+  expect(within(statusAfter).getByText('RESPONSE')).toHaveStyle({ color: 'var(--success)' });
 });
-
 test('a Write on the same GA does not end a read wait — only Response does', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
@@ -1214,7 +1324,7 @@ test('a Write on the same GA does not end a read wait — only Response does', a
   const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
 
   const writeTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T10:06:00.000000+00:00',
@@ -1222,8 +1332,8 @@ test('a Write on the same GA does not end a read wait — only Response does', a
     value_numeric: 1,
   });
   rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
-  expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
+  expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
 
   const response = telegramOn('1/2/3', {
     timestamp: '2026-01-01T10:06:00.120000+00:00',
@@ -1238,7 +1348,7 @@ test('a Write on the same GA does not end a read wait — only Response does', a
   expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/RESPONSE/);
 });
 
-test('waiting Cancel clears the status wait', async () => {
+test('Clear dismisses a read status and does not leave a Cancel divider', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
     '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
@@ -1249,17 +1359,13 @@ test('waiting Cancel clears the status wait', async () => {
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('21.5 °C'));
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
-  const cancel = screen.getByRole('button', { name: /^Cancel$/ });
-  expect(cancel.style.borderLeft).toBe('1px solid var(--border-color)');
-  fireEvent.click(cancel);
-  // Wait ended (no Cancel); pending-read tip stays until Clear / a later Write.
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
-  expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
-  const afterCancelClear = screen.getByRole('button', { name: 'Clear status' });
-  expect(afterCancelClear.style.borderLeft).not.toContain('solid');
+  const clear = screen.getByRole('button', { name: 'Clear status' });
+  expect(clear.style.borderLeft).not.toContain('solid');
+  fireEvent.click(clear);
+  expect(screen.queryByLabelText(/Read request sent to 1\/2\/3/)).not.toBeInTheDocument();
 
-  // After Cancel→Write→Clear, the divider must not stick on the X (same DOM slot).
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '1' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
   const clearBtn = await screen.findByRole('button', { name: 'Clear status' });
@@ -1286,17 +1392,15 @@ test('waiting Cancel keeps unanswered Read instead of restoring the last write',
   await screen.findByRole('button', { name: 'Go to status telegram' });
 
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
 
-  // Wait ended (no Cancel); unanswered Read tip stays — Write is not restored.
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
-  const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
-  expect(pending.querySelector('.lucide-radio')).not.toBeNull();
+  const pending = screen.getByLabelText(/Read request sent to 1\/2\/3/);
+  expect(pending.querySelector('.lucide-radio')).toBeNull();
   expect(screen.queryByLabelText(/written '50' to 1\/2\/3/)).not.toBeInTheDocument();
 });
 
-test('delayed Write keeps a prior Read event visible during the countdown', async () => {
+test('delayed Write hides a prior Read until the job’s own write arrives', async () => {
   vi.stubGlobal('fetch', mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
     '/api/knx/send/scheduled': {
@@ -1310,7 +1414,7 @@ test('delayed Write keeps a prior Read event visible during the countdown', asyn
   const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
 
   const readTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T10:05:00.000000+00:00',
@@ -1332,11 +1436,33 @@ test('delayed Write keeps a prior Read event visible during the countdown', asyn
     btn => btn.closest('[data-status-field]') as HTMLElement,
   );
   await waitFor(() => expect(shell.textContent).toMatch(/-\d+s|-\d+:\d{2}/));
-  expect(shell.textContent).toMatch(/READ/);
-  expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
-  // Status event kind Read always keeps the Read (Radio) icon.
-  expect(shell.querySelector('.lucide-radio')).not.toBeNull();
-  expect(shell.querySelector('svg')).toHaveStyle({ color: 'var(--warning)' });
+  expect(shell.textContent).not.toMatch(/READ/);
+  expect(screen.queryByRole('button', { name: 'Go to status telegram' })).not.toBeInTheDocument();
+
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={telegramOn('1/2/3', {
+    timestamp: '2026-01-01T10:05:30.000000+00:00',
+    direction: 'Incoming',
+    value_numeric: 50,
+    value_formatted: '50',
+  })} />);
+  expect(screen.queryByRole('button', { name: 'Go to status telegram' })).not.toBeInTheDocument();
+
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={telegramOn('1/2/3', {
+    timestamp: '2026-01-01T10:05:31.000000+00:00',
+    direction: 'Outgoing',
+    value_numeric: 21.5,
+    value_formatted: '21.5',
+  })} />);
+  expect(screen.queryByRole('button', { name: 'Go to status telegram' })).not.toBeInTheDocument();
+
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={telegramOn('1/2/3', {
+    timestamp: '2026-01-01T10:05:32.000000+00:00',
+    direction: 'Outgoing',
+    value_numeric: 50,
+    value_formatted: '50',
+  })} />);
+  const jump = await screen.findByRole('button', { name: 'Go to status telegram' });
+  expect(jump.closest('[data-status-field]')!.textContent).toMatch(/WRITE/);
 });
 
 test('countdown stays visible after delayed start when server omits next_send_at', async () => {
@@ -1376,7 +1502,7 @@ test('countdown stays visible after delayed start when server omits next_send_at
   expect(shell.getAttribute('aria-label') ?? '').toMatch(/delayed send to 1\/2\/3/);
 });
 
-test('Write while a job is active cancels and restarts the countdown', async () => {
+test('Write and Read stay disabled while a job is active', async () => {
   let scheduledCalls = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -1411,13 +1537,16 @@ test('Write while a job is active cancels and restarts the countdown', async () 
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '10' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
   await screen.findByRole('button', { name: /^Cancel$/ });
-  expect(screen.queryByText(/already active/i)).not.toBeInTheDocument();
 
+  expect(screen.getByRole('button', { name: /Write/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Read/ })).toBeDisabled();
+  expect(screen.getByPlaceholderText('delay')).toBeDisabled();
+  expect(screen.getByPlaceholderText('every')).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
-  await waitFor(() => expect(scheduledCalls).toBe(2));
-  expect(screen.queryByText(/already active/i)).not.toBeInTheDocument();
-  const shell = screen.getByRole('button', { name: /^Cancel$/ }).closest('[data-status-field]')!;
-  expect(shell.textContent).toMatch(/-\d+s|-\d+:\d{2}/);
+  fireEvent.click(screen.getByRole('button', { name: /Read/ }));
+  expect(scheduledCalls).toBe(1);
+  expect(screen.getByRole('button', { name: /^Cancel$/ }).closest('[data-status-field]')!.textContent)
+    .toMatch(/-\d+s|-\d+:\d{2}/);
 });
 
 test('two rows can run scheduled sends concurrently', async () => {
@@ -1604,7 +1733,7 @@ test('Write on one row does not clear Read-wait on another row with the same GA'
   fireEvent.change(gaInputs[1], { target: { value: '1/2/3' } });
 
   fireEvent.click(screen.getAllByRole('button', { name: /Read/ })[0]);
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
 
   fireEvent.change(screen.getAllByPlaceholderText(/Value/)[1], { target: { value: '50' } });
   fireEvent.click(screen.getAllByRole('button', { name: /Write/ })[1]);
@@ -1615,9 +1744,9 @@ test('Write on one row does not clear Read-wait on another row with the same GA'
   });
   rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
 
-  expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
+  expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument();
   const shells = document.querySelectorAll('[data-status-field]');
-  expect(shells[0].querySelector('.lucide-radio')).not.toBeNull();
+  expect(shells[0].querySelector('.lucide-radio')).toBeNull();
   expect(shells[1].getAttribute('aria-label') ?? '').toMatch(/written '50'/);
 });
 
@@ -1739,7 +1868,7 @@ test('status shell shows write event like Event column and clears', async () => 
 
   const shell = await screen.findByLabelText(/written '50' to 1\/2\/3/);
   expect(shell).toHaveAttribute('data-status-field');
-  expect(shell.querySelector('.lucide-send')).not.toBeNull();
+  expect(shell.querySelector('.lucide-send')).toBeNull();
   const clearBtn = screen.getByRole('button', { name: 'Clear status' });
   // Clear must never keep Cancel's divider (React inline-style leak).
   expect(clearBtn.style.borderLeft).not.toContain('solid');
@@ -1766,7 +1895,7 @@ test('status shell shows write event like Event column and clears', async () => 
   expect(document.querySelector('[data-status-action]')).toBeNull();
 });
 
-test('cyclic send shows countdown and count; both stay after Read during the job', async () => {
+test('cyclic send shows countdown and count and locks the row', async () => {
   const cyclicRunning = {
     state: 'running',
     id: 'cyc-1',
@@ -1802,7 +1931,7 @@ test('cyclic send shows countdown and count; both stay after Read during the job
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '', value: '50', delay: '', every: '5', scheduledJobId: 'cyc-1' },
   ]));
-  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
+  render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
   const shell = screen.getByLabelText(/cyclic send to 1\/2\/3/).closest('[data-status-field]')!;
   // Cyclic running: interval countdown + send count.
@@ -1810,33 +1939,16 @@ test('cyclic send shows countdown and count; both stay after Read during the job
   expect(shell.querySelector('[data-status-metric="countdown"]')).not.toBeNull();
   expect(screen.getByLabelText(/Sends done 2/)).toHaveTextContent('2');
 
+  expect(screen.getByRole('button', { name: /Write/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Read/ })).toBeDisabled();
+  expect(screen.getByPlaceholderText('delay')).toBeDisabled();
+  expect(screen.getByPlaceholderText('every')).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
-  let afterRead = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
+  expect(screen.queryByLabelText(/read request sent/i)).not.toBeInTheDocument();
+  const afterRead = screen.getByLabelText(/cyclic send to 1\/2\/3/);
   expect(afterRead.textContent).toMatch(/-\d+s|-\d+:\d{2}/);
   expect(screen.getByLabelText(/Sends done 2/)).toHaveTextContent('2');
-  expect(afterRead.querySelector('.lucide-radio')).not.toBeNull();
-
-  // A cyclic Write must not clear the waiting icon — only a Response does.
-  const cyclicWrite = telegramOn('1/2/3', {
-    timestamp: '2026-01-01T12:00:00.000000+00:00', value_formatted: '50',
-  });
-  rerender(<WriteToBusPanel targets={[]} latestTelegram={cyclicWrite} />);
-  afterRead = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
-  expect(afterRead.querySelector('.lucide-radio')).not.toBeNull();
-  expect(screen.getByLabelText(/Sends done 2/)).toHaveTextContent('2');
-  expect(afterRead.textContent).toMatch(/-\d+s|-\d+:\d{2}/);
-
-  const response = telegramOn('1/2/3', {
-    timestamp: '2026-01-01T12:00:01.000000+00:00',
-    telegram_type: 'GroupValueResponse',
-    simplified_type: 'Response',
-    value_numeric: 22.3,
-    value_formatted: '22.3',
-  });
-  rerender(<WriteToBusPanel targets={[]} latestTelegram={response} />);
-  await waitFor(() => expect(screen.queryByLabelText(/read request sent/)).not.toBeInTheDocument());
-  expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument();
+  expect(afterRead.querySelector('.lucide-timer')).not.toBeNull();
 });
 
 test('each row keeps its own send job and read-wait status', async () => {
@@ -1892,23 +2004,19 @@ test('each row keeps its own send job and read-wait status', async () => {
   expect(shells[1].textContent ?? '').not.toMatch(/cyclic send/);
 
   fireEvent.click(screen.getAllByRole('button', { name: /Read/ })[1]);
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 1\/2\/3/)).toBeInTheDocument());
   // Wait lives only on row 2; row 1 keeps its job.
   expect(shells[0].querySelector('.lucide-timer')).not.toBeNull();
-  expect(shells[1].querySelector('.lucide-radio')).not.toBeNull();
+  expect(shells[1].querySelector('.lucide-radio')).toBeNull();
+  expect(shells[1].querySelector('[data-status-action] button')?.getAttribute('aria-label')).toBe('Clear status');
   expect(shells[1].querySelector('.lucide-timer')).toBeNull();
 
-  // Cancel on the waiting row ends only that wait — job stays on row 1.
-  fireEvent.click(shells[1].querySelector('button')!);
-  await waitFor(() => expect(
-    shells[1].querySelector('[data-status-action] button')?.getAttribute('aria-label'),
-  ).toBe('Clear status'));
   expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument();
   expect(shells[0].querySelector('.lucide-timer')).not.toBeNull();
   expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
 });
 
-test('Cancel during cyclic Read-wait ends the job but keeps unanswered Read', async () => {
+test('Cancel ends the job and unlocks Write and Read', async () => {
   const cyclicRunning = {
     state: 'running',
     id: 'cyc-2',
@@ -1938,17 +2046,12 @@ test('Cancel during cyclic Read-wait ends the job but keeps unanswered Read', as
   }));
 
   localStorage.setItem(ROWS_KEY, JSON.stringify([
-    { address: '1/2/3', dpt: '', value: '', delay: '', every: '5', scheduledJobId: 'cyc-2' },
+    { address: '1/2/3', dpt: '', value: '50', delay: '', every: '5', scheduledJobId: 'cyc-2' },
   ]));
   render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
-
-  fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  const waiting = await screen.findByLabelText(/read request sent to 1\/2\/3 without response/);
-  // Waiting icon stays even while the cyclic job is live; countdown + count stay too.
-  expect(waiting.querySelector('.lucide-radio')).not.toBeNull();
-  expect(waiting.textContent).toMatch(/-\d+s|-\d+:\d{2}/);
-  expect(screen.getByLabelText(/Sends done 2/)).toHaveTextContent('2');
+  expect(screen.getByRole('button', { name: /Read/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Write/ })).toBeDisabled();
 
   fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
   await waitFor(() => expect(screen.queryByLabelText(/cyclic send/)).not.toBeInTheDocument());
@@ -1956,13 +2059,12 @@ test('Cancel during cyclic Read-wait ends the job but keeps unanswered Read', as
   // Ending the job zeroes the cyclic count and drops the count column.
   expect(screen.queryByLabelText(/Sends done/)).not.toBeInTheDocument();
   expect(document.querySelector('[data-status-metric="count"]')).toBeNull();
-  // Unanswered Read remains so the user can see the GA did not answer.
-  const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
-  expect(pending.querySelector('.lucide-radio')).not.toBeNull();
-  expect(screen.queryByLabelText(/written '/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Read/ })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /Write/ })).toBeEnabled();
+  expect(screen.getByPlaceholderText('every')).toBeEnabled();
 });
 
-test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not the Write', async () => {
+test('Cancel after a cyclic Write keeps the Write telegram', async () => {
   const cyclicRunning = {
     state: 'running',
     id: 'cyc-read-keep',
@@ -1998,34 +2100,23 @@ test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not t
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
 
   const writeTg = telegramOn('1/2/3', {
-    timestamp: '2026-01-01T12:00:00.000000+00:00', value_formatted: '50', unit: null,
+    timestamp: '2026-01-01T12:00:00.000000+00:00',
+    direction: 'Outgoing',
+    value_formatted: '50',
+    unit: null,
   });
   rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
-
-  fireEvent.click(screen.getByRole('button', { name: /Read/ }));
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
-
-  const readTg = telegramOn('1/2/3', {
-    timestamp: '2026-01-01T12:00:01.000000+00:00',
-    telegram_type: 'GroupValueRead',
-    simplified_type: 'Read',
-  });
-  rerender(<WriteToBusPanel targets={[]} latestTelegram={readTg} />);
-  await waitFor(() => {
-    expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/READ/);
-  });
+  expect(screen.getByRole('button', { name: /Read/ })).toBeDisabled();
 
   fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
   await waitFor(() => expect(screen.queryByLabelText(/cyclic send/)).not.toBeInTheDocument());
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
 
-  const pending = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
-  expect(pending.querySelector('.lucide-radio')).not.toBeNull();
-  expect(pending.textContent).toMatch(/READ/);
-  expect(pending.textContent).not.toMatch(/WRITE/);
-  expect(screen.queryByLabelText(/written '/)).not.toBeInTheDocument();
+  const pending = screen.getByLabelText(/written '50' to 1\/2\/3/);
+  expect(pending.textContent).toMatch(/WRITE/);
   expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Read/ })).toBeEnabled();
 });
 
 test('Cancel on a cyclic job zeroes sends_done and hides the count column', async () => {
@@ -2156,13 +2247,13 @@ test('header Reset cancels all jobs and clears the panel to one empty row', asyn
   render(<WriteToBusPanel targets={[]} />);
   // One live job → row Cancel, but not header Cancel.
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
-  expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Cancel all jobs')).not.toBeInTheDocument();
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
 
   fireEvent.click(screen.getByRole('button', { name: 'Reset panel' }));
   await waitFor(() => expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1));
   expect(screen.getByPlaceholderText('GA')).toHaveValue('');
-  expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Cancel all jobs')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
   expect(cancelBodies.some(b => b && typeof b === 'object' && !('id' in (b as object) && (b as { id?: string }).id))).toBe(true);
 });
@@ -2181,7 +2272,7 @@ test('header Cancel is reserved in layout and only visible with two or more row 
   render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
   const cancelAll = screen.getByRole('button', { name: 'Cancel all' });
-  expect(cancelAll).toHaveAttribute('title', 'Cancel all jobs and read waits');
+  expect(cancelAll).toHaveAttribute('title', 'Cancel all jobs');
   expect(cancelAll.textContent).toBe('Cancel');
   expect(cancelAll.style.color).toBe('var(--accent-primary)');
   expect(cancelAll.style.background).toBe('transparent');
@@ -2217,24 +2308,17 @@ test('header Cancel ends jobs and read waits but keeps row addresses', async () 
 
   render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
-  expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Cancel all jobs')).not.toBeInTheDocument();
 
-  // Second Cancel via Read-wait → header Cancel appears.
+  // A read on another row is not a Cancel, so header Cancel stays hidden.
   fireEvent.click(screen.getAllByRole('button', { name: /Read/ })[1]);
-  await waitFor(() => expect(screen.getByLabelText(/read request sent to 4\/5\/6 without response/)).toBeInTheDocument());
-  await waitFor(() => expect(screen.getByTitle('Cancel all jobs and read waits')).toBeInTheDocument());
-
-  fireEvent.click(screen.getByTitle('Cancel all jobs and read waits'));
-  await waitFor(() => expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument());
-  // Read-wait and jobs ended (no Cancel); leftover Read feedback remains until Clear — same as row Cancel.
-  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
-  expect(screen.queryByLabelText(/cyclic send/)).not.toBeInTheDocument();
-  expect(screen.getByLabelText(/read request sent to 4\/5\/6 without response/)).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByLabelText(/Read request sent to 4\/5\/6/)).toBeInTheDocument());
+  expect(screen.queryByTitle('Cancel all jobs')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
   const addresses = screen.getAllByPlaceholderText('GA');
   expect(addresses).toHaveLength(2);
   expect(addresses[0]).toHaveValue('1/2/3');
   expect(addresses[1]).toHaveValue('4/5/6');
-  expect(cancelBodies.some(b => b && typeof b === 'object' && !(b as { id?: string }).id)).toBe(true);
 });
 
 // ── Address and name fields stay paired ──────────────────────────────────────
@@ -2426,33 +2510,29 @@ test('without a project, complete free-entry GA is kept and invalid reverts', ()
   expect(ga).toHaveValue('5/5/5');
 });
 
-test('topRowHintFromRow / topRowHintMatches use only the top row semantics', () => {
+test('panelAddressesFromRows collects every unique GA', () => {
   expect(expectedPanelDpt(9, 1)).toBe('9.001');
-  expect(expectedPanelDpt(null, 1)).toBe('');
-  const top = { address: '1/2/3', dpt: '9.001', delay: '', every: '' };
-  const hint = topRowHintFromRow(top);
-  expect(hint).toEqual({ address: '1/2/3', dpt: '9.001' });
-  expect(topRowHintMatches(hint, '1/2/3', 9, 1)).toBe(true);
-  expect(topRowHintMatches(hint, '4/5/6', 9, 1)).toBe(false);
-  expect(topRowHintMatches(hint, '1/2/3', 5, 1)).toBe(false);
-  // Delay/every must be empty for a hint.
-  expect(topRowHintFromRow({ ...top, delay: '2' })).toBeNull();
-  expect(topRowHintFromRow({ ...top, every: '5' })).toBeNull();
-  expect(topRowHintFromRow({ address: '', dpt: '9.001', delay: '', every: '' })).toBeNull();
+  expect(panelAddressesFromRows([
+    { address: '1/2/3' },
+    { address: '4/5/6' },
+    { address: '1/2/3' },
+    { address: '  ' },
+    { address: '7/8/9' },
+  ])).toEqual(['1/2/3', '4/5/6', '7/8/9']);
 });
 
-test('onTopRowHintChange reports the top row and clears on unmount', () => {
+test('onPanelAddressesChange reports all row GAs and clears on unmount', () => {
   localStorage.setItem(ROWS_KEY, JSON.stringify([
-    { address: '1/2/3', dpt: '9.001', value: '21', delay: '', every: '' },
-    { address: '4/5/6', dpt: '5.001', value: '1', delay: '', every: '' },
+    { address: '1/2/3', dpt: '9.001', value: '21', delay: '2', every: '' },
+    { address: '4/5/6', dpt: '5.001', value: '1', delay: '', every: '5' },
   ]));
-  const onTopRowHintChange = vi.fn();
+  const onPanelAddressesChange = vi.fn();
   const { unmount } = render(
-    <WriteToBusPanel targets={[]} onTopRowHintChange={onTopRowHintChange} />,
+    <WriteToBusPanel targets={[]} onPanelAddressesChange={onPanelAddressesChange} />,
   );
-  expect(onTopRowHintChange).toHaveBeenCalledWith({ address: '1/2/3', dpt: '9.001' });
+  expect(onPanelAddressesChange).toHaveBeenCalledWith(['1/2/3', '4/5/6']);
   unmount();
-  expect(onTopRowHintChange).toHaveBeenLastCalledWith(null);
+  expect(onPanelAddressesChange).toHaveBeenLastCalledWith([]);
 });
 
 test('header Add row at top inserts a blank row at index 0', () => {
@@ -2607,4 +2687,136 @@ test('ctrlSendRequest is a no-op when the panel already has more than one row', 
   expect(gas).toHaveLength(2);
   expect(gas[0]).toHaveValue('1/2/3');
   expect(gas[1]).toHaveValue('4/5/6');
+});
+
+test('Read with every starts a cyclic read and a Response does not end it', async () => {
+  const job = {
+    state: 'running',
+    id: 'read-cyc',
+    address: '1/2/3',
+    read: true,
+    interval_seconds: 5,
+    sends_done: 1,
+    sends_skipped: 0,
+    next_send_at: new Date(Date.now() + 4_000).toISOString(),
+  };
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/knx/send/scheduled/status')) {
+      return { ok: true, json: async () => ({ jobs: [job] }) } as Response;
+    }
+    if (url.includes('/api/knx/send/scheduled')) {
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({ address: '1/2/3', read: true, interval_seconds: 5 });
+      expect(body.payload).toBeUndefined();
+      return { ok: true, json: async () => job } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }));
+
+  const history: ReturnType<typeof telegramOn>[] = [];
+  const view = (latest: ReturnType<typeof telegramOn> | null) => (
+    <GaReadPhaseProvider rows={[...history]}>
+      <WriteToBusPanel targets={[]} latestTelegram={latest} />
+    </GaReadPhaseProvider>
+  );
+  const { rerender } = render(view(null));
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getByPlaceholderText('every'), { target: { value: '5' } });
+  fireEvent.click(screen.getByRole('button', { name: /Read/ }));
+  await screen.findByLabelText(/cyclic read of 1\/2\/3 every 5s/);
+
+  const readTg = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T12:00:01.000000+00:00',
+    direction: 'Incoming',
+    telegram_type: 'GroupValueRead',
+    simplified_type: 'Read',
+    value_numeric: null,
+    value_formatted: null,
+  });
+  const olderResponse = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T12:00:00.000000+00:00',
+    direction: 'Incoming',
+    telegram_type: 'GroupValueResponse',
+    simplified_type: 'Response',
+    value_numeric: 1,
+    value_formatted: '1',
+  });
+  history.push(olderResponse, readTg);
+  rerender(view(readTg));
+  await waitFor(() => expect(screen.getByText('READ')).toHaveStyle({ color: 'var(--warning-text)' }));
+
+  const responseTg = telegramOn('1/2/3', {
+    timestamp: '2026-01-01T12:00:02.000000+00:00',
+    direction: 'Incoming',
+    telegram_type: 'GroupValueResponse',
+    simplified_type: 'Response',
+    value_numeric: 22.3,
+    value_formatted: '22.3',
+  });
+  history.push(responseTg);
+  rerender(view(responseTg));
+  await waitFor(() => expect(screen.getByText('READ')).toHaveStyle({ color: 'var(--success)' }));
+  expect(document.querySelector('[data-status-field]')?.textContent).not.toMatch(/RESPONSE/);
+  expect(screen.getByLabelText(/cyclic read of 1\/2\/3 every 5s/)).toBeInTheDocument();
+
+  job.sends_done = 2;
+  const nextRead = telegramOn('1/2/3', {
+    ...readTg,
+    timestamp: '2026-01-01T12:00:03.000000+00:00',
+    direction: 'Outgoing',
+  });
+  history.push(nextRead);
+  rerender(view(nextRead));
+  await waitFor(() => expect(screen.getByText('READ')).toHaveStyle({ color: 'var(--warning-text)' }), { timeout: 2500 });
+  expect(screen.getByLabelText(/cyclic read of 1\/2\/3 every 5s/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Write/ })).toBeDisabled();
+});
+
+test('a second row of the same GA can run the other job kind', async () => {
+  const jobs: Record<string, unknown> = {};
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/knx/send/scheduled/status')) {
+      return { ok: true, json: async () => ({ jobs: Object.values(jobs) }) } as Response;
+    }
+    if (url.includes('/api/knx/send/scheduled/cancel')) {
+      return { ok: true, json: async () => ({ status: 'ok' }) } as Response;
+    }
+    if (url.includes('/api/knx/send/scheduled')) {
+      const body = JSON.parse(String(init?.body)) as { read?: boolean };
+      const id = body.read ? 'read-job' : 'write-job';
+      const job = {
+        state: 'running',
+        id,
+        address: '1/2/3',
+        read: Boolean(body.read),
+        interval_seconds: 5,
+        sends_done: 1,
+        next_send_at: new Date(Date.now() + 3_000).toISOString(),
+      };
+      jobs[id] = job;
+      return { ok: true, json: async () => job } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }));
+
+  render(<WriteToBusPanel targets={[]} />);
+  fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
+  const gas = screen.getAllByPlaceholderText('GA');
+  fireEvent.change(gas[0], { target: { value: '1/2/3' } });
+  fireEvent.change(gas[1], { target: { value: '1/2/3' } });
+  fireEvent.change(screen.getAllByPlaceholderText(/Value/)[0], { target: { value: '50' } });
+  fireEvent.change(screen.getAllByPlaceholderText('every')[0], { target: { value: '5' } });
+  fireEvent.click(screen.getAllByRole('button', { name: /Write/ })[0]);
+  await screen.findByLabelText(/cyclic send to 1\/2\/3/);
+
+  expect(screen.getAllByRole('button', { name: /Read/ })[0]).toBeDisabled();
+  expect(screen.getAllByRole('button', { name: /Read/ })[1]).toBeEnabled();
+
+  fireEvent.change(screen.getAllByPlaceholderText('every')[1], { target: { value: '5' } });
+  fireEvent.click(screen.getAllByRole('button', { name: /Read/ })[1]);
+  await screen.findByLabelText(/cyclic read of 1\/2\/3 every 5s/);
+  expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2);
 });

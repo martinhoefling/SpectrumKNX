@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
+import { resetDiscreteLabelModes } from '../utils/dptValues';
 import { WriteControls, needsValueColumn } from './WriteControls';
 
 beforeEach(() => {
   localStorage.clear();
+  resetDiscreteLabelModes();
 });
 
 test('needsValueColumn is false only for button DPTs', () => {
@@ -165,19 +167,25 @@ test('value choice select keeps the chevron right-aligned', () => {
   expect(container.querySelector('[aria-label="Value"]')).toBe(trigger);
 });
 
-test('value choice select navigates with arrow keys and Enter', () => {
+test('value choice select commits the next choice with arrow keys (wrapping)', async () => {
   const onWrite = vi.fn();
   render(<WriteControls dptMain={3} dptKey="3.008" value="" onValueChange={() => {}} onWrite={onWrite} />);
   const trigger = screen.getByRole('button', { name: 'Value' });
+  // Starts at index 0; ArrowDown selects index 1 immediately.
   fireEvent.keyDown(trigger, { key: 'ArrowDown' });
   expect(screen.getByRole('listbox', { name: 'Value' })).toBeInTheDocument();
-  expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
-  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
   expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true');
   fireEvent.keyDown(trigger, { key: 'Enter' });
   expect(screen.queryByRole('listbox', { name: 'Value' })).not.toBeInTheDocument();
+  await vi.waitFor(() => expect(trigger).toHaveFocus());
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
   expect(onWrite).toHaveBeenCalledWith({ control: 'up', step_code: 1 });
+
+  // ArrowUp from index 1 wraps to the last option.
+  fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+  fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+  const options = screen.getAllByRole('option');
+  expect(options[options.length - 1]).toHaveAttribute('aria-selected', 'true');
 });
 
 test('numeric free values are right-aligned against the unit sibling', () => {
@@ -278,6 +286,23 @@ test('a bare DPT main renders a value field and one Write button', () => {
   expect(screen.queryByRole('button', { name: 'Toggle recent values' })).not.toBeInTheDocument();
 });
 
+test('focusing the value field selects its contents and keeps the selection after recents open', async () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
+  render(
+    <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="42" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  const input = screen.getByLabelText('Value') as HTMLInputElement;
+  input.focus();
+  expect(await screen.findByRole('listbox', { name: 'Recent values' })).toBeInTheDocument();
+  // Menu mount / mouseup collapses the selection; the focus lock must restore it.
+  input.setSelectionRange(2, 2);
+  document.dispatchEvent(new Event('selectionchange'));
+  await waitFor(() => {
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(2);
+  });
+});
+
 test('recent values show a chevron and open from the field', () => {
   localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
   render(
@@ -294,7 +319,7 @@ test('recent values show a chevron and open from the field', () => {
   expect(screen.queryByText('40')).not.toBeInTheDocument();
 });
 
-test('arrow keys move the recent-values highlight; Enter picks it', () => {
+test('arrow keys move the recent-values highlight; Enter picks it', async () => {
   localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
   const onValueChange = vi.fn();
   render(
@@ -308,27 +333,68 @@ test('arrow keys move the recent-values highlight; Enter picks it', () => {
   fireEvent.keyDown(input, { key: 'Enter' });
   expect(onValueChange).toHaveBeenCalledWith('10');
   expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Toggle recent values' })).toHaveFocus());
 });
 
-test('arrow keys scroll the highlighted recent value into view', () => {
+test('chevron arrow keys commit the next recent value from the unfiltered list, wrapping', async () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10', '21']));
+  function Controlled() {
+    const [value, setValue] = useState('40');
+    return (
+      <WriteControls
+        dptMain={5}
+        dptKey="5.001"
+        address="1/2/3"
+        value={value}
+        onValueChange={setValue}
+        onWrite={() => {}}
+      />
+    );
+  }
+  render(<Controlled />);
+  const chevron = screen.getByRole('button', { name: 'Toggle recent values' });
+  chevron.focus();
+  fireEvent.keyDown(chevron, { key: 'ArrowDown' });
+  expect(screen.getByLabelText('Value')).toHaveValue('10');
+  expect(screen.getByRole('option', { name: '10' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('option', { name: '21' })).toBeInTheDocument();
+  await vi.waitFor(() => expect(chevron).toHaveFocus());
+  fireEvent.keyDown(chevron, { key: 'ArrowDown' });
+  expect(screen.getByLabelText('Value')).toHaveValue('21');
+  fireEvent.keyDown(chevron, { key: 'ArrowDown' });
+  expect(screen.getByLabelText('Value')).toHaveValue('40');
+  fireEvent.keyDown(chevron, { key: 'ArrowUp' });
+  expect(screen.getByLabelText('Value')).toHaveValue('21');
+});
+
+test('arrow keys scroll the highlighted recent value inside the menu only', () => {
   localStorage.setItem(
     'recent_val_ga_1/2/3',
     JSON.stringify(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']),
   );
-  const scrollIntoView = vi.fn();
-  HTMLElement.prototype.scrollIntoView = scrollIntoView;
   render(
     <WriteControls dptMain={5} dptKey="5.001" address="1/2/3" value="" onValueChange={() => {}} onWrite={() => {}} />,
   );
   const input = screen.getByLabelText('Value');
   fireEvent.focus(input);
-  scrollIntoView.mockClear();
+  const list = screen.getByRole('listbox', { name: 'Recent values' });
+  list.getBoundingClientRect = () => ({
+    top: 100, bottom: 150, left: 0, right: 120, width: 120, height: 50,
+    x: 0, y: 100, toJSON() { return {}; },
+  });
+  // Option "b" sits below the visible menu — scrolling must bump menu.scrollTop only.
+  const optB = screen.getByRole('option', { name: 'b' });
+  optB.getBoundingClientRect = () => ({
+    top: 160, bottom: 180, left: 0, right: 120, width: 120, height: 20,
+    x: 0, y: 160, toJSON() { return {}; },
+  });
+  const before = list.scrollTop;
   fireEvent.keyDown(input, { key: 'ArrowDown' });
-  expect(screen.getByRole('option', { name: 'b' })).toHaveAttribute('aria-selected', 'true');
-  expect(scrollIntoView).toHaveBeenCalled();
+  expect(optB).toHaveAttribute('aria-selected', 'true');
+  expect(list.scrollTop).toBe(before + 30);
 });
 
-test('Enter with an open recent-values list picks the highlight without writing', () => {
+test('Enter with an open recent-values list picks the highlight without writing', async () => {
   localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40', '10']));
   const onValueChange = vi.fn();
   const onWrite = vi.fn();
@@ -342,6 +408,7 @@ test('Enter with an open recent-values list picks the highlight without writing'
   expect(onValueChange).toHaveBeenCalledWith('40');
   expect(onWrite).not.toHaveBeenCalled();
   expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Toggle recent values' })).toHaveFocus());
 });
 
 test('typing clears the recent-values highlight', () => {
@@ -456,15 +523,22 @@ test('recent values list is placed below the value field shell', async () => {
     />,
   );
   const shell = container.querySelector('[data-value-field]') as HTMLElement;
+  let bottom = 230;
   shell.getBoundingClientRect = () => ({
-    top: 200, bottom: 230, left: 40, right: 160, width: 120, height: 30,
-    x: 40, y: 200, toJSON() { return {}; },
+    top: bottom - 30, bottom, left: 40, right: 160, width: 120, height: 30,
+    x: 40, y: bottom - 30, toJSON() { return {}; },
   });
   // Re-open placement after mocking geometry (focus already opened recents).
   fireEvent.focus(screen.getByLabelText('Value'));
   await waitFor(() => {
     const list = screen.getByRole('listbox', { name: 'Recent values' });
-    expect(Number.parseFloat(list.style.top)).toBeGreaterThanOrEqual(234);
+    expect(Number.parseFloat(list.style.top)).toBe(234);
+  });
+  // Popover nudge / last-value load can move the shell — list must follow below.
+  bottom = 120;
+  await waitFor(() => {
+    const list = screen.getByRole('listbox', { name: 'Recent values' });
+    expect(Number.parseFloat(list.style.top)).toBe(124);
   });
 });
 
@@ -696,7 +770,7 @@ test('ctrl-click cycles ≤4-bit write button labels name → hex → bin withou
   expect(onWrite).toHaveBeenCalledWith(true);
 });
 
-test('≤4-bit label mode survives a DPT change', () => {
+test('≤4-bit label mode stays when the DPT changes', () => {
   const { rerender } = render(
     <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={() => {}} />,
   );
@@ -706,8 +780,22 @@ test('≤4-bit label mode survives a DPT change', () => {
   rerender(
     <WriteControls dptMain={1} dptKey="1.008" value="" onValueChange={() => {}} onWrite={() => {}} />,
   );
-  // 1.008 words are up/down; hex mode must still be active after the DPT switch.
+  // Same panel mode: up/down are shown as hex, not decoded words.
   expect(screen.getByRole('button', { name: /^0x1$/i })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^0x0$/i })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^up$/i })).not.toBeInTheDocument();
+});
+
+test('≤4-bit label mode is shared across WriteControls of different DPTs', () => {
+  render(
+    <>
+      <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={() => {}} />
+      <WriteControls dptMain={1} dptKey="1.008" value="" onValueChange={() => {}} onWrite={() => {}} />
+    </>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^on$/i }), { ctrlKey: true });
+  // 1.001 on/off and 1.008 up/down follow the same panel mode.
+  expect(screen.getAllByRole('button', { name: /^0x1$/i })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: /^0x0$/i })).toHaveLength(2);
   expect(screen.queryByRole('button', { name: /^up$/i })).not.toBeInTheDocument();
 });

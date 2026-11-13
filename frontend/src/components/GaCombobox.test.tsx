@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { expect, test } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { expect, test, vi } from 'vitest';
 import { GaCombobox } from './GaCombobox';
 
 const OPTIONS = [
@@ -28,6 +28,29 @@ test('a click on the field shell opens the suggestion list', () => {
   const input = screen.getByRole('combobox');
   fireEvent.mouseDown(input.parentElement!);
   expect(screen.getByRole('listbox')).toBeInTheDocument();
+});
+
+test('focusing the combobox selects its contents and keeps it after suggestions open', async () => {
+  render(
+    <GaCombobox
+      value="1/2/3"
+      onChange={() => {}}
+      options={[{ address: '1/2/3', name: 'A' }, { address: '4/5/6', name: 'B' }]}
+      recentAddresses={['1/2/3', '4/5/6']}
+    />,
+  );
+  const input = screen.getByRole('combobox') as HTMLInputElement;
+  fireEvent.mouseDown(input);
+  expect(input).toHaveFocus();
+  expect(await screen.findByRole('listbox')).toBeInTheDocument();
+  // Click-end / list mount collapses the selection the way Chrome does.
+  input.setSelectionRange(5, 5);
+  input.dispatchEvent(new Event('selectionchange', { bubbles: true }));
+  document.dispatchEvent(new Event('selectionchange'));
+  await waitFor(() => {
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(5);
+  });
 });
 
 test('shows only recent addresses, newest first, while the input is empty', () => {
@@ -72,7 +95,7 @@ test('shows no dropdown on focus when there are no recents', () => {
   expect(screen.queryAllByRole('option')).toHaveLength(0);
 });
 
-test('ranks the exact address match first and preselects it, ahead of infix matches (#217)', () => {
+test('ranks the exact address match first and preselects it, ahead of infix matches (#217)', async () => {
   const picked: string[] = [];
   render(
     <GaCombobox
@@ -97,6 +120,7 @@ test('ranks the exact address match first and preselects it, ahead of infix matc
   // Enter picks the preselected exact match without arrowing down.
   fireEvent.keyDown(input, { key: 'Enter' });
   expect(picked).toEqual(['2/4/1']);
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Toggle suggestions' })).toHaveFocus());
 });
 
 test('ranks an exact name match first (#217)', () => {

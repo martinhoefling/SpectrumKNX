@@ -13,6 +13,12 @@ function mockFetch(routes: Record<string, unknown>) {
   });
 }
 
+function gridAreasOf(el: HTMLElement): string {
+  let node: HTMLElement | null = el;
+  while (node && node.style.display !== 'grid') node = node.parentElement;
+  return (node?.style.gridTemplateAreas ?? '').replace(/\s+/g, ' ');
+}
+
 beforeEach(() => {
   vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
 });
@@ -53,7 +59,7 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
   const active = screen.getByRole('button', { name: /^active$/i });
   const read = screen.getByRole('button', { name: /^Read$/i });
   expect(inactive.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // No value field: send buttons sit between DPT and delay; Read is right of every.
+  // No value field: delay/every sit to the right of DPT; Read is on the write row.
   const send = inactive.parentElement as HTMLElement;
   expect(send.style.gridArea).toBe('write');
   expect(send.style.display).toBe('flex');
@@ -61,14 +67,22 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
   expect(send.style.width).toBe('max-content');
   expect(inactive.style.width).not.toBe('100%');
   expect((read.parentElement as HTMLElement).style.gridArea).toBe('read');
+  expect((read.parentElement as HTMLElement).style.justifySelf).toBe('end');
+  expect(send.style.justifySelf).toBe('start');
   const dpt = screen.getByLabelText('Datapoint type');
-  const scheduleInputs = screen.getAllByPlaceholderText('s');
-  expect(scheduleInputs).toHaveLength(2);
-  expect(dpt.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(send.compareDocumentPosition(scheduleInputs[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(
-    scheduleInputs[1].compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
+  const delay = screen.getByPlaceholderText('delay');
+  const every = screen.getByPlaceholderText('every');
+  expect(document.querySelectorAll('[data-seconds-field]')).toHaveLength(2);
+  const schedule = delay.closest('[data-seconds-field]')!.parentElement!.parentElement as HTMLElement;
+  expect(schedule).toBe(every.closest('[data-seconds-field]')!.parentElement!.parentElement);
+  expect(schedule.style.display).toBe('flex');
+  expect(dpt.compareDocumentPosition(delay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(delay.compareDocumentPosition(every) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(every.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const areas = gridAreasOf(delay);
+  expect(areas).toContain('"dpt sched"');
+  expect(areas).toContain('"write read"');
+  expect(send.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
   fireEvent.click(active);
 
@@ -80,7 +94,7 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
   });
   await waitFor(() => {
     const status = document.querySelector('[data-status-field]') as HTMLElement | null;
-    expect(status?.querySelector('.lucide-send')).not.toBeNull();
+    expect(status?.querySelector('.lucide-send')).toBeNull();
     expect(status?.getAttribute('aria-label') ?? '').toMatch(/written .+ to 16\/0\/1/i);
   });
 });
@@ -165,6 +179,51 @@ test('restore-list jump returns scrollTop from when the popover opened', async (
   expect(scrollEl.scrollTop).toBe(120);
   expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
   expect(screen.getByText('1/1/1')).toBeInTheDocument();
+});
+
+test('dragging the popover shows restore and puts the card back on the row', async () => {
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+
+  const { container } = render(
+    <div data-telegram-table>
+      <div data-telegram-scroll style={{ height: 80, overflow: 'auto' }}>
+        <div style={{ height: 400 }} />
+        <SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />
+      </div>
+    </div>,
+  );
+  const table = container.querySelector('[data-telegram-table]') as HTMLElement;
+  table.getBoundingClientRect = () => ({
+    x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600,
+    toJSON() { return this; },
+  });
+  const scrollEl = container.querySelector('[data-telegram-scroll]') as HTMLElement;
+  scrollEl.scrollTop = 40;
+  const trigger = screen.getByRole('button', { name: /Send to this GA/ });
+  trigger.getBoundingClientRect = () => ({
+    x: 120, y: 140, top: 140, left: 120, right: 144, bottom: 164, width: 24, height: 24,
+    toJSON() { return this; },
+  });
+
+  fireEvent.click(trigger);
+  const handle = await screen.findByTitle('Drag to move');
+  const card = handle.parentElement as HTMLElement;
+  const opened = { top: card.style.top, left: card.style.left };
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
+
+  fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+  fireEvent.pointerMove(handle, { button: 0, pointerId: 1, clientX: 48, clientY: 36 });
+  fireEvent.pointerUp(handle, { button: 0, pointerId: 1, clientX: 48, clientY: 36 });
+  expect(card.style.left).not.toBe(opened.left);
+
+  expect(await screen.findByRole('button', { name: 'Restore list position' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Restore list position' }));
+  await waitFor(() => {
+    expect(card.style.top).toBe(opened.top);
+    expect(card.style.left).toBe(opened.left);
+  });
+  expect(scrollEl.scrollTop).toBe(40);
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
 });
 
 test('hosted restore-list jump uses capture/restore callbacks', async () => {
@@ -289,12 +348,24 @@ test('triggers a GroupValueRead from the Read button', async () => {
   const read = screen.getByRole('button', { name: /Read/ });
   expect(write.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect((write.parentElement as HTMLElement).style.gridArea).toBe('write');
-  // Value under DPT + Write; Read sits in its own cell right of every (same column as Write).
+  // Delay/every to the right of DPT, value on the next row, Read at the row's right edge.
   expect((read.parentElement as HTMLElement).style.gridArea).toBe('read');
+  expect((read.parentElement as HTMLElement).style.justifySelf).toBe('end');
+  expect((write.parentElement as HTMLElement).style.justifySelf).toBe('start');
   const value = screen.getByPlaceholderText(/Value/);
+  const delay = screen.getByPlaceholderText('delay');
+  const every = screen.getByPlaceholderText('every');
+  const dpt = screen.getByLabelText('Datapoint type');
+  expect(dpt.compareDocumentPosition(delay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(every.compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const areas = gridAreasOf(delay);
+  expect(areas).toContain('"dpt sched"');
+  expect(areas).toContain('"value value"');
+  expect(areas).toContain('"write read"');
+  expect(delay.closest('[data-seconds-field]')!.parentElement!.parentElement)
+    .toBe(every.closest('[data-seconds-field]')!.parentElement!.parentElement);
   expect(value.compareDocumentPosition(write) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  const scheduleInputs = screen.getAllByPlaceholderText('s');
-  expect(scheduleInputs[1].compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(write.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(read);
 
   await waitFor(() => {
@@ -302,16 +373,53 @@ test('triggers a GroupValueRead from the Read button', async () => {
     expect(call).toBeTruthy();
     expect(JSON.parse((call![1] as RequestInit).body as string)).toMatchObject({ address: '1/1/97' });
   });
-  // Panel-like status: orange radio + read-wait tip; Cancel ends the wait.
+  // Status shows the read request. No radio and no Cancel — Clear dismisses it.
   await waitFor(() => {
     const status = document.querySelector('[data-status-field]') as HTMLElement | null;
-    expect(status?.querySelector('.lucide-radio')).not.toBeNull();
+    expect(status?.querySelector('.lucide-radio')).toBeNull();
     expect(status?.getAttribute('aria-label') ?? '').toMatch(/read request sent/i);
   });
-  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+  const readIcon = read.querySelector('.lucide-radio');
+  expect(readIcon).not.toBeNull();
+  expect(readIcon).toHaveStyle({ color: 'var(--accent-primary)' });
   expect(screen.getByLabelText('Datapoint type')).toBeInTheDocument();
   expect(read).toHaveClass('wtb-read-btn');
   await waitFor(() => expect(screen.getByRole('button', { name: /^Read$/ })).toHaveFocus());
+});
+
+test('ctrl-click Read switches to Response mode so Write sends a response', async () => {
+  const fetchMock = mockFetch({
+    '/api/telegrams': { telegrams: [] },
+    '/api/knx/send': { status: 'sent' },
+    '/api/knx/read': { status: 'sent' },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  render(<SendToGaPopover address="1/1/97" name="Helligkeit" dptMain={9} dptSub={4} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const value = await screen.findByPlaceholderText(/Value/);
+  fireEvent.change(value, { target: { value: '50' } });
+
+  fireEvent.click(screen.getByRole('button', { name: /^Read$/ }), { ctrlKey: true });
+  expect(screen.getByRole('button', { name: /^Response$/ })).toBeInTheDocument();
+  const sentToBus = (url: string) =>
+    (url.includes('/api/knx/send') && !url.includes('scheduled')) || url.includes('/api/knx/read');
+  expect(fetchMock.mock.calls.some(([u]) => sentToBus(String(u)))).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: /^Response$/ }));
+  expect(fetchMock.mock.calls.some(([u]) => sentToBus(String(u)))).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: /Write/ }));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/knx/send') && !String(u).includes('scheduled'));
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toMatchObject({
+      address: '1/1/97',
+      payload: 50,
+      response: true,
+    });
+  });
+  expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/knx/read'))).toBe(false);
 });
 
 test('read wait ends only on Response; Write is ignored; close clears wait', async () => {
@@ -339,7 +447,7 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
     expect(status?.getAttribute('aria-label') ?? '').toMatch(/read request sent/i);
   });
   expect(screen.getByText('21.5')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
   // Wait must not lock write controls (Write itself still needs a value).
   expect(screen.getByLabelText('Datapoint type')).not.toBeDisabled();
   expect(screen.getByLabelText('Value')).not.toBeDisabled();
@@ -378,7 +486,7 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
   );
   await waitFor(() => {
     const status = document.querySelector('[data-status-field]') as HTMLElement | null;
-    expect(status?.querySelector('.lucide-radio')).not.toBeNull();
+    expect(status?.querySelector('.lucide-radio')).toBeNull();
     expect(status?.getAttribute('aria-label') ?? '').toMatch(/Response on /i);
     expect(status?.getAttribute('aria-label') ?? '').not.toMatch(/read request sent/i);
   });
@@ -439,6 +547,41 @@ test('DPT suggestions include project catalog subtypes for the GA main', async (
   expect(options.some(t => t.includes('5.001'))).toBe(false); // other main filtered out
   // Open jumps to the current draft value.
   expect(screen.getByRole('option', { name: /9\.001/ })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Escape closes the DPT Werthilfe before dismissing the popover', async () => {
+  render(<SendToGaPopover address="14/5/1" name="Temp" dptMain={9} dptSub={1} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const dpt = await screen.findByLabelText('Datapoint type');
+  await waitFor(() => expect(dpt).toHaveValue('9.001'));
+
+  fireEvent.focus(dpt);
+  expect(screen.getByRole('listbox', { name: 'Datapoint types' })).toBeInTheDocument();
+  expect(screen.getByText('14/5/1')).toBeInTheDocument();
+
+  fireEvent.keyDown(dpt, { key: 'Escape' });
+  expect(screen.queryByRole('listbox', { name: 'Datapoint types' })).not.toBeInTheDocument();
+  expect(screen.getByText('14/5/1')).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.queryByText('14/5/1')).not.toBeInTheDocument();
+});
+
+test('Escape closes the value Werthilfe before dismissing the popover', async () => {
+  localStorage.setItem('recent_val_ga_14/5/1', JSON.stringify(['21.5', '22']));
+  render(<SendToGaPopover address="14/5/1" name="Temp" dptMain={9} dptSub={1} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const value = await screen.findByPlaceholderText(/Value/);
+  fireEvent.focus(value);
+  expect(await screen.findByRole('listbox', { name: 'Recent values' })).toBeInTheDocument();
+  expect(screen.getByText('14/5/1')).toBeInTheDocument();
+
+  fireEvent.keyDown(value, { key: 'Escape' });
+  expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+  expect(screen.getByText('14/5/1')).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.queryByText('14/5/1')).not.toBeInTheDocument();
 });
 
 test('still opens when the trigger sits near the table edge', async () => {
@@ -811,6 +954,7 @@ test('live Write updates last value and timestamp while open', async () => {
     timestamp: '2026-07-17T09:10:00Z',
     telegram_type: 'GroupValueWrite',
     simplified_type: 'Write',
+    direction: 'Outgoing',
     target_address: '1/1/97',
     value_formatted: '18.0',
     unit: '°C',
@@ -819,6 +963,7 @@ test('live Write updates last value and timestamp while open', async () => {
     <SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} latestTelegram={writeTg as never} />,
   );
   expect(screen.getByText('18.0')).toBeInTheDocument();
+  expect(screen.getByText('18.0').closest('[data-bus-pulse]')).toHaveAttribute('data-bus-pulse', 'Outgoing');
   expect(screen.getByText(format(new Date('2026-07-17T09:10:00Z'), 'yyyy-MM-dd HH:mm:ss'))).toBeInTheDocument();
 });
 
@@ -864,7 +1009,7 @@ test('late loadLast does not overwrite a newer live last value', async () => {
   expect(screen.queryByText('21.5')).not.toBeInTheDocument();
 });
 
-test('jobActive marks the send icon dim-green and always-visible attr', () => {
+test('jobActive marks the send icon in Outgoing color', () => {
   render(
     <SendToGaHost>
       <SendToGaPopover address="2/3/4" triggerId="t1" jobActive />
@@ -872,7 +1017,26 @@ test('jobActive marks the send icon dim-green and always-visible attr', () => {
   );
   const btn = screen.getByRole('button', { name: /Send to this GA/ });
   expect(btn).toHaveAttribute('data-send-job-active');
-  expect(btn.style.color).toMatch(/success/);
+  expect(btn.style.color).toBe('var(--tt-outgoing)');
+});
+
+test('delay and every match the send-panel seconds field chrome', async () => {
+  render(<SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+
+  const delay = await waitFor(() => screen.getByPlaceholderText('delay'));
+  const every = screen.getByPlaceholderText('every');
+  expect(document.querySelectorAll('[data-seconds-field]')).toHaveLength(2);
+  expect(screen.queryByText('s')).not.toBeInTheDocument();
+  expect(delay).toHaveStyle({ textAlign: 'right' });
+  expect(every).toHaveStyle({ textAlign: 'right' });
+
+  fireEvent.change(delay, { target: { value: '2' } });
+  fireEvent.change(every, { target: { value: '5' } });
+  const units = screen.getAllByText('s');
+  expect(units).toHaveLength(2);
+  expect(delay.nextElementSibling).toBe(units[0]);
+  expect(every.nextElementSibling).toBe(units[1]);
 });
 
 test('active GA job shows panel-like status below the controls with Cancel', async () => {
@@ -912,12 +1076,23 @@ test('active GA job shows panel-like status below the controls with Cancel', asy
   });
   expect(status.querySelector('.lucide-timer')).not.toBeNull();
   expect(status.querySelector('[data-status-metric="countdown"]')).not.toBeNull();
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.wtb-write-btn, .wtb-read-btn')) {
+    expect(btn).toBeDisabled();
+  }
+  expect(screen.getByPlaceholderText('delay')).toBeDisabled();
+  expect(screen.getByPlaceholderText('every')).toBeDisabled();
   const cancel = screen.getByRole('button', { name: /^Cancel$/ });
   fireEvent.click(cancel);
   expect(onCancelLinked).toHaveBeenCalledWith('row-job-1');
 });
 
-test('outgoing Write flashes the send icon briefly', async () => {
+async function endSendWritePulse() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(420);
+  });
+}
+
+test('Outgoing and Incoming bus events pulse the send icon in direction colors', async () => {
   vi.useFakeTimers();
   try {
     const { rerender } = render(
@@ -926,7 +1101,111 @@ test('outgoing Write flashes the send icon briefly', async () => {
       </SendToGaHost>,
     );
     const btn = screen.getByRole('button', { name: /Send to this GA/ });
-    expect(btn).not.toHaveAttribute('data-send-outgoing-flash');
+    expect(btn).not.toHaveAttribute('data-bus-pulse');
+
+    const incoming = {
+      timestamp: '2026-07-17T09:09:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Incoming',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={incoming as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={incoming as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Incoming');
+    expect(btn.style.color).toBe('var(--tt-incoming)');
+
+    await endSendWritePulse();
+    expect(btn).not.toHaveAttribute('data-bus-pulse');
+
+    const outgoing = {
+      timestamp: '2026-07-17T09:10:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Outgoing',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={outgoing as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={outgoing as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Outgoing');
+    expect(btn.style.color).toBe('var(--tt-outgoing)');
+
+    await endSendWritePulse();
+    expect(btn).not.toHaveAttribute('data-bus-pulse');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('a later telegram for another GA still restores the send icon when the pulse ends', async () => {
+  vi.useFakeTimers();
+  try {
+    const matching = {
+      timestamp: '2026-07-17T09:10:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Outgoing',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    const { rerender } = render(
+      <SendToGaHost latestTelegram={matching as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={matching as never} />
+      </SendToGaHost>,
+    );
+    const btn = screen.getByRole('button', { name: /Send to this GA/ });
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Outgoing');
+    expect(btn.querySelector('svg')).toBeTruthy();
+
+    const other = {
+      timestamp: '2026-07-17T09:10:00.200Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Incoming',
+      target_address: '9/9/9',
+      value_formatted: 'Off',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={other as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={other as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Outgoing');
+    btn.style.filter = 'brightness(1.85)';
+    btn.style.transform = 'scale(1.18)';
+    btn.style.animation = 'bus-pulse 0.42s ease-out forwards';
+
+    await endSendWritePulse();
+    expect(btn).not.toHaveAttribute('data-bus-pulse');
+    expect(btn.style.color).toBe('var(--text-dim)');
+    expect(btn.style.filter).toBe('');
+    expect(btn.style.transform).toBe('');
+    expect(btn.style.animation).toBe('');
+    expect(btn.querySelector('svg')).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('after a bus pulse, panel-matched icons stay blue with pulse styles cleared', async () => {
+  vi.useFakeTimers();
+  try {
+    const { rerender } = render(
+      <SendToGaHost latestTelegram={null}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" panelMatched latestTelegram={null} />
+      </SendToGaHost>,
+    );
+    const btn = screen.getByRole('button', { name: /Send to this GA/ });
+    expect(btn).toHaveAttribute('data-send-panel-match');
+    expect(btn.style.color).toBe('var(--accent-primary)');
 
     const tg = {
       timestamp: '2026-07-17T09:10:00Z',
@@ -938,16 +1217,125 @@ test('outgoing Write flashes the send icon briefly', async () => {
     };
     rerender(
       <SendToGaHost latestTelegram={tg as never}>
-        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={tg as never} />
+        <SendToGaPopover address="2/3/4" triggerId="t1" panelMatched latestTelegram={tg as never} />
       </SendToGaHost>,
     );
-    expect(btn).toHaveAttribute('data-send-outgoing-flash');
-    expect(btn.style.color).toBe('var(--success)');
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Outgoing');
+    btn.style.filter = 'brightness(1.85)';
+    btn.style.transform = 'scale(1.18)';
+    btn.style.animation = 'bus-pulse 0.42s ease-out forwards';
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(450);
-    });
-    expect(btn).not.toHaveAttribute('data-send-outgoing-flash');
+    await endSendWritePulse();
+    expect(btn).not.toHaveAttribute('data-bus-pulse');
+    expect(btn).toHaveAttribute('data-send-panel-match');
+    expect(btn.style.color).toBe('var(--accent-primary)');
+    expect(btn.style.filter).toBe('');
+    expect(btn.style.transform).toBe('');
+    expect(btn.style.animation).toBe('');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('after a bus pulse, job-active icons restore Outgoing color with styles cleared', async () => {
+  vi.useFakeTimers();
+  try {
+    const { rerender } = render(
+      <SendToGaHost latestTelegram={null}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" jobActive latestTelegram={null} />
+      </SendToGaHost>,
+    );
+    const btn = screen.getByRole('button', { name: /Send to this GA/ });
+    expect(btn.style.color).toBe('var(--tt-outgoing)');
+
+    const tg = {
+      timestamp: '2026-07-17T09:10:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Incoming',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={tg as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" jobActive latestTelegram={tg as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Incoming');
+    expect(btn.style.color).toBe('var(--tt-incoming)');
+    btn.style.filter = 'brightness(1.5)';
+    btn.style.transform = 'scale(1.1)';
+
+    await endSendWritePulse();
+    expect(btn).not.toHaveAttribute('data-bus-pulse');
+    expect(btn).toHaveAttribute('data-send-job-active');
+    expect(btn.style.color).toBe('var(--tt-outgoing)');
+    expect(btn.style.filter).toBe('');
+    expect(btn.style.transform).toBe('');
+    expect(btn.style.animation).toBe('');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('outgoing pulse keeps job-active icons in Outgoing color', async () => {
+  vi.useFakeTimers();
+  try {
+    const { rerender } = render(
+      <SendToGaHost latestTelegram={null}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" jobActive latestTelegram={null} />
+      </SendToGaHost>,
+    );
+    const btn = screen.getByRole('button', { name: /Send to this GA/ });
+    expect(btn.style.color).toBe('var(--tt-outgoing)');
+
+    const tg = {
+      timestamp: '2026-07-17T09:10:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Outgoing',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={tg as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" jobActive latestTelegram={tg as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Outgoing');
+    expect(btn).toHaveAttribute('data-send-job-active');
+    expect(btn.style.color).toBe('var(--tt-outgoing)');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('incoming pulse uses Incoming color even while a job is active', async () => {
+  vi.useFakeTimers();
+  try {
+    const { rerender } = render(
+      <SendToGaHost latestTelegram={null}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" jobActive latestTelegram={null} />
+      </SendToGaHost>,
+    );
+    const btn = screen.getByRole('button', { name: /Send to this GA/ });
+    expect(btn.style.color).toBe('var(--tt-outgoing)');
+
+    const tg = {
+      timestamp: '2026-07-17T09:10:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Incoming',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={tg as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" jobActive latestTelegram={tg as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-bus-pulse', 'Incoming');
+    expect(btn.style.color).toBe('var(--tt-incoming)');
   } finally {
     vi.useRealTimers();
   }
@@ -1010,4 +1398,27 @@ test('header drag moves the popover inside the TT and clears the marks pill', as
     expect(top).toBeGreaterThanOrEqual(108);
     expect(top + 120).toBeLessThanOrEqual(392);
   });
+});
+
+test('a delayed Read is handed to the linked send-panel row', async () => {
+  const onReadWithSchedule = vi.fn();
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+  render(
+    <SendToGaPopover
+      address="1/2/3"
+      dptMain={9}
+      dptSub={1}
+      onReadWithSchedule={onReadWithSchedule}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const delay = await screen.findByPlaceholderText('delay');
+  fireEvent.change(delay, { target: { value: '5' } });
+  fireEvent.click(screen.getByRole('button', { name: /^Read$/ }));
+  expect(onReadWithSchedule).toHaveBeenCalledWith(expect.objectContaining({
+    address: '1/2/3',
+    delay: '5',
+    every: '',
+  }));
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/knx/read'))).toBe(false);
 });

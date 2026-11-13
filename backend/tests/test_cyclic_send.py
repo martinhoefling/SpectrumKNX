@@ -22,6 +22,64 @@ async def _reset_job_state():
 
 
 @pytest.mark.asyncio
+async def test_one_shot_delayed_read_does_not_write():
+    with (
+        patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
+        patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()) as send,
+        patch.object(cyclic_send.knx_daemon, "read_group_value", new=AsyncMock()) as read,
+    ):
+        job = cyclic_send.start_send("1/2/3", None, None, False, delay_seconds=0.01, interval_seconds=None, read=True)
+        await cyclic_send._tasks[job.id]
+
+    assert job.state == "done"
+    assert job.read is True
+    assert job.sends_done == 1
+    read.assert_awaited_once_with("1/2/3")
+    send.assert_not_awaited()
+    assert job.to_dict()["read"] is True
+
+
+@pytest.mark.asyncio
+async def test_cyclic_read_ticks_until_cancelled():
+    with (
+        patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
+        patch.object(cyclic_send.knx_daemon, "read_group_value", new=AsyncMock()) as read,
+    ):
+        job = cyclic_send.start_send("1/2/3", None, None, False, delay_seconds=0, interval_seconds=0.01, read=True)
+        task = cyclic_send._tasks[job.id]
+        await asyncio.sleep(0.05)
+        assert job.state == "running"
+        assert cyclic_send.cancel_send(job.id) is True
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert job.state == "cancelled"
+    assert job.sends_done >= 2
+    assert read.await_count == job.sends_done
+
+
+@pytest.mark.asyncio
+async def test_read_and_write_jobs_same_address_run_together():
+    with (
+        patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),
+        patch.object(cyclic_send.knx_daemon, "send_group_value", new=AsyncMock()) as send,
+        patch.object(cyclic_send.knx_daemon, "read_group_value", new=AsyncMock()) as read,
+    ):
+        write = cyclic_send.start_send("1/2/3", True, "1.001", False, delay_seconds=0, interval_seconds=0.01)
+        read_job = cyclic_send.start_send(
+            "1/2/3", None, None, False, delay_seconds=0, interval_seconds=0.01, read=True,
+        )
+        await asyncio.sleep(0.05)
+        assert write.state == "running"
+        assert read_job.state == "running"
+        assert send.await_count >= 1
+        assert read.await_count >= 1
+        assert cyclic_send.cancel_send(write.id) is True
+        assert read_job.state == "running"
+        assert cyclic_send.cancel_send(read_job.id) is True
+
+
+@pytest.mark.asyncio
 async def test_one_shot_delayed_send():
     with (
         patch.object(cyclic_send.knx_daemon, "write_enabled", return_value=True),

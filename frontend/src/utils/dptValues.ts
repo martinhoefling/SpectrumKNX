@@ -5,6 +5,8 @@
  * (on/off, true/false, up/down), not a generic boolean.
  */
 
+import { useSyncExternalStore } from 'react';
+
 import { isTextDptMain, textDptCharWidth } from './knxSend';
 
 export type BusPayload =
@@ -202,6 +204,43 @@ export function nextDiscreteLabelMode(mode: DiscreteLabelMode): DiscreteLabelMod
   if (mode === 'name') return 'hex';
   if (mode === 'hex') return 'bin';
   return 'name';
+}
+
+// One name/hex/bin mode for the whole send panel (every row and the popover),
+// independent of which DPT a control is showing.
+let discreteLabelMode: DiscreteLabelMode = 'name';
+const discreteLabelModeListeners = new Set<() => void>();
+
+const subscribeDiscreteLabelMode = (cb: () => void) => {
+  discreteLabelModeListeners.add(cb);
+  return () => {
+    discreteLabelModeListeners.delete(cb);
+  };
+};
+
+const getDiscreteLabelModeSnapshot = () => discreteLabelMode;
+
+/** Active label mode for every WriteControls (`name` until cycled). */
+export function getDiscreteLabelMode(): DiscreteLabelMode {
+  return discreteLabelMode;
+}
+
+/** Advance name → hex → bin for the whole panel. */
+export function cycleDiscreteLabelMode(): DiscreteLabelMode {
+  discreteLabelMode = nextDiscreteLabelMode(discreteLabelMode);
+  discreteLabelModeListeners.forEach(l => l());
+  return discreteLabelMode;
+}
+
+/** Test helper: restore decoded labels. */
+export function resetDiscreteLabelModes(): void {
+  discreteLabelMode = 'name';
+  discreteLabelModeListeners.forEach(l => l());
+}
+
+/** Subscribe to the panel-wide name/hex/bin mode. */
+export function useDiscreteLabelMode(): DiscreteLabelMode {
+  return useSyncExternalStore(subscribeDiscreteLabelMode, getDiscreteLabelModeSnapshot);
 }
 
 /** Button label for a discrete choice under the active display mode. */

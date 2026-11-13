@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent as ReactUIEvent } from 'react';
-import { Radio, Plus, Minus, AlertTriangle, CheckCircle2, Timer, RotateCcw, X, Send } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent as ReactUIEvent } from 'react';
+import { Plus, Minus, AlertTriangle, CheckCircle2, Timer, RotateCcw, X, Send } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
@@ -19,6 +19,8 @@ import { GaCombobox } from './GaCombobox';
 import { DptField } from './DptField';
 import { WriteControls, needsValueColumn } from './WriteControls';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
+import { EventTypeLabel } from './EventTypeLabel';
+import { useGaReadPhase, useReadAnswered } from './GaReadPhase';
 import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
 import { buildWriteDptOptions, dptUnit } from '../utils/dpt';
@@ -31,6 +33,7 @@ import {
   ROW_OUTLINE_FLASH_MS,
 } from '../utils/rowOutlineFlash';
 import { useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
+import { SecondsField } from './SecondsField';
 import {
   sanitizeSecondsInput,
   rowsEqualForCorrespondence,
@@ -45,30 +48,52 @@ export type { SendCorrespondenceKey, SendPanelCommand, SendPanelCommandResult, L
 /** Panel Read button: keeps visible focus through the row busy→disabled cycle. */
 function RetainFocusReadButton({
   disabled,
+  muted = false,
+  respond = false,
   onRead,
+  onToggle,
   title,
+  address,
   'data-wtb-col': dataWtbCol,
 }: {
   disabled: boolean;
+  /** Stronger fade when a write job owns the row. A read job keeps the normal disabled tone. */
+  muted?: boolean;
+  /** Mode flag: Write buttons send a GroupValueResponse instead of a Write. */
+  respond?: boolean;
   onRead: () => void;
+  /** Ctrl/cmd-click switches Read ↔ Response mode. Ignored while the button is disabled. */
+  onToggle?: () => void;
   title: string;
+  address: string;
   'data-wtb-col'?: string;
 }) {
   const { retainClickFocus } = useRetainFocusThroughDisabled(disabled);
+  const phase = useGaReadPhase(address);
   return (
     <button
       type="button"
       className="wtb-read-btn"
       data-wtb-col={dataWtbCol}
       disabled={disabled}
-      style={secondaryBtn(disabled)}
+      style={secondaryBtn(disabled, muted)}
       title={title}
       onClick={e => {
         retainClickFocus(e);
+        if ((e.ctrlKey || e.metaKey) && onToggle) {
+          onToggle();
+          return;
+        }
         onRead();
       }}
     >
-      <Radio size={14} /> Read
+      <EventTypeLabel
+        kind={respond ? 'Response' : 'Read'}
+        showIcon
+        phase={phase}
+        iconDim={disabled ? (muted ? 'muted' : 'disabled') : undefined}
+        iconSize={14}
+      />
     </button>
   );
 }
@@ -94,8 +119,10 @@ interface Props {
   dptCatalog?: FilterOption[];
   /** Jump the telegram list to the telegram that carried this row's last value. */
   onGotoTelegram?: (telegram: Telegram) => void;
-  /** Reports the top row's GA/DPT when delay/every are empty (for send-icon blue). */
+  /** Reports the top row's GA/DPT when delay/every are empty (legacy hint). */
   onTopRowHintChange?: (hint: SendPanelTopRowHint | null) => void;
+  /** Every unique non-empty GA currently in the panel (TT send-icon opaque/blue). */
+  onPanelAddressesChange?: (addresses: string[]) => void;
   /** Ctrl-click from TT send icon: clear matching top row or insert at top. */
   ctrlSendRequest?: CtrlSendRequest | null;
   /** Called after a ctrlSendRequest has been applied. */
@@ -124,6 +151,8 @@ interface Row {
   value: string;
   delay: string;
   every: string;
+  /** When true, Write buttons send a GroupValueResponse instead of a Write. */
+  respond: boolean;
   busy: boolean;
   feedback: { ok: boolean; msg: string } | null;
   /**
@@ -132,13 +161,17 @@ interface Row {
    */
   readBaseline: string | null;
   /**
-   * After a send/read, wait for the matching bus telegram on the live feed.
-   * 'read' keeps the waiting icon until a Response arrives (or Cancel) —
-   * Writes never clear a read wait.
+   * After a send/read, bind the matching bus telegram on the live feed.
+   * 'read' keeps the Read event until a Response replaces it. Writes never clear it.
    */
   statusWatch: 'write' | 'read' | null;
   /** Bus telegram currently shown in Status (time + jump). */
   statusTelegram: Telegram | null;
+  /**
+   * This row sent a Read and is waiting to show that Read.
+   * Other rows on the same GA keep their own read event. Not persisted.
+   */
+  claimOwnRead?: boolean;
   /**
    * Last Write this row caused on the bus. Survives Read waits / Clear so a
    * later Write or idle fallback can reuse it — Cancel never restores it over
@@ -170,7 +203,7 @@ const POLL_INTERVAL_MS = 1000;
 
 let rowSeq = 0;
 const newRow = (): Row => ({
-  id: `row-${rowSeq++}`, address: '', name: '', dpt: '', value: '', delay: '', every: '', busy: false, feedback: null,
+  id: `row-${rowSeq++}`, address: '', name: '', dpt: '', value: '', delay: '', every: '', respond: false, busy: false, feedback: null,
   readBaseline: null, statusWatch: null, statusTelegram: null, lastSentTelegram: null,
   scheduledJobId: null,
 });
@@ -185,6 +218,17 @@ const STATUS_SHELL_MIN_WIDTH_COMPACT = '5.75rem';
 export const STATUS_ACTION_WIDTH = '4.25rem';
 /** Fits the Clear X / empty spacer when no Cancel is on the panel. */
 export const STATUS_CLEAR_WIDTH = '11px';
+/** Send-count column. Same width on every row that shows the column. */
+const STATUS_COUNT_TRACK = '4ch';
+/** `yyyy-MM-dd HH:mm:ss`, the gap, and the clock button. */
+const STATUS_WHEN_TRACK = 'calc(19ch + 0.35rem + 13px + 0.3rem)';
+/** RESPONSE is the longest event word. */
+const STATUS_EVENT_TRACK = '8ch';
+/**
+ * Clock button in the status jump: 13px icon + 0.15rem padding each side.
+ * The shell is always this tall, so clearing the status does not shrink it.
+ */
+const STATUS_SHELL_HEIGHT = 'calc(0.7rem + 2px + max(14px, 1.2em, 13px + 0.3rem))';
 
 /** Row has anything that warrants Cancel/Clear or fills the status body. */
 function rowHasStatusChrome(
@@ -255,6 +299,55 @@ function isReadTelegram(tg: Telegram | null | undefined): boolean {
   return Boolean(tg.telegram_type?.includes('Read')) && !tg.telegram_type?.includes('Response');
 }
 
+function isResponseTelegram(tg: Telegram | null | undefined): boolean {
+  if (!tg) return false;
+  return tg.simplified_type === 'Response' || Boolean(tg.telegram_type?.includes('Response'));
+}
+
+/** True when this telegram is one this row's job put on the bus, not another device's echo. */
+function telegramFromRowJob(job: ScheduledSendStatus, tg: Telegram): boolean {
+  // A read job's own Read may arrive Incoming or Outgoing.
+  if (job.read) return isReadTelegram(tg);
+  if (tg.direction === 'Incoming') return false;
+  if (job.response) return isResponseTelegram(tg);
+  if (!isWriteTelegram(tg) || isResponseTelegram(tg)) return false;
+  return payloadMatchesJob(job.payload, tg);
+}
+
+/** Telegram currently drawn in the status jump, or null while an error or a send owns the row. */
+function visibleStatusTelegram(
+  row: Pick<Row, 'feedback' | 'busy' | 'statusWatch' | 'statusTelegram' | 'lastSentTelegram'>,
+  rowJob: ScheduledSendStatus | null,
+  lastTelegram: Telegram | undefined,
+): Telegram | null {
+  const showJob = isLiveJob(rowJob);
+  const unansweredRead = row.statusWatch === 'read' || isReadRequestFeedback(row.feedback);
+  const jobTelegram = showJob && rowJob && row.statusTelegram && telegramFromRowJob(rowJob, row.statusTelegram)
+    ? row.statusTelegram
+    : null;
+  if ((row.feedback && !row.feedback.ok) || row.busy) return null;
+  if (showJob) return jobTelegram;
+  return row.statusTelegram
+    ?? (!unansweredRead ? row.lastSentTelegram : null)
+    ?? (row.statusWatch === 'write' && lastTelegram && isWriteTelegram(lastTelegram) ? lastTelegram : null);
+}
+
+function payloadMatchesJob(payload: unknown, tg: Telegram): boolean {
+  if (payload == null) return true;
+  const shown = (tg.value_formatted ?? '').trim();
+  if (typeof payload === 'boolean') {
+    if (tg.value_numeric === 0 || tg.value_numeric === 1) return payload === (tg.value_numeric === 1);
+    const text = shown.toLowerCase();
+    return payload ? /^(on|true|yes|1)$/.test(text) : /^(off|false|no|0)$/.test(text);
+  }
+  if (typeof payload === 'number') {
+    if (typeof tg.value_numeric === 'number' && Math.abs(tg.value_numeric - payload) < 1e-6) return true;
+    return shown === String(payload) || shown.startsWith(`${payload} `);
+  }
+  if (typeof payload === 'string') return shown === payload;
+  return true;
+}
+
 function isReadRequestFeedback(feedback: Row['feedback']): boolean {
   return Boolean(feedback?.ok && /^Read request/i.test(feedback.msg));
 }
@@ -277,24 +370,26 @@ function telegramValue(tg: Telegram | null | undefined, fallback = '', dpt?: str
   return fallback;
 }
 
-/** Shared write-panel grid: addr | name | last | event | dpt | value | send | delay | every | read | status | del | add. */
+/** Shared write-panel grid: addr | name | last | event | delay | every | dpt | value | send | read | status | del | add. */
 const WTB_COLS = 13;
 const WTB_NAME_COL = 1;
-const WTB_VALUE_COL = 5;
-const WTB_SEND_COL = 6;
+const WTB_VALUE_COL = 7;
+const WTB_SEND_COL = 8;
 const WTB_STATUS_COL = 10;
-/** Middle pane scrolls horizontally: name … read (GA + status/del/add stay pinned). */
+/** Middle pane scrolls horizontally: name … value. GA stays pinned left. */
 const WTB_MID_START = 1;
-const WTB_MID_END = 10; // exclusive
+const WTB_MID_END = 8; // exclusive
+/** Write, read, status, delete, add stay pinned and scroll only vertically. */
+const WTB_RIGHT_START = 8;
 const WTB_COL_GAP = '0.45rem';
-/** Address, DPT, value, delay, every — measured content + small typing buffer. */
-const WTB_BUFFER_COLS = new Set([0, 4, 5, 7, 8]);
+/** Address, DPT, delay, every, value — measured content + small typing buffer. */
+const WTB_BUFFER_COLS = new Set([0, 4, 5, 6, 7]);
 const WTB_INPUT_BUFFER_PX = 10;
 
-const WTB_FALLBACK_RIGHT_TRACKS = 'max-content max-content max-content';
+const WTB_FALLBACK_RIGHT_TRACKS = 'max-content max-content max-content max-content max-content';
 
 /**
- * Mid-pane tracks (name … read). The name track is `minmax(w, 1fr)`, which
+ * Mid-pane tracks (name … value). The name track is `minmax(w, 1fr)`, which
  * contains a space — drop the value track by column index, not by splitting
  * the template string, or the DPT track is removed instead and the field
  * paints under the send buttons.
@@ -317,7 +412,7 @@ export function midTracksTemplate(colTracks: number[] | null, showValueCol: bool
 
 function rightTracksTemplate(colTracks: number[] | null): string {
   if (!colTracks) return WTB_FALLBACK_RIGHT_TRACKS;
-  return colTracks.slice(WTB_STATUS_COL).map(w => `${w}px`).join(' ');
+  return colTracks.slice(WTB_RIGHT_START).map(w => `${w}px`).join(' ');
 }
 
 function leftColWidth(colTracks: number[] | null): string {
@@ -326,8 +421,9 @@ function leftColWidth(colTracks: number[] | null): string {
 
 function rightPaneWidth(colTracks: number[] | null): string {
   if (!colTracks) return 'max-content';
-  const [a, b, c] = colTracks.slice(WTB_STATUS_COL);
-  return `calc(${a}px + ${b}px + ${c}px + 2 * ${WTB_COL_GAP})`;
+  const tracks = colTracks.slice(WTB_RIGHT_START);
+  const gaps = Math.max(0, tracks.length - 1);
+  return `calc(${tracks.map(w => `${w}px`).join(' + ')} + ${gaps} * ${WTB_COL_GAP})`;
 }
 
 function measureIntrinsicWidth(el: HTMLElement): number {
@@ -381,94 +477,6 @@ function measureColumnCell(cell: HTMLElement, col: number): number {
   const glass = cell.querySelector('.glass-input') as HTMLElement | null;
   if (glass) return measureIntrinsicWidth(glass);
   return measureIntrinsicWidth(cell);
-}
-
-const secondsBareInput: CSSProperties = {
-  border: 'none',
-  outline: 'none',
-  background: 'transparent',
-  padding: 0,
-  color: 'var(--text-main)',
-  font: 'inherit',
-  fontSize: 'inherit',
-  minWidth: 0,
-};
-
-/**
- * Delay/Every: glass shell fills the track; column width comes from text
- * (value + `s`, or placeholder), not the UA input default.
- */
-function SecondsField({
-  value,
-  onChange,
-  placeholder,
-  title,
-  col,
-  disabled = false,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  title: string;
-  col: string;
-  disabled?: boolean;
-}) {
-  const showUnit = value.trim() !== '';
-  // Floor against placeholder and a typical filled "0" so empty tracks stay usable.
-  const inputCh = Math.max(value.length, placeholder.length, 1) + 1;
-  return (
-    <div data-wtb-col={col} style={{ width: '100%', minWidth: 0 }}>
-      <div
-        data-seconds-field
-        className="glass-input"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          width: '100%',
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-          padding: '0.2rem 0.35rem',
-          gap: showUnit ? '0.3rem' : undefined,
-          fontSize: '0.72rem',
-          opacity: disabled ? 0.45 : 1,
-        }}
-      >
-        <input
-          placeholder={placeholder}
-          value={value}
-          disabled={disabled}
-          onChange={e => { if (!disabled) onChange(e.target.value); }}
-          onBlur={() => {
-            if (disabled) return;
-            const next = sanitizeSecondsInput(value);
-            if (next !== value) onChange(next);
-          }}
-          inputMode="numeric"
-          title={title}
-          style={{
-            ...secondsBareInput,
-            flex: '1 1 auto',
-            width: `${inputCh}ch`,
-            minWidth: `${inputCh}ch`,
-            textAlign: 'right',
-          }}
-        />
-        {showUnit && (
-          <span
-            style={{
-              fontSize: '0.72rem',
-              color: 'var(--text-dim)',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-              pointerEvents: 'none',
-            }}
-          >
-            s
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function sameTracks(a: number[] | null, b: number[]): boolean {
@@ -584,7 +592,7 @@ const MAX_STORED_ROWS = 20;
 
 type StoredRow = Pick<
   Row,
-  | 'address' | 'name' | 'dpt' | 'value' | 'delay' | 'every' | 'feedback' | 'readBaseline'
+  | 'address' | 'name' | 'dpt' | 'value' | 'delay' | 'every' | 'respond' | 'feedback' | 'readBaseline'
   | 'statusWatch' | 'statusTelegram' | 'lastSentTelegram' | 'scheduledJobId'
 >;
 
@@ -624,6 +632,7 @@ function loadStoredRows(): Row[] | null {
         value: str(s?.value),
         delay: str(s?.delay),
         every: str(s?.every),
+        respond: s?.respond === true,
         feedback: parseFeedback(s?.feedback),
         readBaseline: typeof s?.readBaseline === 'string' ? s.readBaseline : null,
         statusWatch: parseStatusWatch(s?.statusWatch),
@@ -666,13 +675,28 @@ export function topRowHintMatches(
     && hint.dpt === expectedPanelDpt(dptMain, dptSub);
 }
 
+/** Unique trimmed GAs present in send-panel rows (order of first appearance). */
+export function panelAddressesFromRows(
+  rows: Array<{ address: string }>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of rows) {
+    const address = row.address.trim();
+    if (!address || seen.has(address)) continue;
+    seen.add(address);
+    out.push(address);
+  }
+  return out;
+}
+
 function saveRows(rows: Row[]): void {
   try {
     const stored: StoredRow[] = rows.map(({
-      address, name, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
+      address, name, dpt, value, delay, every, respond, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
       scheduledJobId,
     }) => ({
-      address, name, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
+      address, name, dpt, value, delay, every, respond, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
       scheduledJobId,
     }));
     localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(stored));
@@ -702,6 +726,7 @@ function isPendingJobId(id: string | undefined): boolean {
 export function WriteToBusPanel({
   targets, latestTelegram, dptCatalog = [], onGotoTelegram,
   onTopRowHintChange,
+  onPanelAddressesChange,
   ctrlSendRequest = null,
   onCtrlSendHandled,
   sendPanelCommand = null,
@@ -714,8 +739,14 @@ export function WriteToBusPanel({
   const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
   const [flashRowId, setFlashRowId] = useState<string | null>(null);
   const [flashNonce, setFlashNonce] = useState(0);
-  /** Bumped after ctrl-insert so the top row's WriteControls focus value/write. */
+  /** Bumped so WriteControls focuses value/write (ctrl-insert or DPT pick). */
   const [focusToken, setFocusToken] = useState<number | null>(null);
+  /** Which row should receive the focusToken bump. */
+  const [focusRowId, setFocusRowId] = useState<string | null>(null);
+  const bumpValueFocus = (rowId: string) => {
+    setFocusRowId(rowId);
+    setFocusToken(t => (t ?? 0) + 1);
+  };
   /** Active scheduled job per row id (optimistic pending-* ids until POST returns). */
   const [jobsByRowId, setJobsByRowId] = useState<Record<string, ScheduledSendStatus>>({});
   const [colTracks, setColTracks] = useState<number[] | null>(null);
@@ -725,7 +756,7 @@ export function WriteToBusPanel({
   const [heightDragging, setHeightDragging] = useState(false);
   /** Bump on panel reset so the body grid host remounts and drops orphaned row DOM. */
   const [bodyEpoch, setBodyEpoch] = useState(0);
-  /** Shared horizontal offset for the mid pane (name … read). */
+  /** Shared horizontal offset for the mid pane (name … value). */
   const [midScrollLeft, setMidScrollLeft] = useState(0);
   const [midContentWidth, setMidContentWidth] = useState(0);
   const [midViewportWidth, setMidViewportWidth] = useState(0);
@@ -753,6 +784,8 @@ export function WriteToBusPanel({
   const watchingRef = useRef(false);
   const rowsRef = useRef(rows);
   const jobsByRowIdRef = useRef(jobsByRowId);
+  /** Newest Read per GA, so a job can claim the Read it just sent. */
+  const latestReadByAddressRef = useRef<Map<string, Telegram>>(new Map());
   /** Pre-edit GA/name/dpt per row, captured when the GA field focuses (blur revert). */
   const gaFocusSnapshotRef = useRef<Map<string, { address: string; name: string; dpt: string }>>(new Map());
   /** Pre-edit name per row, captured when the name field focuses (unknown-name revert). */
@@ -814,15 +847,20 @@ export function WriteToBusPanel({
       && j.state === 'running'
       && (j.sends_done ?? 0) > 0,
   );
+  // When any row shows a telegram, every status row reserves the same
+  // date/time/jump and event-type tracks so those values line up.
+  const showEventCols = rows.some(r => {
+    const addr = r.address.trim();
+    const last = GA_RE.test(addr) ? lastValues[addr] : undefined;
+    return visibleStatusTelegram(r, jobsByRowId[r.id] ?? null, last) != null;
+  });
   const showActionCol = anyJobActive || rows.some(r => rowHasStatusChrome(r, jobsByRowId[r.id]));
   // Action track width follows panel content: Cancel-wide only while some row
   // actually shows Cancel; otherwise Clear-icon narrow.
-  const anyCancelAction = anyJobActive || rows.some(r => r.statusWatch === 'read');
+  const anyCancelAction = anyJobActive;
   const actionWidth = anyCancelAction ? STATUS_ACTION_WIDTH : STATUS_CLEAR_WIDTH;
-  // Header Cancel only when more than one row shows Cancel (same rule as RowStatus).
-  const cancelRowCount = rows.filter(
-    r => isLiveJob(jobsByRowId[r.id]) || r.statusWatch === 'read',
-  ).length;
+  // Header Cancel only when more than one row shows a job Cancel.
+  const cancelRowCount = rows.filter(r => isLiveJob(jobsByRowId[r.id])).length;
   const showCancelAll = cancelRowCount > 1;
 
   const showValueCol = rows.some(r => needsValueColumn(r.dpt || null, parseDptMain(r.dpt)));
@@ -1104,6 +1142,15 @@ export function WriteToBusPanel({
     onTopRowHintChange?.(null);
   }, [onTopRowHintChange]);
 
+  // Every panel GA lights the matching TT send icon (panel open/closed irrelevant).
+  useEffect(() => {
+    onPanelAddressesChange?.(panelAddressesFromRows(rows));
+  }, [rows, onPanelAddressesChange]);
+
+  useEffect(() => () => {
+    onPanelAddressesChange?.([]);
+  }, [onPanelAddressesChange]);
+
   const updateRow = (id: string, patch: Partial<Row>) =>
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
 
@@ -1113,7 +1160,7 @@ export function WriteToBusPanel({
    * update behind an `await` (tests and clicks expect sync row changes).
    */
   const detachRowJob = (id: string): ScheduledSendStatus | undefined => {
-    const owned = jobsByRowId[id];
+    const owned = jobsByRowIdRef.current[id];
     setJobsByRowId(prev => {
       if (!(id in prev)) return prev;
       const next = { ...prev };
@@ -1173,6 +1220,7 @@ export function WriteToBusPanel({
             value: source.value,
             delay: source.delay,
             every: source.every,
+            respond: source.respond,
           }
         : newRow();
       if (index < 0) return [...rs, next];
@@ -1186,6 +1234,8 @@ export function WriteToBusPanel({
   };
 
   const resetRow = (id: string) => {
+    // A live job owns the row fields. Reset stays blocked; delete cancels the job.
+    if (isLiveJob(jobsByRowIdRef.current[id])) return;
     const owned = detachRowJob(id);
     setRows(rs => rs.map(r => (r.id === id ? { ...newRow(), id: r.id } : r)));
     void cancelDetachedJob(id, owned);
@@ -1230,6 +1280,10 @@ export function WriteToBusPanel({
       name: (known?.name ?? name ?? '').toString(),
       dpt: known && known.main != null ? formatDpt(known.main, known.sub) : expectedDpt,
     };
+    if (top && isLiveJob(jobsByRowIdRef.current[top.id]) && (matches || !top.address.trim())) {
+      onCtrlSendHandled?.();
+      return;
+    }
     if (matches && top) {
       resetRow(top.id);
     } else if (top && !top.address.trim()) {
@@ -1237,21 +1291,22 @@ export function WriteToBusPanel({
       setRows(rs => rs.map(r => (r.id === top.id ? { ...r, ...resolved, ...clearStatusPatch() } : r)));
       setFlashRowId(top.id);
       setFlashNonce(n => n + 1);
-      setFocusToken(t => (t ?? 0) + 1);
+      bumpValueFocus(top.id);
       if (trimmed) rememberGa(trimmed);
     } else {
       const next: Row = { ...newRow(), ...resolved };
       setRows(rs => [next, ...rs]);
       setFlashRowId(next.id);
       setFlashNonce(n => n + 1);
-      setFocusToken(t => (t ?? 0) + 1);
+      bumpValueFocus(next.id);
       if (trimmed) rememberGa(trimmed);
     }
     onCtrlSendHandled?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only on request nonce
   }, [ctrlSendRequest?.nonce]);
 
-  const writeRef = useRef<(row: Row, payload: BusPayload) => Promise<void>>(async () => {});
+  const writeRef = useRef<(row: Row, payload: BusPayload, response?: boolean) => Promise<void>>(async () => {});
+  const readRef = useRef<(row: Row) => Promise<void>>(async () => {});
   const cancelJobRef = useRef<(rowId: string) => Promise<void>>(async () => {});
 
   // Popover correspondence: ensure / cancel / write via panel rows.
@@ -1306,7 +1361,19 @@ export function WriteToBusPanel({
         return;
       }
       // Apply draft fields already ensured; write uses current row delay/every.
-      void writeRef.current(row, cmd.payload).finally(() => {
+      void writeRef.current(row, cmd.payload, Boolean(cmd.response)).finally(() => {
+        finish({ rowId: row.id, created: false, matched: true });
+      });
+      return;
+    }
+
+    if (cmd.type === 'readViaRow') {
+      const row = rowsRef.current.find(r => r.id === cmd.rowId);
+      if (!row) {
+        finish({ rowId: null, created: false, matched: false });
+        return;
+      }
+      void readRef.current(row).finally(() => {
         finish({ rowId: row.id, created: false, matched: true });
       });
     }
@@ -1462,15 +1529,32 @@ export function WriteToBusPanel({
   if (latestTelegram !== seenLatest) {
     setSeenLatest(latestTelegram);
     if (latestTelegram) {
+      if (isReadTelegram(latestTelegram)) {
+        latestReadByAddressRef.current.set(latestTelegram.target_address.trim(), latestTelegram);
+      }
       const addr = latestTelegram.target_address;
       const kind = latestTelegram.simplified_type;
       setRows(rs => {
         let changed = false;
         const next = rs.map(r => {
           if (r.address.trim() !== addr) return r;
-          // Job binding is per owning row — never share send/wait across rows.
-          const jobOwns = isLiveJob(jobsByRowId[r.id]);
-          const wantWrite = r.statusWatch === 'write' || jobOwns;
+          // A live job only keeps the telegram it put on the bus.
+          const job = jobsByRowId[r.id];
+          if (isLiveJob(job) && job) {
+            if (job.read) {
+              // Only the row that sent this read adopts it. Color follows timestamps.
+              if (isReadTelegram(latestTelegram) && r.claimOwnRead) {
+                changed = true;
+                return { ...r, statusTelegram: latestTelegram, claimOwnRead: false };
+              }
+              return r;
+            }
+            if (!telegramFromRowJob(job, latestTelegram)) return r;
+            changed = true;
+            return { ...r, statusTelegram: latestTelegram, lastSentTelegram: latestTelegram };
+          }
+          // One-shot binding is per owning row — never share send/wait across rows.
+          const wantWrite = r.statusWatch === 'write';
           const wantRead = r.statusWatch === 'read';
           const isWrite = kind === 'Write' || latestTelegram.telegram_type?.includes('Write');
           const isRead = kind === 'Read' || latestTelegram.telegram_type?.includes('Read');
@@ -1492,8 +1576,9 @@ export function WriteToBusPanel({
             return { ...r, statusTelegram: latestTelegram };
           }
           if (wantRead && isResponse) {
-            // Only Response ends the wait (even if a Read request already filled Status).
             changed = true;
+            // A one-shot read ends on the first Response. A live read job
+            // never reaches here: it only binds the Read it sent itself.
             return {
               ...r,
               statusTelegram: latestTelegram,
@@ -1509,19 +1594,20 @@ export function WriteToBusPanel({
     }
   }
 
-  const write = async (row: Row, payload: BusPayload) => {
+  const write = async (row: Row, payload: BusPayload, response?: boolean) => {
+    if (isLiveJob(jobsByRowIdRef.current[row.id])) return;
+    const asResponse = response ?? row.respond;
     const delaySeconds = parseFloat(row.delay) || 0;
     const intervalSeconds = parseFloat(row.every) || 0;
     const scheduled = delaySeconds > 0 || intervalSeconds > 0;
-    // Keep lastSentTelegram. For delayed send, also keep statusTelegram so a prior
-    // Read (time+jump) stays visible beside the countdown until the Write binds.
-    // Display suppresses lastSentTelegram while busy so it cannot flash before an error.
+    // Keep lastSentTelegram. The status jump stays empty until this send's own
+    // telegram arrives, so a prior Read or another GA event cannot stand in for it.
     updateRow(row.id, {
       busy: true,
       feedback: null,
       readBaseline: null,
       statusWatch: null,
-      ...(scheduled ? {} : { statusTelegram: null }),
+      statusTelegram: null,
     });
     try {
       if (scheduled) {
@@ -1529,36 +1615,32 @@ export function WriteToBusPanel({
           failRow(row.id, 'Interval must be at least 1 second');
           return;
         }
-        // Same-row re-click cancels and restarts that row's job only.
-        const existing = jobsByRowId[row.id];
-        if (isLiveJob(existing) && existing.id && !isPendingJobId(existing.id)) {
-          try { await cancelScheduledSend(existing.id); } catch { /* start below */ }
-        }
         const nextAt = delaySeconds > 0
           ? new Date(Date.now() + delaySeconds * 1000).toISOString()
           : null;
         // Arm countdown/count before the network round-trip so Write feels instant.
         watchingRef.current = true;
         updateRow(row.id, { scheduledJobId: null });
-        setJobsByRowId(prev => ({
-          ...prev,
-          [row.id]: {
-            state: delaySeconds > 0 ? 'waiting' : 'running',
-            id: `pending-${row.id}`,
-            address: row.address.trim(),
-            delay_seconds: delaySeconds > 0 ? delaySeconds : undefined,
-            interval_seconds: intervalSeconds > 0 ? intervalSeconds : null,
-            sends_done: 0,
-            next_send_at: nextAt,
-          },
-        }));
-        const started = await startScheduled(row, payload, delaySeconds, intervalSeconds, nextAt);
+        const optimistic: ScheduledSendStatus = {
+          state: delaySeconds > 0 ? 'waiting' : 'running',
+          id: `pending-${row.id}`,
+          address: row.address.trim(),
+          payload,
+          response: asResponse,
+          delay_seconds: delaySeconds > 0 ? delaySeconds : undefined,
+          interval_seconds: intervalSeconds > 0 ? intervalSeconds : null,
+          sends_done: 0,
+          next_send_at: nextAt,
+        };
+        jobsByRowIdRef.current = { ...jobsByRowIdRef.current, [row.id]: optimistic };
+        setJobsByRowId(prev => ({ ...prev, [row.id]: optimistic }));
+        const started = await startScheduled(row, payload, delaySeconds, intervalSeconds, nextAt, false, asResponse);
         if (started) updateRow(row.id, { statusWatch: 'write' });
       } else {
-        await sendTelegram(row.address.trim(), payload, row.dpt.trim() || undefined);
+        await sendTelegram(row.address.trim(), payload, row.dpt.trim() || undefined, asResponse);
         const shown = describeBusPayload(payload, row.dpt) || row.value || '(raw)';
         updateRow(row.id, {
-          feedback: { ok: true, msg: `Sent ${shown} to ${row.address.trim()}` },
+          feedback: { ok: true, msg: `${asResponse ? 'Response' : 'Sent'} ${shown} to ${row.address.trim()}` },
           statusWatch: 'write',
           statusTelegram: null,
         });
@@ -1572,18 +1654,50 @@ export function WriteToBusPanel({
   };
 
   const read = async (row: Row) => {
+    if (isLiveJob(jobsByRowIdRef.current[row.id])) return;
+    const delaySeconds = parseFloat(row.delay) || 0;
+    const intervalSeconds = parseFloat(row.every) || 0;
+    const scheduled = delaySeconds > 0 || intervalSeconds > 0;
     // Arm statusWatch before the API returns so a fast bus Read still binds.
     updateRow(row.id, {
       busy: true,
-      ...clearStatusPatch(),
+      feedback: null,
       readBaseline: lastValues[row.address.trim()]?.timestamp ?? '',
       statusWatch: 'read',
+      statusTelegram: null,
+      claimOwnRead: true,
     });
     try {
-      await readTelegram(row.address.trim());
-      updateRow(row.id, {
-        feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` },
-      });
+      if (scheduled) {
+        if (intervalSeconds > 0 && intervalSeconds < 1) {
+          failRow(row.id, 'Interval must be at least 1 second');
+          return;
+        }
+        const nextAt = delaySeconds > 0
+          ? new Date(Date.now() + delaySeconds * 1000).toISOString()
+          : null;
+        watchingRef.current = true;
+        updateRow(row.id, { scheduledJobId: null });
+        const optimistic: ScheduledSendStatus = {
+          state: delaySeconds > 0 ? 'waiting' : 'running',
+          id: `pending-${row.id}`,
+          address: row.address.trim(),
+          read: true,
+          delay_seconds: delaySeconds > 0 ? delaySeconds : undefined,
+          interval_seconds: intervalSeconds > 0 ? intervalSeconds : null,
+          sends_done: 0,
+          next_send_at: nextAt,
+        };
+        jobsByRowIdRef.current = { ...jobsByRowIdRef.current, [row.id]: optimistic };
+        setJobsByRowId(prev => ({ ...prev, [row.id]: optimistic }));
+        const started = await startScheduled(row, null, delaySeconds, intervalSeconds, nextAt, true);
+        if (!started) updateRow(row.id, { statusWatch: null, readBaseline: null });
+      } else {
+        await readTelegram(row.address.trim());
+        updateRow(row.id, {
+          feedback: { ok: true, msg: `Read request sent to ${row.address.trim()}` },
+        });
+      }
       rememberGa(row.address);
     } catch (err) {
       failRow(row.id, err instanceof Error ? err.message : 'Request failed');
@@ -1592,6 +1706,7 @@ export function WriteToBusPanel({
     }
   };
   writeRef.current = write;
+  readRef.current = read;
   // cancelJob is a nested function declaration (hoisted) below the return.
   cancelJobRef.current = cancelJob;
 
@@ -1631,7 +1746,7 @@ export function WriteToBusPanel({
           overflowY: 'hidden',
           padding: '0.45rem 0 0 0.85rem',
           boxSizing: 'border-box',
-          // Mid-pane horizontal offset (name … read).
+          // Mid-pane horizontal offset (name … value).
           ['--wtb-mid-x' as string]: `-${midScrollLeftApplied}px`,
         }}
       >
@@ -1686,12 +1801,14 @@ export function WriteToBusPanel({
                 minWidth: 0,
               }}
             >
+              <div aria-hidden />
+              <div aria-hidden />
               <div data-wtb-col="10" style={{ minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
                 {/* Always mounted so show/hide never reflows status / header tracks. */}
                 <button
                   type="button"
                   onClick={() => { void cancelAllRows(); }}
-                  title={showCancelAll ? 'Cancel all jobs and read waits' : undefined}
+                  title={showCancelAll ? 'Cancel all jobs' : undefined}
                   aria-label="Cancel all"
                   aria-hidden={showCancelAll ? undefined : true}
                   tabIndex={showCancelAll ? undefined : -1}
@@ -1787,29 +1904,10 @@ export function WriteToBusPanel({
           const overridden = projectDpt !== '' && row.dpt.trim() !== projectDpt;
           const addressValid = GA_RE.test(row.address.trim());
           const lastTelegram = addressValid ? lastValues[row.address.trim()] : undefined;
-          // Stay "waiting" until a Response clears statusWatch (or Cancel).
-          const awaiting = row.statusWatch === 'read';
-          // Leftover Read feedback after Cancel — keep unanswered Read chrome,
-          // never fall back to lastSentTelegram Write.
-          const unansweredRead = awaiting || isReadRequestFeedback(row.feedback);
           const scheduledDisabled = row.busy || !addressValid;
           const rowJob = jobsByRowId[row.id] ?? null;
           const showJob = isLiveJob(rowJob);
-          // Errors own the status body. While a send is in flight, suppress the
-          // last-Write fallback so time/jump cannot flash before success or error.
-          // Otherwise: bound telegram, else (when not mid-read / leftover Read
-          // feedback) this row's last Write, else idle GA Write fallback.
-          const statusTelegram = (row.feedback && !row.feedback.ok) || row.busy
-            ? null
-            : (row.statusTelegram
-              ?? (!unansweredRead ? row.lastSentTelegram : null)
-              ?? (!showJob
-                && !unansweredRead
-                && row.statusWatch === 'write'
-                && lastTelegram
-                && isWriteTelegram(lastTelegram)
-                ? lastTelegram
-                : null));
+          const statusTelegram = visibleStatusTelegram(row, showJob ? rowJob : null, lastTelegram);
           // When the project names a DPT main, the hint stays within that main —
           // telegram length is fixed (5.001 → 5.010 ok, not 9.001). With no
           // project DPT the user may pick any known type.
@@ -1830,7 +1928,31 @@ export function WriteToBusPanel({
               }
             : undefined;
           return (
-            <Fragment key={row.id}>
+            <WriteControls
+              key={row.id}
+              dptMain={dptMain}
+              dptKey={row.dpt || null}
+              address={row.address || null}
+              value={row.value}
+              onValueChange={v => updateRow(row.id, { value: v })}
+              onWrite={payload => void write(row, payload)}
+              onError={msg => failRow(row.id, msg)}
+              disabled={scheduledDisabled || showJob}
+              sendLocked={showJob}
+              activeJob={showJob ? rowJob : null}
+              unit={
+                (row.dpt.trim()
+                  ? dptUnit(row.dpt.trim(), dptOptions.find(o => o.key === row.dpt.trim())?.name || null)
+                  : '')
+                || lastTelegram?.unit
+                || ''
+              }
+              valueColProps={{ 'data-wtb-col': '7', style: { width: '100%', minWidth: 0, overflow: 'hidden' } }}
+              sendColProps={{ 'data-wtb-col': '8' }}
+              reserveValueSlot={showValueCol}
+              focusToken={focusRowId === row.id ? focusToken : null}
+              layout={(valueSlot, sendSlot) => (
+            <>
               <div
                 data-wtb-row-id={row.id}
                 aria-hidden
@@ -1861,6 +1983,8 @@ export function WriteToBusPanel({
                   recentAddresses={recentGas}
                   placeholder="GA"
                   width="100%"
+                  disabled={showJob}
+                  title={showJob ? 'Group address (locked while this job is running)' : undefined}
                 />
               </div>
               <div
@@ -1892,6 +2016,8 @@ export function WriteToBusPanel({
                       recentAddresses={recentGas}
                       placeholder="Group name"
                       width="100%"
+                      disabled={showJob}
+                      title={showJob ? 'Group name (locked while this job is running)' : undefined}
                     />
                   </div>
                   <div data-wtb-col="2">
@@ -1908,48 +2034,8 @@ export function WriteToBusPanel({
                       onJump={() => lastTelegram && onGotoTelegram?.(lastTelegram)}
                     />
                   </div>
-                  <div data-wtb-col="4" style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
-                    <DptField
-                      value={row.dpt}
-                      options={allowedDpts}
-                      disabled={!addressValid}
-                      overridden={overridden}
-                      title={
-                        !addressValid
-                          ? 'Enter a group address first'
-                          : overridden
-                            ? `Overriding project DPT ${projectDpt}`
-                            : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
-                      }
-                      onChange={next => onDptChange(row.id, next)}
-                      onReset={() => updateRow(row.id, { dpt: projectDpt, value: '', ...clearStatusPatch() })}
-                      resetTitle={`Reset to project DPT ${projectDpt}`}
-                    />
-                  </div>
-                  {/* WriteControls emits value + send siblings for columns 5 and 6. */}
-                  <WriteControls
-                    dptMain={dptMain}
-                    dptKey={row.dpt || null}
-                    address={row.address || null}
-                    value={row.value}
-                    onValueChange={v => updateRow(row.id, { value: v })}
-                    onWrite={payload => void write(row, payload)}
-                    onError={msg => failRow(row.id, msg)}
-                    disabled={scheduledDisabled}
-                    unit={
-                      (row.dpt.trim()
-                        ? dptUnit(row.dpt.trim(), dptOptions.find(o => o.key === row.dpt.trim())?.name || null)
-                        : '')
-                      || lastTelegram?.unit
-                      || ''
-                    }
-                    valueColProps={{ 'data-wtb-col': '5', style: { width: '100%', minWidth: 0, overflow: 'hidden' } }}
-                    sendColProps={{ 'data-wtb-col': '6' }}
-                    reserveValueSlot={showValueCol}
-                    focusToken={rowIndex === 0 ? focusToken : null}
-                  />
                   <SecondsField
-                    col="7"
+                    col="4"
                     placeholder={delayPlaceholder}
                     value={row.delay}
                     onChange={v => updateRow(row.id, { delay: v })}
@@ -1963,7 +2049,7 @@ export function WriteToBusPanel({
                     disabled={showJob || !addressValid}
                   />
                   <SecondsField
-                    col="8"
+                    col="5"
                     placeholder={everyPlaceholder}
                     value={row.every}
                     onChange={v => updateRow(row.id, { every: v })}
@@ -1976,12 +2062,28 @@ export function WriteToBusPanel({
                     }
                     disabled={showJob || !addressValid}
                   />
-                  <RetainFocusReadButton
-                    data-wtb-col="9"
-                    disabled={row.busy || !addressValid}
-                    onRead={() => void read(row)}
-                    title="Send a GroupValueRead; the response shows up as this row's last value"
-                  />
+                  <div data-wtb-col="6" style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
+                    <DptField
+                      value={row.dpt}
+                      options={allowedDpts}
+                      disabled={!addressValid || showJob}
+                      overridden={overridden}
+                      title={
+                        showJob
+                          ? 'Datapoint type (locked while this job is running)'
+                          : !addressValid
+                            ? 'Enter a group address first'
+                            : overridden
+                              ? `Overriding project DPT ${projectDpt}`
+                              : 'Datapoint type, e.g. 5.010 (defaults to the project DPT)'
+                      }
+                      onChange={next => onDptChange(row.id, next)}
+                      onReset={() => updateRow(row.id, { dpt: projectDpt, value: '', ...clearStatusPatch() })}
+                      resetValue={projectDpt}
+                      resetTitle={`Reset to project DPT ${projectDpt}`}
+                    />
+                  </div>
+                  {valueSlot}
                 </div>
               </div>
               <div
@@ -1997,13 +2099,33 @@ export function WriteToBusPanel({
                   ...stickyFirst,
                 }}
               >
+                {sendSlot}
+                <RetainFocusReadButton
+                  data-wtb-col="9"
+                  address={row.address}
+                  muted={showJob && !rowJob?.read}
+                  respond={row.respond}
+                  disabled={row.busy || !addressValid || showJob}
+                  onToggle={() => updateRow(row.id, { respond: !row.respond })}
+                  onRead={() => {
+                    if (row.respond) return;
+                    void read(row);
+                  }}
+                  title={
+                    showJob
+                      ? `${row.respond ? 'Response' : 'Read'} (locked while this job is running)`
+                      : row.respond
+                        ? 'Write buttons send a GroupValueResponse · ctrl/cmd-click to switch to Read'
+                        : "Send a GroupValueRead; the response shows up as this row's last value · ctrl/cmd-click so Write buttons send a Response"
+                  }
+                />
                 <div data-wtb-col="10" style={{ minWidth: 0 }}>
                   <SendJobStatusField
                     feedback={row.feedback}
-                    awaiting={awaiting}
                     job={showJob ? rowJob : null}
                     showCountdownCol={showCountdownCol}
                     showSendCountCol={showSendCountCol}
+                    showEventCols={showEventCols}
                     showActionCol={showActionCol}
                     actionWidth={actionWidth}
                     statusTelegram={statusTelegram}
@@ -2014,11 +2136,6 @@ export function WriteToBusPanel({
                     onCancel={() => {
                       void cancelJob(row.id);
                     }}
-                    onStopAwait={() => {
-                      // End the wait only — keep Read feedback / Read telegram so
-                      // the user still sees that the GA did not answer.
-                      updateRow(row.id, { readBaseline: null, statusWatch: null });
-                    }}
                     onClear={() => {
                       updateRow(row.id, clearAllStatusPatch());
                     }}
@@ -2028,19 +2145,17 @@ export function WriteToBusPanel({
                 <button
                   data-wtb-col="11"
                   className="icon-button"
-                  onClick={(e: ReactMouseEvent<HTMLButtonElement>) => {
-                    if (e.ctrlKey || e.metaKey) {
-                      resetRow(row.id);
-                      return;
-                    }
+                  onClick={() => {
                     if (rows.length === 1) return;
                     removeRow(row.id);
                   }}
                   aria-disabled={rows.length === 1 ? true : undefined}
                   title={
                     rows.length === 1
-                      ? 'At least one row is required · ctrl/cmd-click to reset'
-                      : 'Delete this row · ctrl/cmd-click to reset'
+                      ? 'At least one row is required'
+                      : showJob
+                        ? 'Delete this row and cancel its job'
+                        : 'Delete this row'
                   }
                   style={{
                     color: rows.length === 1
@@ -2079,12 +2194,14 @@ export function WriteToBusPanel({
                   <Plus size={15} strokeWidth={2.5} />
                 </button>
               </div>
-            </Fragment>
+            </>
+              )}
+            />
           );
         })}
       </div>
         </div>
-        {/* H-scrollbar only under the mid pane (name … read). */}
+        {/* H-scrollbar only under the mid pane (name … value). */}
         <div
           style={{
             display: 'flex',
@@ -2194,14 +2311,23 @@ export function WriteToBusPanel({
     delaySeconds: number,
     intervalSeconds: number,
     optimisticNextAt: string | null,
+    read = false,
+    response = false,
   ): Promise<boolean> {
     // Caller already armed an optimistic job + validated delay/interval.
     // Poll only after the server accepts; an early idle poll would clear it.
     try {
-      const status = await startScheduledSend(row.address.trim(), payload, row.dpt.trim() || undefined, {
-        delaySeconds: delaySeconds > 0 ? delaySeconds : undefined,
-        intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
-      });
+      const status = await startScheduledSend(
+        row.address.trim(),
+        read ? undefined : payload,
+        read ? undefined : (row.dpt.trim() || undefined),
+        {
+          delaySeconds: delaySeconds > 0 ? delaySeconds : undefined,
+          intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
+          read,
+          response,
+        },
+      );
       // Row removed/reset/cancelled while POST was in flight — drop the new server job.
       const abandoned = cancelWhenStartedRef.current.has(row.id)
         || !rowsRef.current.some(r => r.id === row.id);
@@ -2224,6 +2350,9 @@ export function WriteToBusPanel({
         ...prev,
         [row.id]: {
           ...status,
+          read: status.read ?? read,
+          response: status.response ?? (read ? false : response),
+          payload: status.payload !== undefined ? status.payload : (read ? undefined : payload),
           next_send_at: status.next_send_at ?? optimisticNextAt,
           delay_seconds: status.delay_seconds ?? (delaySeconds > 0 ? delaySeconds : undefined),
           interval_seconds: status.interval_seconds ?? (intervalSeconds > 0 ? intervalSeconds : null),
@@ -2274,6 +2403,9 @@ export function WriteToBusPanel({
           if (live) {
             next[rowId] = {
               ...live,
+              payload: live.payload !== undefined ? live.payload : job.payload,
+              response: live.response ?? job.response,
+              read: live.read ?? job.read,
               next_send_at: live.next_send_at ?? job.next_send_at ?? null,
             };
             used.add(live.id);
@@ -2289,6 +2421,25 @@ export function WriteToBusPanel({
         }
         return next;
       });
+      const claimed = Object.entries(jobsByRowIdRef.current).filter(([rowId, job]) => {
+        if (!job.read || isPendingJobId(job.id)) return false;
+        const live = job.id ? byId.get(job.id) : undefined;
+        return Boolean(live && (live.sends_done ?? 0) > (job.sends_done ?? 0) && rowId);
+      }).map(([rowId]) => rowId);
+      if (claimed.length > 0) {
+        setRows(rs => rs.map(r => {
+          if (!claimed.includes(r.id)) return r;
+          const seen = latestReadByAddressRef.current.get(r.address.trim());
+          const currentMs = r.statusTelegram && isReadTelegram(r.statusTelegram)
+            ? Date.parse(r.statusTelegram.timestamp)
+            : Number.NEGATIVE_INFINITY;
+          const seenMs = seen ? Date.parse(seen.timestamp) : NaN;
+          if (seen && seenMs > currentMs) {
+            return { ...r, statusTelegram: seen, claimOwnRead: false };
+          }
+          return { ...r, claimOwnRead: true };
+        }));
+      }
       // Drop stale bindings when the server job is gone (and not mid-POST).
       setRows(rs => {
         let changed = false;
@@ -2354,9 +2505,9 @@ export function WriteToBusPanel({
     setRows(rs => rs.map(r => {
       if (r.id !== rowId) return r;
       const base = { ...r, scheduledJobId: null as string | null };
-      // Preserve unanswered Read chrome (and end the wait if still armed).
+      // Keep the Read binding so a later Response can still replace the event word.
       if (hasUnansweredRead(r)) {
-        return { ...base, readBaseline: null, statusWatch: null };
+        return base;
       }
       const tg = r.lastSentTelegram ?? r.statusTelegram;
       if (!isWriteTelegram(tg) && !(cancelled.sends_done && cancelled.sends_done > 0)) return base;
@@ -2393,10 +2544,6 @@ export function WriteToBusPanel({
     setRows(rs => rs.map(r => {
       const cancelled = snapshot[r.id];
       let next: Row = { ...r, scheduledJobId: null };
-      if (r.statusWatch === 'read') {
-        // End wait; keep Read feedback / telegram (no Write restore).
-        next = { ...next, readBaseline: null, statusWatch: null };
-      }
       if (isLiveJob(cancelled) && !hasUnansweredRead(next)) {
         const tg = next.lastSentTelegram ?? next.statusTelegram;
         const addr = (cancelled.address ?? r.address).trim();
@@ -2448,6 +2595,10 @@ export function WriteToBusPanel({
  * Text follows the row's effective DPT (same vocabulary as the send buttons).
  * Click the value to toggle decoded ↔ raw hex. Date/time/kind live in Event.
  */
+function busPulseDir(direction: string | null | undefined): 'Incoming' | 'Outgoing' | null {
+  return direction === 'Incoming' || direction === 'Outgoing' ? direction : null;
+}
+
 function LastValue({ telegram, dpt }: { telegram: Telegram | undefined; dpt: string }) {
   const hasValue = telegram != null && telegram.simplified_type !== 'Read';
   if (!hasValue) return <span aria-hidden style={{ display: 'inline-block', height: 18 }} />;
@@ -2456,25 +2607,17 @@ function LastValue({ telegram, dpt }: { telegram: Telegram | undefined; dpt: str
       className="wtb-last-value"
       title={`Last telegram on this group address: ${telegramEventType(telegram)} from ${telegram.source_address}${telegram.source_name ? ` (${telegram.source_name})` : ''}, ${new Date(telegram.timestamp).toLocaleString()}`}
     >
-      {/* Remounting only the flash restarts the highlight without resetting decoded/raw. */}
-      <span key={telegram.timestamp} className="wtb-last-value-flash" aria-hidden />
       <span style={{ color: 'var(--text-dim)' }}>Last value:</span>
-      <BusValueText value={telegram} dpt={dpt} />
+      <BusValueText
+        value={telegram}
+        dpt={dpt}
+        pulse={busPulseDir(telegram.direction)}
+        pulseKey={telegram.timestamp}
+      />
       <style>{`
         .wtb-last-value {
-          position: relative;
           display: inline-flex; align-items: baseline; gap: 0.35rem;
           font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 4px; white-space: nowrap;
-        }
-        .wtb-last-value-flash {
-          position: absolute; inset: 0; border-radius: inherit;
-          pointer-events: none; z-index: 0;
-          animation: wtb-last-value-flash 1.6s ease-out;
-        }
-        .wtb-last-value > :not(.wtb-last-value-flash) { position: relative; z-index: 1; }
-        @keyframes wtb-last-value-flash {
-          from { background: rgba(99, 102, 241, 0.35); }
-          to { background: transparent; }
         }
       `}</style>
     </span>
@@ -2491,6 +2634,7 @@ function EventCell({
   canJump: boolean;
   onJump: () => void;
 }) {
+  const readAnswered = useReadAnswered(telegram);
   if (!telegram) {
     return <TelegramWhenJump empty reserveJump />;
   }
@@ -2498,6 +2642,7 @@ function EventCell({
     <TelegramWhenJump
       timestamp={telegram.timestamp}
       eventType={telegramEventType(telegram)}
+              readAnswered={readAnswered}
       onJump={canJump ? onJump : undefined}
       reserveJump={!canJump}
       style={{ width: '100%' }}
@@ -2542,17 +2687,17 @@ function formatGaLabel(address: string | undefined, name: string | undefined): s
 }
 
 /**
- * Status shell: icon | [countdown?] | [count?] | event(when+jump+type) | [Cancel/Clear?].
- * Countdown/count/action columns are panel-wide so rows stay aligned; values
- * remain per-row. Tooltips stay static (no tip flicker).
+ * Status shell: left group (icon, countdown) and a right-packed group
+ * (send count, event, Cancel/Clear). Countdown/count columns stay panel-wide
+ * so empty slots keep row height; values remain per-row. Tooltips stay static.
  */
 /** Panel / popover shared status shell (countdown, send count, event, Cancel). */
 export function SendJobStatusField({
   feedback,
-  awaiting,
   job,
   showCountdownCol,
   showSendCountCol,
+  showEventCols = false,
   showActionCol,
   actionWidth,
   statusTelegram,
@@ -2561,15 +2706,15 @@ export function SendJobStatusField({
   value,
   dpt,
   onCancel,
-  onStopAwait,
   onClear,
   onJump,
 }: {
   feedback: { ok: boolean; msg: string } | null;
-  awaiting: boolean;
   job: ScheduledSendStatus | null;
   showCountdownCol: boolean;
   showSendCountCol: boolean;
+  /** Same date/time/jump and event-type tracks on every row that shows a telegram. */
+  showEventCols?: boolean;
   showActionCol: boolean;
   /** Panel-wide Cancel or Clear track width. */
   actionWidth: string;
@@ -2579,10 +2724,10 @@ export function SendJobStatusField({
   value: string;
   dpt: string;
   onCancel: () => void;
-  onStopAwait: () => void;
   onClear: () => void;
   onJump: () => void;
 }) {
+  const historyAnswered = useReadAnswered(statusTelegram);
   const jobLive = job != null && (job.state === 'waiting' || job.state === 'running');
   const jobWaiting = job != null && job.state === 'waiting';
   const jobCyclic = jobLive && Boolean(job.interval_seconds);
@@ -2595,37 +2740,12 @@ export function SendJobStatusField({
     statusTelegram
     && (statusTelegram.simplified_type === 'Write' || statusTelegram.telegram_type?.includes('Write')),
   );
-  const isResponseTg = Boolean(
-    statusTelegram
-    && (
-      statusTelegram.simplified_type === 'Response'
-      || statusTelegram.telegram_type?.includes('Response')
-    ),
-  );
-  const isReadTg = Boolean(
-    statusTelegram
-    && (
-      statusTelegram.simplified_type === 'Read'
-      || (
-        Boolean(statusTelegram.telegram_type?.includes('Read'))
-        && !statusTelegram.telegram_type?.includes('Response')
-      )
-    ),
-  );
-  // Orange Radio while Status shows Read / pending wait; green once Status shows Response.
-  const pendingReadIcon = awaiting || isReadRequestFeedback || isReadTg;
   const ga = formatGaLabel(address || job?.address, groupName);
   const writtenValue = statusTelegram
     ? telegramValue(statusTelegram, value, dpt)
     : (value ?? '').trim();
 
-  // Job metric stays visible even while awaiting a Read.
-  // Await owns the waiting icon/tooltip; Cancel ends wait and job together.
   const tooltip = (() => {
-    // Pending Read (no Response yet): same tip for live wait and leftover feedback.
-    if (awaiting || isReadRequestFeedback) {
-      return `read request sent to ${ga} without response`;
-    }
     if (jobLive) return describeJob(job, groupName);
     if (feedback && !feedback.ok) return feedback.msg;
     if (isWriteTg || writtenOk || sentOk) {
@@ -2648,15 +2768,9 @@ export function SendJobStatusField({
   let icon: ReactNode = null;
   if (feedback && !feedback.ok) {
     icon = <AlertTriangle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />;
-  } else if (pendingReadIcon) {
-    icon = <Radio size={14} style={{ color: 'var(--warning)', flexShrink: 0 }} />;
-  } else if (isResponseTg) {
-    icon = <Radio size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />;
   } else if (jobLive) {
     icon = <Timer size={14} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />;
-  } else if (sentOk || writtenOk || isWriteTg) {
-    icon = <Send size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />;
-  } else if (feedback?.ok) {
+  } else if (feedback?.ok && !isReadRequestFeedback && !sentOk && !writtenOk) {
     icon = <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />;
   }
 
@@ -2665,9 +2779,9 @@ export function SendJobStatusField({
     showSendCountCol && jobCyclic && !jobWaiting && (job.sends_done ?? 0) > 0,
   );
   const hasContent = Boolean(
-    icon || statusTelegram || showCountdown || showSendCount || awaiting || feedback || jobLive,
+    icon || statusTelegram || showCountdown || showSendCount || feedback || jobLive,
   );
-  const showCancel = jobLive || awaiting;
+  const showCancel = jobLive;
 
   const metricStyle: CSSProperties = {
     display: 'inline-flex',
@@ -2702,12 +2816,7 @@ export function SendJobStatusField({
         <button
           key="status-cancel"
           type="button"
-          // Job cancel also ends a concurrent Read-wait (keeps unanswered Read).
-          // Read-only Cancel goes through onStopAwait.
-          onClick={() => {
-            if (jobLive) onCancel();
-            else if (awaiting) onStopAwait();
-          }}
+          onClick={() => onCancel()}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -2756,13 +2865,7 @@ export function SendJobStatusField({
     </div>
   ) : null;
 
-  const gridCols = [
-    'auto',
-    ...(showCountdownCol ? ['auto'] : []),
-    ...(showSendCountCol ? ['auto'] : []),
-    'minmax(0, 1fr)',
-    ...(showActionCol ? ['auto'] : []),
-  ].join(' ');
+  const errorText = Boolean(feedback && !feedback.ok && !statusTelegram);
 
   return (
     <div
@@ -2770,11 +2873,9 @@ export function SendJobStatusField({
       title={tooltip || undefined}
       aria-label={tooltip || undefined}
       style={{
-        display: 'grid',
-        // icon | [countdown?] | [count?] | event(when+jump+type) | [Cancel/Clear?]
-        gridTemplateColumns: gridCols,
+        display: 'flex',
         alignItems: 'center',
-        columnGap: '0.55rem',
+        gap: '0.55rem',
         width: '100%',
         minWidth: !showActionCol
           ? STATUS_SHELL_MIN_WIDTH_COMPACT
@@ -2787,95 +2888,180 @@ export function SendJobStatusField({
         fontSize: '0.78rem',
         fontWeight: 600,
         lineHeight: 1.2,
-        minHeight: 'calc(0.7rem + 2px + max(14px, 1.2em))',
+        height: STATUS_SHELL_HEIGHT,
+        minHeight: STATUS_SHELL_HEIGHT,
         background: 'transparent',
         border: '1px solid var(--border-color)',
         borderRadius: 6,
         overflow: 'hidden',
       }}
     >
-      <span
+      <div
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          width: 14,
-          height: 14,
+          gap: '0.55rem',
           flexShrink: 0,
-          lineHeight: 0,
         }}
       >
-        {icon ?? <span aria-hidden style={{ display: 'inline-block', width: 14, height: 14 }} />}
-      </span>
-      {showCountdownCol ? (
         <span
-          data-status-metric="countdown"
-          style={{ ...metricStyle, justifyContent: 'flex-end' }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 14,
+            height: 14,
+            flexShrink: 0,
+            lineHeight: 0,
+          }}
         >
-          {showCountdown ? (
-            <span style={{ color: 'var(--warning)' }}>-{formatCountdown(countdown)}</span>
-          ) : (
-            <span aria-hidden>{'\u00a0'}</span>
-          )}
+          {icon ?? <span aria-hidden style={{ display: 'inline-block', width: 14, height: 14 }} />}
         </span>
-      ) : null}
-      {showSendCountCol ? (
-        <span
-          data-status-metric="count"
-          style={{ ...metricStyle, justifyContent: 'flex-start' }}
-        >
-          {showSendCount ? (
-            <span aria-label={`Sends done ${job?.sends_done}`} style={{ color: 'var(--success)' }}>
-              {job!.sends_done}
-            </span>
-          ) : (
-            <span aria-hidden>{'\u00a0'}</span>
-          )}
-        </span>
-      ) : null}
+        {showCountdownCol ? (
+          <span
+            data-status-metric="countdown"
+            style={{ ...metricStyle, justifyContent: 'flex-end' }}
+          >
+            {showCountdown ? (
+              <span style={{ color: 'var(--warning)' }}>-{formatCountdown(countdown)}</span>
+            ) : (
+              <span aria-hidden>{'\u00a0'}</span>
+            )}
+          </span>
+        ) : null}
+      </div>
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '0.35rem',
+          justifyContent: 'flex-end',
+          gap: '0.55rem',
+          marginLeft: 'auto',
+          flex: 1,
           minWidth: 0,
-          overflow: 'hidden',
-          fontSize: '0.72rem',
-          fontWeight: 400,
-          lineHeight: 1,
-          color: 'var(--text-dim)',
-          whiteSpace: 'nowrap',
         }}
       >
-        {statusTelegram ? (
-          <TelegramWhenJump
-            timestamp={statusTelegram.timestamp}
-            eventType={telegramEventType(statusTelegram)}
-            onJump={onJump}
-            jumpLabel="Go to status telegram"
-          />
-        ) : feedback && !feedback.ok ? (
-          // width:0 + minWidth:100% fills the event track for ellipsis without
-          // contributing the full message to intrinsic / max-content width.
-          <span
-            data-status-error
+        {(showSendCountCol || showEventCols) ? (
+          <div
+            data-status-grid
             style={{
-              width: 0,
-              minWidth: '100%',
-              flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              color: 'var(--error)',
+              display: 'grid',
+              gridTemplateColumns: [
+                showSendCountCol ? STATUS_COUNT_TRACK : null,
+                showEventCols ? STATUS_WHEN_TRACK : null,
+                showEventCols ? STATUS_EVENT_TRACK : null,
+              ].filter(Boolean).join(' '),
+              columnGap: '0.55rem',
+              alignItems: 'center',
+              flex: '0 0 auto',
+              minWidth: 0,
+              height: '100%',
+              fontSize: '0.72rem',
+              fontWeight: 400,
+              fontFamily: "'JetBrains Mono', monospace",
+              lineHeight: 1,
+              color: 'var(--text-dim)',
             }}
           >
-            {feedback.msg}
-          </span>
-        ) : (
-          <span aria-hidden style={{ display: 'inline-block', minWidth: '8ch' }}>{'\u00a0'}</span>
-        )}
+            {showSendCountCol ? (
+              <span
+                data-status-metric="count"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' }}
+              >
+                {showSendCount ? (
+                  <span aria-label={`Sends done ${job?.sends_done}`} style={{ color: 'var(--success)' }}>
+                    {job!.sends_done}
+                  </span>
+                ) : (
+                  <span aria-hidden>{'\u00a0'}</span>
+                )}
+              </span>
+            ) : null}
+            {showEventCols && errorText ? (
+              <span
+                data-status-error
+                style={{
+                  gridColumn: 'span 2',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--error)',
+                }}
+              >
+                {feedback!.msg}
+              </span>
+            ) : showEventCols ? (
+              <>
+                <span data-status-metric="when" style={{ minWidth: 0, overflow: 'hidden' }}>
+                  {statusTelegram ? (
+                    <TelegramWhenJump
+                      timestamp={statusTelegram.timestamp}
+                      onJump={onJump}
+                      jumpLabel="Go to status telegram"
+                    />
+                  ) : (
+                    <span aria-hidden>{'\u00a0'}</span>
+                  )}
+                </span>
+                <span data-status-metric="event" style={{ minWidth: 0, overflow: 'hidden' }}>
+                  {statusTelegram && telegramEventType(statusTelegram) ? (
+                    <EventTypeLabel
+                      kind={telegramEventType(statusTelegram)}
+                      answered={historyAnswered}
+                    />
+                  ) : (
+                    <span aria-hidden>{'\u00a0'}</span>
+                  )}
+                </span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {!showEventCols ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '0.35rem',
+              minWidth: 0,
+              // Errors take the leftover of the right group so the ellipsis has a
+              // definite width. Telegram text stays content-sized and packs right.
+              flex: errorText ? '1 1 auto' : '0 1 auto',
+              overflow: 'hidden',
+              height: '100%',
+              fontSize: '0.72rem',
+              fontWeight: 400,
+              lineHeight: 1,
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {feedback && !feedback.ok ? (
+              // width:0 + minWidth:100% fills the event track for ellipsis without
+              // contributing the full message to intrinsic / max-content width.
+              <span
+                data-status-error
+                style={{
+                  width: 0,
+                  minWidth: '100%',
+                  flex: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--error)',
+                }}
+              >
+                {feedback.msg}
+              </span>
+            ) : (
+              <span aria-hidden style={{ display: 'inline-block', minWidth: '8ch' }}>{'\u00a0'}</span>
+            )}
+          </div>
+        ) : null}
+        {actionSlot}
       </div>
-      {actionSlot}
     </div>
   );
 }
@@ -2883,6 +3069,12 @@ export function SendJobStatusField({
 /** Static job tooltip — no ticking countdown or next-send clock (avoids native tip flicker). */
 function describeJob(job: ScheduledSendStatus, groupName?: string): string {
   const ga = formatGaLabel(job.address, groupName);
+  if (job.read) {
+    if (job.state !== 'waiting' && job.interval_seconds) {
+      return `cyclic read of ${ga} every ${job.interval_seconds}s`;
+    }
+    return `delayed read of ${ga}`;
+  }
   if (job.state === 'waiting') {
     return `delayed send to ${ga}`;
   }

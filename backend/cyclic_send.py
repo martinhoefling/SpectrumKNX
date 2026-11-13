@@ -1,9 +1,10 @@
 """Delayed and cyclic send-to-bus jobs (#167).
 
-Multiple jobs may run at once (one per Write-to-bus panel row): each has an
-optional one-shot delay before the first send, then optionally repeats at a
-fixed interval until cancelled. Jobs live in memory only and do not survive
-restarts.
+Multiple jobs may run at once. Each is either a GroupValueWrite/Response or a
+GroupValueRead, with an optional one-shot delay before the first send, then
+optionally repeats at a fixed interval until cancelled. The send panel keeps
+at most one job per row; this module does not. Jobs live in memory only and
+do not survive restarts.
 """
 
 import asyncio
@@ -27,6 +28,7 @@ class SendJob:
     payload: Any = None
     dpt: str | None = None
     response: bool = False
+    read: bool = False
     delay_seconds: float = 0.0
     interval_seconds: float | None = None
     sends_done: int = 0
@@ -44,6 +46,7 @@ class SendJob:
             "payload": self.payload,
             "dpt": self.dpt,
             "response": self.response,
+            "read": self.read,
             "delay_seconds": self.delay_seconds,
             "interval_seconds": self.interval_seconds,
             "sends_done": self.sends_done,
@@ -66,7 +69,10 @@ async def _attempt_send(job: SendJob) -> None:
         job.sends_skipped += 1
         logger.warning(f"Skipping scheduled send to {job.address}: bus not writable")
         return
-    await knx_daemon.send_group_value(job.address, job.payload, job.dpt, job.response)
+    if job.read:
+        await knx_daemon.read_group_value(job.address)
+    else:
+        await knx_daemon.send_group_value(job.address, job.payload, job.dpt, job.response)
     job.sends_done += 1
 
 
@@ -104,6 +110,7 @@ def start_send(
     response: bool,
     delay_seconds: float,
     interval_seconds: float | None,
+    read: bool = False,
 ) -> SendJob:
     """Starts a background delayed/cyclic send. Multiple jobs may run concurrently."""
     job = SendJob(
@@ -111,6 +118,7 @@ def start_send(
         payload=payload,
         dpt=dpt,
         response=response,
+        read=read,
         delay_seconds=delay_seconds,
         interval_seconds=interval_seconds,
     )

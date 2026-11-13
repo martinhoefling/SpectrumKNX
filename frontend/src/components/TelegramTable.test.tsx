@@ -106,6 +106,95 @@ const stripesByKey = (container: HTMLElement): Map<string, string> => {
   return map;
 };
 
+test('a READ row turns success green once a later Response arrives for its GA', () => {
+  const read = makeTelegram({
+    timestamp: '2026-01-01T10:00:00.000Z',
+    simplified_type: 'Read',
+    telegram_type: 'GroupValueRead',
+    target_address: '1/2/3',
+    raw_hex: '0x00',
+  });
+  const { container, rerender } = renderTable([read]);
+  expect(container.querySelector('.tt-type-read')).toBeInTheDocument();
+  expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
+
+  rerender(
+    <TelegramTable
+      telegrams={[
+        makeTelegram({
+          timestamp: '2026-01-01T10:00:01.000Z',
+          simplified_type: 'Response',
+          telegram_type: 'GroupValueResponse',
+          target_address: '1/2/3',
+          raw_hex: '0x01',
+          value_formatted: 'On',
+        }),
+        read,
+      ]}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+  const answered = container.querySelector('.tt-type-read-answered');
+  expect(answered).toBeTruthy();
+  expect(answered?.textContent).toBe('Read');
+  expect(container.querySelector('.tt-type-response')).toBeTruthy();
+});
+
+test('a visible READ follows a response that is only in the read-phase source', () => {
+  const read = makeTelegram({
+    timestamp: '2026-01-01T10:00:00.000Z',
+    simplified_type: 'Read',
+    telegram_type: 'GroupValueRead',
+    target_address: '1/2/3',
+    raw_hex: '0x00',
+  });
+  const response = makeTelegram({
+    timestamp: '2026-01-01T10:00:01.000Z',
+    simplified_type: 'Response',
+    telegram_type: 'GroupValueResponse',
+    target_address: '1/2/3',
+    raw_hex: '0x01',
+    value_formatted: 'On',
+  });
+  const { container, rerender } = renderTable([read]);
+  expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
+
+  rerender(
+    <TelegramTable
+      telegrams={[read]}
+      readPhaseTelegrams={[response, read]}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+  expect(container.querySelector('.tt-type-read-answered')?.textContent).toBe('Read');
+  expect(container.querySelector('.tt-type-response')).not.toBeInTheDocument();
+
+  rerender(
+    <TelegramTable
+      telegrams={[read]}
+      readPhaseTelegrams={[read]}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+    />,
+  );
+  expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
+  expect(container.querySelector('.tt-type-read')).toBeInTheDocument();
+});
+
 test('zebra stripes stay with their telegram when new ones are prepended (#266)', () => {
   const { container, rerender } = renderTable(makeList(6, 5));
   const before = stripesByKey(container);
@@ -2711,9 +2800,13 @@ test('matched/open send icons stay fully opaque under row hover CSS', () => {
     .map(s => s.textContent ?? '')
     .join('\n');
   expect(styleText).toMatch(/\.log-row:hover \.quick-send-btn\[data-send-popover-open\]/);
-  expect(styleText).toMatch(/\.quick-send-btn\[data-send-panel-match\]/);
-  expect(styleText).toMatch(/\.quick-send-btn\[data-send-job-active\]/);
-  expect(styleText).toMatch(/quick-send-outgoing-flash/);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-send-panel-match\][^}]*opacity:\s*1\s*!important/s);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-send-job-active\][^}]*opacity:\s*1\s*!important/s);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-send-job-active\][^}]*color:\s*var\(--tt-outgoing\)/s);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-bus-pulse\][^}]*opacity:\s*1\s*!important/s);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-bus-pulse="Outgoing"\]:hover[^}]*color:\s*var\(--tt-outgoing\)/s);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-bus-pulse="Incoming"\]:hover[^}]*color:\s*var\(--tt-incoming\)/s);
+  expect(styleText).not.toMatch(/quick-send-write-pulse/);
   expect(styleText).toMatch(/\.quick-send-btn:focus[^}]*opacity:\s*1\s*!important/s);
 });
 
@@ -2760,10 +2853,11 @@ test('alt-click on send icon forwards onAltSend', () => {
   expect(onAltSend).toHaveBeenCalledTimes(1);
 });
 
-test('sendPanelTopHint marks matching send icon with data-send-panel-match', () => {
+test('sendPanelAddresses marks matching send icons with data-send-panel-match', () => {
   const telegrams = [
     makeTelegram({ target_address: '1/2/3', dpt_main: 9, dpt_sub: 1 }),
     makeTelegram({ target_address: '4/5/6', dpt_main: 1, dpt_sub: 1 }),
+    makeTelegram({ target_address: '7/8/9', dpt_main: 5, dpt_sub: 1 }),
   ];
   const { container } = render(
     <TelegramTable
@@ -2775,9 +2869,9 @@ test('sendPanelTopHint marks matching send icon with data-send-panel-match', () 
       onQuickFilter={vi.fn()}
       onQuickVisualize={vi.fn()}
       canSend
-      sendPanelTopHint={{ address: '1/2/3', dpt: '9.001' }}
+      sendPanelAddresses={new Set(['1/2/3', '7/8/9'])}
     />,
   );
   const matched = container.querySelectorAll('.quick-send-btn[data-send-panel-match]');
-  expect(matched).toHaveLength(1);
+  expect(matched).toHaveLength(2);
 });

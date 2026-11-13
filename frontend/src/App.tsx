@@ -37,6 +37,7 @@ import {
   pauseModeForListFollow,
   pauseModeForToggle,
   cachePausedForMode,
+  readPhaseRows,
 } from './utils/bufferPauseMode';
 import { rangeToMs } from './utils/historyLoad';
 import { HistorySearch } from './components/HistorySearch';
@@ -53,7 +54,6 @@ import { DatabaseOverlay } from './components/DatabaseOverlay';
 import {
   WriteToBusPanel,
   type CtrlSendRequest,
-  type SendPanelTopRowHint,
   type SendPanelCommand,
   type LinkedRowStatus,
 } from './components/WriteToBusPanel';
@@ -63,6 +63,7 @@ import {
 } from './utils/sendCorrespondence';
 import type { BusPayload } from './utils/dptValues';
 import { DptCatalogProvider } from './components/DptCatalogContext';
+import { GaReadPhaseProvider } from './components/GaReadPhase';
 import { UpdateNotification } from './components/UpdateNotification';
 import { LegacyTimestampBanner } from './components/LegacyTimestampBanner';
 import { LoginScreen } from './components/LoginScreen';
@@ -291,8 +292,8 @@ function App() {
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(initialWorkspace?.view === 'database');
   const [isSendOpen, setIsSendOpen] = useState(false);
-  /** Top send-panel row hint for TT send-icon blue (cleared when panel closes). */
-  const [sendPanelTopHint, setSendPanelTopHint] = useState<SendPanelTopRowHint | null>(null);
+  /** GAs currently present in the send panel (TT send-icon opaque/blue; panel visibility irrelevant). */
+  const [sendPanelAddresses, setSendPanelAddresses] = useState<ReadonlySet<string>>(() => new Set());
   /** Ctrl-click send-icon request consumed by WriteToBusPanel (clear or insert top row). */
   const [ctrlSendRequest, setCtrlSendRequest] = useState<CtrlSendRequest | null>(null);
   const ctrlSendNonceRef = useRef(0);
@@ -308,8 +309,9 @@ function App() {
   );
   const pendingEnsureRef = useRef<{
     nonce: number;
-    kind: 'link' | 'write';
+    kind: 'link' | 'write' | 'read';
     payload?: BusPayload;
+    response?: boolean;
   } | null>(null);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
@@ -361,6 +363,7 @@ function App() {
   // reappear instantly after a reload and only the gaps are fetched (#211).
   const {
     telegrams: liveTelegrams,
+    ingested: ingestedTelegrams,
     addLive,
     setConnected: setCacheConnected,
     setPaused: setCachePaused,
@@ -375,6 +378,12 @@ function App() {
   // Snapshot frozen in auto/manual; flush moves mode to playing without
   // necessarily enabling live-follow (edge flush keeps the viewport + pill).
   const isPaused = cachePausedForMode(pauseMode);
+  // GA read phase and the list's READ color follow live Responses, including
+  // during auto-pause. Manual pause holds the frozen snapshot.
+  const gaReadRows = useMemo(
+    () => readPhaseRows(pauseMode, liveTelegrams, ingestedTelegrams),
+    [pauseMode, liveTelegrams, ingestedTelegrams],
+  );
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -831,8 +840,11 @@ function App() {
     setCtrlSendRequest(null);
   }, []);
 
-  const handleSendPanelTopHintChange = useCallback((hint: SendPanelTopRowHint | null) => {
-    setSendPanelTopHint(hint);
+  const handlePanelAddressesChange = useCallback((addresses: string[]) => {
+    setSendPanelAddresses(prev => {
+      if (prev.size === addresses.length && addresses.every(a => prev.has(a))) return prev;
+      return new Set(addresses);
+    });
   }, []);
 
   const handleLinkedRowStatusesChange = useCallback((statuses: Record<string, LinkedRowStatus>) => {
@@ -858,11 +870,22 @@ function App() {
   const handleWriteWithSchedule = useCallback((
     draft: SendCorrespondenceKey & { name?: string | null },
     payload: BusPayload,
+    opts?: { response?: boolean },
   ) => {
     const key = correspondenceKeyFromDraft(draft);
     sendPanelCmdNonceRef.current += 1;
     const nonce = sendPanelCmdNonceRef.current;
-    pendingEnsureRef.current = { nonce, kind: 'write', payload };
+    pendingEnsureRef.current = { nonce, kind: 'write', payload, response: opts?.response };
+    setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
+  }, []);
+
+  const handleReadWithSchedule = useCallback((
+    draft: SendCorrespondenceKey & { name?: string | null },
+  ) => {
+    const key = correspondenceKeyFromDraft(draft);
+    sendPanelCmdNonceRef.current += 1;
+    const nonce = sendPanelCmdNonceRef.current;
+    pendingEnsureRef.current = { nonce, kind: 'read' };
     setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
   }, []);
 
@@ -894,6 +917,16 @@ function App() {
           nonce: sendPanelCmdNonceRef.current,
           rowId: result.rowId,
           payload: pending.payload,
+          response: pending.response,
+        });
+        return;
+      }
+      if (pending.kind === 'read' && result.rowId) {
+        sendPanelCmdNonceRef.current += 1;
+        setSendPanelCommand({
+          type: 'readViaRow',
+          nonce: sendPanelCmdNonceRef.current,
+          rowId: result.rowId,
         });
         return;
       }
@@ -1004,6 +1037,7 @@ function App() {
 
   return (
     <DptCatalogProvider value={filterOptions.dpts}>
+    <GaReadPhaseProvider rows={gaReadRows}>
     <div className="container dashboard-grid" style={{ padding: '1.5rem', gap: '1.5rem' }}>
 
       {/* ── Main area (Full Width) ─── */}
@@ -1450,7 +1484,7 @@ function App() {
                   dptCatalog={filterOptions.dpts}
                   latestTelegram={latestTelegram}
                   onGotoTelegram={handleGotoTelegram}
-                  onTopRowHintChange={handleSendPanelTopHintChange}
+                  onPanelAddressesChange={handlePanelAddressesChange}
                   ctrlSendRequest={ctrlSendRequest}
                   onCtrlSendHandled={handleCtrlSendHandled}
                   sendPanelCommand={sendPanelCommand}
@@ -1585,6 +1619,7 @@ function App() {
                     </div>
                     <TelegramTable
                     telegrams={filteredLiveTelegrams}
+                    readPhaseTelegrams={gaReadRows}
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
                     onSort={handleSort}
@@ -1596,13 +1631,14 @@ function App() {
                     onGotoTelegram={handleGotoTelegram}
                     onAltSend={handleAltSend}
                     onCtrlSend={handleCtrlSend}
-                    sendPanelTopHint={isSendOpen ? sendPanelTopHint : null}
+                    sendPanelAddresses={sendPanelAddresses}
                     activeSendJobAddresses={activeSendJobAddresses}
                     gaJobStatuses={gaJobStatuses}
                     linkedRowId={popoverLinkedRowId}
                     linkedStatus={popoverLinkedRowId ? linkedRowStatuses[popoverLinkedRowId] ?? null : null}
                     onScheduleCommit={handleScheduleCommit}
                     onWriteWithSchedule={handleWriteWithSchedule}
+                    onReadWithSchedule={handleReadWithSchedule}
                     onCancelLinked={handleCancelLinked}
                     latestTelegram={latestTelegram}
                     quickFilterOpen={quickFilterOpen}
@@ -1732,6 +1768,7 @@ function App() {
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       `}</style>
     </div>
+    </GaReadPhaseProvider>
     </DptCatalogProvider>
   );
 }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Clock } from 'lucide-react';
 
 import type { FilterOption } from '../types/filters';
+import { selectAllMouseDown, selectInputText } from '../utils/selectInputText';
 
 interface Props {
   value: string;
@@ -26,6 +27,9 @@ interface Props {
    * `name` swaps the two lines (name, then address).
    */
   display?: 'address' | 'name';
+  /** While set, the field cannot be edited and the suggestion list stays closed. */
+  disabled?: boolean;
+  title?: string;
 }
 
 /**
@@ -36,13 +40,14 @@ interface Props {
  * The suggestion list is portaled to document.body so it cannot expand the
  * write-panel scroll area and shift the row grid.
  */
-export function GaCombobox({ value, onChange, onCommit, onFocus, options, recentAddresses, placeholder, width = 220, display = 'address' }: Props) {
+export function GaCombobox({ value, onChange, onCommit, onFocus, options, recentAddresses, placeholder, width = 220, display = 'address', disabled = false, title }: Props) {
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // A list pick commits through onChange. Blur follows the click and must not
@@ -50,6 +55,13 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
   const pickedRef = useRef(false);
   // Arrow navigation must not be undone by the row currently under the pointer.
   const keyboardNav = useRef(false);
+  // Close the menu when the field becomes disabled without an effect, so
+  // re-enabling it does not pop the suggestions back open.
+  const [prevDisabled, setPrevDisabled] = useState(disabled);
+  if (disabled !== prevDisabled) {
+    setPrevDisabled(disabled);
+    if (disabled) setOpen(false);
+  }
 
   const { matches, recentCount } = useMemo(() => {
     const q = value.trim().toLowerCase();
@@ -98,7 +110,16 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
     const widthPx = Math.max(r.width, 260);
     let left = r.left;
     if (left + widthPx > window.innerWidth - 8) left = Math.max(8, window.innerWidth - widthPx - 8);
-    setBox({ top: r.bottom + 4, left, width: widthPx });
+    const top = r.bottom + 4;
+    const menu = menuRef.current;
+    // Avoid setState after mount — re-renders clear select-on-focus.
+    if (menu) {
+      menu.style.top = `${top}px`;
+      menu.style.left = `${left}px`;
+      menu.style.width = `${widthPx}px`;
+      return;
+    }
+    setBox({ top, left, width: widthPx });
   };
 
   useLayoutEffect(() => {
@@ -116,10 +137,24 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
     };
   }, [open, matches.length, value]);
 
-  useEffect(() => {
-    if (!open || activeIndex < 0) return;
-    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
+  // Scroll only inside the menu — scrollIntoView on the page clears input selection.
+  useLayoutEffect(() => {
+    if (!open || activeIndex < 0 || !menuRef.current) return;
+    const menu = menuRef.current;
+    const opt = optionRefs.current[activeIndex];
+    if (!opt) return;
+    const m = menu.getBoundingClientRect();
+    const o = opt.getBoundingClientRect();
+    if (o.bottom > m.bottom) menu.scrollTop += o.bottom - m.bottom;
+    else if (o.top < m.top) menu.scrollTop -= m.top - o.top;
   }, [open, activeIndex]);
+
+  // Re-assert select-on-focus after the Werthilfe mounts / repositions.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = inputRef.current;
+    if (el && document.activeElement === el) el.select();
+  }, [open, box]);
 
   useEffect(() => {
     if (!open) return;
@@ -137,6 +172,8 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
     const text = display === 'name' ? (o.name || o.address || '') : (o.address ?? '');
     onChange(text, o);
     setOpen(false);
+    // Land on the chevron after a Werthilfe pick (list stays closed).
+    queueMicrotask(() => chevronRef.current?.focus());
   };
 
   const commitText = () => {
@@ -178,11 +215,16 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
       <div
         className="glass-input"
         onMouseDown={e => {
+          if (disabled) return;
           if ((e.target as HTMLElement).closest('[data-ga-chevron]')) return;
-          if (e.target !== inputRef.current) e.preventDefault();
+          // Input mousedown already focused and selected (defaultPrevented).
+          if (e.defaultPrevented) return;
+          const input = inputRef.current;
+          if (e.target === input && document.activeElement === input) return;
+          e.preventDefault();
           setHighlight(0);
           setOpen(true);
-          inputRef.current?.focus();
+          input?.focus();
         }}
         style={{
           display: 'inline-flex',
@@ -191,21 +233,34 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
           boxSizing: 'border-box',
           padding: '0.2rem 0.3rem 0.2rem 0.35rem',
           gap: '0.25rem',
+          opacity: disabled ? 0.45 : 1,
         }}
       >
       <input
         ref={inputRef}
         value={value}
         placeholder={placeholder}
+        title={title}
         size={size}
-        onChange={e => { pickedRef.current = false; onChange(e.target.value); setOpen(true); setHighlight(-1); }}
-        onFocus={() => {
+        disabled={disabled}
+        onMouseDown={selectAllMouseDown}
+        onChange={e => {
+          if (disabled) return;
+          pickedRef.current = false;
+          onChange(e.target.value);
+          setOpen(true);
+          setHighlight(-1);
+        }}
+        onFocus={e => {
+          if (disabled) return;
           pickedRef.current = false;
           setOpen(true);
           setHighlight(0);
+          selectInputText(e.currentTarget);
           onFocus?.();
         }}
         onBlur={() => {
+          if (disabled) { setOpen(false); return; }
           if (pickedRef.current) { pickedRef.current = false; setOpen(false); return; }
           // Incomplete text adopts a highlighted suggestion only while one is
           // selected (arrows/hover). Typing clears the highlight so free text stays.
@@ -234,12 +289,15 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
         }}
       />
       <button
+        ref={chevronRef}
         type="button"
         className="icon-button"
         data-ga-chevron
         aria-label="Toggle suggestions"
+        disabled={disabled}
         onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
         onClick={() => {
+          if (disabled) return;
           if (open) setOpen(false);
           else {
             setHighlight(0);
@@ -252,7 +310,7 @@ export function GaCombobox({ value, onChange, onCommit, onFocus, options, recent
         <ChevronDown size={13} />
       </button>
       </div>
-      {open && matches.length > 0 && box && createPortal(
+      {open && !disabled && matches.length > 0 && box && createPortal(
         <div
           ref={menuRef}
           id={listId}

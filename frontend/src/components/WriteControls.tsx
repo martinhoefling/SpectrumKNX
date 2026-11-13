@@ -7,17 +7,19 @@ import {
   payloadFromValue,
   textDptCharWidth,
   textDptWritePayload,
+  type ScheduledSendStatus,
 } from '../utils/knxSend';
 import {
+  cycleDiscreteLabelMode,
   discreteDptValues,
   formatDiscreteChoiceLabel,
-  nextDiscreteLabelMode,
+  useDiscreteLabelMode,
   type BusPayload,
   type DiscreteChoice,
-  type DiscreteLabelMode,
 } from '../utils/dptValues';
 import { boolBtn, primaryBtn } from '../utils/buttonStyles';
 import { focusVisible, useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
+import { selectAllMouseDown, selectInputText } from '../utils/selectInputText';
 import { ThemedDatetimePicker } from './ThemedDatetimePicker';
 
 /** Leftmost write/send button in the send column (DOM order; skip Read / sendEnd). */
@@ -45,8 +47,15 @@ interface Props {
   onWrite: (payload: BusPayload) => void;
   /** A free-value entry that cannot be sent (bad `0x`/`0b`, or outside a bare main's range). */
   onError?: (message: string) => void;
-  /** Disables all controls (busy, invalid address, active scheduled job). */
+  /** Disables value inputs and send buttons (busy, invalid address). */
   disabled?: boolean;
+  /** Disables send buttons while a scheduled job owns the row. Value inputs stay editable. */
+  sendLocked?: boolean;
+  /**
+   * Live job while `sendLocked`. A write keeps the button for `payload` at the
+   * normal disabled tone and fades the others. A read fades every write button.
+   */
+  activeJob?: Pick<ScheduledSendStatus, 'read' | 'payload'> | null;
   /** Unit for the free-value field (e.g. °C), shown once a value is entered. */
   unit?: string | null;
   /** Extra props for the value-column wrapper (e.g. grid `data-wtb-col`). */
@@ -70,6 +79,11 @@ interface Props {
    * available, otherwise the first enabled write/send button.
    */
   focusToken?: number | null;
+  /**
+   * Place the value slot and the send slot in different parents (send panel).
+   * Omitted: both are returned as siblings for one grid.
+   */
+  layout?: (value: ReactNode, send: ReactNode) => ReactNode;
 }
 
 const getRecentValues = (address?: string | null, dptKey?: string | null, dptMain?: number | null): string[] => {
@@ -201,6 +215,22 @@ const sendBtn = (fit: 'fill' | 'hug', base: CSSProperties): CSSProperties => (
   fit === 'hug' ? base : fillBtn(base)
 );
 
+/** Structural equality for discrete payloads (booleans, numbers, DPT 2/3 objects). */
+function payloadsEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => payloadsEqual(item, b[i]));
+  }
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  return ak.every(key => payloadsEqual(left[key], right[key]));
+}
+
 /** Above the send popover (z-index 1000) so a portaled value list stays visible. */
 const PORTAL_MENU_Z = 1100;
 
@@ -281,20 +311,25 @@ function ValueFieldShell({
  * for DPT 10/11/19, and a recent values dropdown otherwise.
  *
  * Returns two siblings (value slot, send slot) so a parent CSS grid can place
- * them in separate columns.
+ * them in separate columns. `layout` places those slots in different parents.
  */
 export function WriteControls({
-  dptMain, dptKey, address, value, onValueChange, onWrite, onError, disabled = false, unit = null,
+  dptMain, dptKey, address, value, onValueChange, onWrite, onError, disabled = false, sendLocked = false,
+  activeJob = null, unit = null,
   valueColProps, sendColProps, reserveValueSlot = true, sendFit = 'fill', sendEnd,
-  focusToken = null,
+  focusToken = null, layout,
 }: Props) {
   const [recentsOpen, setRecentsOpen] = useState(false);
   const [recentsHighlight, setRecentsHighlight] = useState(0);
   const [recentsTick, setRecentsTick] = useState(0);
+  /** Filter recent values only after typing while the list is open (chevron steps use the full list). */
+  const [recentsTypedWhileOpen, setRecentsTypedWhileOpen] = useState(false);
   const [recentsBox, setRecentsBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const valueInputRef = useRef<HTMLInputElement>(null);
+  const valueChevronRef = useRef<HTMLButtonElement>(null);
   const valueShellRef = useRef<HTMLDivElement>(null);
   const sendColRef = useRef<HTMLDivElement>(null);
+  const recentsMenuRef = useRef<HTMLDivElement>(null);
   const recentsOptionRefs = useRef<(HTMLDivElement | null)[]>([]);
   const { retainFocusOn, retainClickFocus, setBeforeRestore } = useRetainFocusThroughDisabled(disabled);
   const recentsKeyboardNav = useRef(false);
@@ -303,13 +338,13 @@ export function WriteControls({
   // The select index belongs to one DPT. A different key reads as the first entry,
   // so changing the DPT does not need an effect to clear a stale pick.
   const [picked, setPicked] = useState({ key: dptKey, index: 0 });
-  /** Decoded / 0x / 0b labels for ≤4-bit named send buttons (Ctrl-click cycles; survives DPT changes). */
-  const [labelMode, setLabelMode] = useState<DiscreteLabelMode>('name');
+  /** Panel-wide name / 0x / 0b labels (every row, not one mode per DPT). */
+  const labelMode = useDiscreteLabelMode();
   const cycleLabelMode = (e: MouseEvent) => {
     if (!(e.ctrlKey || e.metaKey)) return false;
     e.preventDefault();
     e.stopPropagation();
-    setLabelMode(prev => nextDiscreteLabelMode(prev));
+    cycleDiscreteLabelMode();
     return true;
   };
   const discreteButtonLabel = (choice: DiscreteChoice) => (
@@ -319,17 +354,26 @@ export function WriteControls({
     () => getRecentValues(address, dptKey, dptMain),
     [address, dptKey, dptMain, recentsTick],
   );
-  const filteredRecents = useMemo(() => filterRecentValues(recents, value), [recents, value]);
+  const filteredRecents = useMemo(
+    () => (recentsTypedWhileOpen ? filterRecentValues(recents, value) : recents),
+    [recents, value, recentsTypedWhileOpen],
+  );
   const choices = useMemo(() => discreteDptValues(dptKey), [dptKey]);
   // -1 = no highlight (cleared by typing); otherwise clamp into the filtered list.
   const recentsActive = recentsHighlight < 0 || filteredRecents.length === 0
     ? -1
     : Math.min(recentsHighlight, filteredRecents.length - 1);
 
-  // Recent values are portaled so the send panel's overflow:hidden cannot clip them.
-  // Re-place after open (rAF ×2 + ResizeObserver) so popover layout settles below the value.
+  // Recent values are portaled so overflow:hidden hosts cannot clip them.
+  // Always anchor directly under the value shell — never flip above. Keep
+  // re-measuring while open: the send popover can still move (last-value
+  // load, overlap nudge) after focus already opened recents.
+  // After the menu is mounted, update its position via the DOM only — React
+  // setState on every frame would re-render the value input and clear select-on-focus.
   useLayoutEffect(() => {
     if (!recentsOpen) return;
+    let alive = true;
+    let raf = 0;
     const place = () => {
       const el = valueShellRef.current;
       if (!el) return;
@@ -337,30 +381,58 @@ export function WriteControls({
       const width = Math.max(r.width, 120);
       let left = r.left;
       if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
-      setRecentsBox({ top: r.bottom + 4, left, width });
+      const top = r.bottom + 4;
+      const menu = recentsMenuRef.current;
+      if (menu) {
+        menu.style.top = `${top}px`;
+        menu.style.left = `${left}px`;
+        menu.style.width = `${width}px`;
+        return;
+      }
+      setRecentsBox(prev => (
+        prev && prev.top === top && prev.left === left && prev.width === width
+          ? prev
+          : { top, left, width }
+      ));
+    };
+    const tick = () => {
+      if (!alive) return;
+      place();
+      raf = requestAnimationFrame(tick);
     };
     place();
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      place();
-      raf2 = requestAnimationFrame(place);
-    });
+    raf = requestAnimationFrame(tick);
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(place) : null;
     if (valueShellRef.current) ro?.observe(valueShellRef.current);
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
     return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
+      alive = false;
+      cancelAnimationFrame(raf);
       ro?.disconnect();
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
   }, [recentsOpen, filteredRecents.length]);
 
+  // Re-assert select-on-focus after the Werthilfe mounts (open re-render clears it).
+  useLayoutEffect(() => {
+    if (!recentsOpen) return;
+    const el = valueInputRef.current;
+    if (el && document.activeElement === el) el.select();
+  }, [recentsOpen, recentsBox]);
+
+  // Scroll only inside the menu — never the popover/page (that would slide the
+  // value field under a fixed list and look like the list opened above it).
   useEffect(() => {
     if (!recentsOpen || recentsActive < 0) return;
-    recentsOptionRefs.current[recentsActive]?.scrollIntoView?.({ block: 'nearest' });
+    const menu = recentsMenuRef.current;
+    const opt = recentsOptionRefs.current[recentsActive];
+    if (!menu || !opt) return;
+    const m = menu.getBoundingClientRect();
+    const o = opt.getBoundingClientRect();
+    if (o.bottom > m.bottom) menu.scrollTop += o.bottom - m.bottom;
+    else if (o.top < m.top) menu.scrollTop -= m.top - o.top;
   }, [recentsOpen, recentsActive]);
 
   useLayoutEffect(() => {
@@ -402,6 +474,17 @@ export function WriteControls({
   const retainWriteButtonFocus = (e: MouseEvent<HTMLButtonElement>) => {
     retainClickFocus(e);
   };
+  const sendDisabled = disabled || sendLocked;
+  /**
+   * Stronger fade for a send button that is not this job's action.
+   * Omit `represented` for the single Write button: it is the value being sent.
+   */
+  const irrelevantSend = (represented?: BusPayload): boolean => {
+    if (!sendLocked || !activeJob) return false;
+    if (activeJob.read) return true;
+    if (represented === undefined) return false;
+    return !payloadsEqual(represented, activeJob.payload);
+  };
 
   /** Capture Write/Read clicks in sendEnd so busy→disabled can restore focus. */
   const onSendColClickCapture = (e: MouseEvent<HTMLDivElement>) => {
@@ -436,11 +519,13 @@ export function WriteControls({
   const valueSlot = keepValueSlot
     ? <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }} />
     : null;
+  const placeSlots = (valueNode: ReactNode, sendNode: ReactNode) => (
+    layout ? layout(valueNode, sendNode) : <>{valueNode}{sendNode}</>
+  );
 
   if (subtype && choices && choices.length > 4) {
     const index = picked.key === dptKey && picked.index < choices.length ? picked.index : 0;
-    return (
-      <>
+    return placeSlots(
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueChoiceSelect
             choices={choices.map(c => c.label)}
@@ -448,27 +533,25 @@ export function WriteControls({
             disabled={disabled}
             onChange={i => setPicked({ key: dptKey, index: i })}
           />
-        </div>
+        </div>,
         <div {...sendCol(1)}>
           <button
             type="button"
             className="wtb-write-btn"
             onClick={e => { onWrite(choices[index].payload); retainWriteButtonFocus(e); }}
-            disabled={disabled}
-            style={sendBtn(sendFit, primaryBtn(disabled))}
+            disabled={sendDisabled}
+            style={sendBtn(sendFit, primaryBtn(sendDisabled, irrelevantSend()))}
           >
             <Send size={14} /> Write
           </button>
           {sendEnd}
         </div>
-      </>
     );
   }
 
   if (subtype && choices && choices.length > 0) {
-    return (
-      <>
-        {valueSlot}
+    return placeSlots(
+        valueSlot,
         <div {...sendCol(choices.length)}>
           {choices.map(choice => {
             const shown = discreteButtonLabel(choice);
@@ -477,13 +560,13 @@ export function WriteControls({
                 key={choice.label}
                 type="button"
                 className="wtb-write-btn"
-                disabled={disabled}
+                disabled={sendDisabled}
                 onClick={e => {
                   if (cycleLabelMode(e)) return;
                   onWrite(choice.payload);
                   retainWriteButtonFocus(e);
                 }}
-                style={sendBtn(sendFit, boolBtn(disabled))}
+                style={sendBtn(sendFit, boolBtn(sendDisabled, irrelevantSend(choice.payload)))}
                 title={`Write ${choice.label}${labelMode === 'name' ? '' : ` (${shown})`} · ctrl/cmd-click to cycle name / hex / bin`}
               >
                 <Send size={13} /> {shown}
@@ -492,7 +575,6 @@ export function WriteControls({
           })}
           {sendEnd}
         </div>
-      </>
     );
   }
 
@@ -501,20 +583,19 @@ export function WriteControls({
     const offChoice: DiscreteChoice = { label: 'off', payload: false };
     const onShown = discreteButtonLabel(onChoice);
     const offShown = discreteButtonLabel(offChoice);
-    return (
-      <>
-        {valueSlot}
+    return placeSlots(
+        valueSlot,
         <div {...sendCol(2)}>
           <button
             type="button"
             className="wtb-write-btn"
-            disabled={disabled}
+            disabled={sendDisabled}
             onClick={e => {
               if (cycleLabelMode(e)) return;
               onWrite(true);
               retainWriteButtonFocus(e);
             }}
-            style={sendBtn(sendFit, boolBtn(disabled))}
+            style={sendBtn(sendFit, boolBtn(sendDisabled, irrelevantSend(true)))}
             title={`Write on${labelMode === 'name' ? '' : ` (${onShown})`} · ctrl/cmd-click to cycle name / hex / bin`}
           >
             <Send size={13} /> {onShown}
@@ -522,26 +603,24 @@ export function WriteControls({
           <button
             type="button"
             className="wtb-write-btn"
-            disabled={disabled}
+            disabled={sendDisabled}
             onClick={e => {
               if (cycleLabelMode(e)) return;
               onWrite(false);
               retainWriteButtonFocus(e);
             }}
-            style={sendBtn(sendFit, boolBtn(disabled))}
+            style={sendBtn(sendFit, boolBtn(sendDisabled, irrelevantSend(false)))}
             title={`Write off${labelMode === 'name' ? '' : ` (${offShown})`} · ctrl/cmd-click to cycle name / hex / bin`}
           >
             <Send size={13} /> {offShown}
           </button>
           {sendEnd}
         </div>
-      </>
     );
   }
 
   if (subtype && dptMain === 10) {
-    return (
-      <>
+    return placeSlots(
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueFieldShell unit={unit} showUnit={Boolean(value.trim())}>
             <ThemedDatetimePicker
@@ -557,7 +636,7 @@ export function WriteControls({
               style={{ ...bareInput, flex: '1 1 auto', width: 'auto', textAlign: 'left' }}
             />
           </ValueFieldShell>
-        </div>
+        </div>,
         <div {...sendCol(1)}>
           <button
             type="button"
@@ -567,20 +646,18 @@ export function WriteControls({
               onWrite(value);
               retainWriteButtonFocus(e);
             }}
-            disabled={disabled || value === ''}
-            style={sendBtn(sendFit, primaryBtn(disabled || value === ''))}
+            disabled={sendDisabled || value === ''}
+            style={sendBtn(sendFit, primaryBtn(sendDisabled || value === '', irrelevantSend()))}
           >
             <Send size={14} /> Write
           </button>
           {sendEnd}
         </div>
-      </>
     );
   }
 
   if (subtype && dptMain === 11) {
-    return (
-      <>
+    return placeSlots(
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueFieldShell unit={unit} showUnit={Boolean(value.trim())}>
             <ThemedDatetimePicker
@@ -595,7 +672,7 @@ export function WriteControls({
               style={{ ...bareInput, flex: '1 1 auto', width: 'auto', textAlign: 'left' }}
             />
           </ValueFieldShell>
-        </div>
+        </div>,
         <div {...sendCol(1)}>
           <button
             type="button"
@@ -605,20 +682,18 @@ export function WriteControls({
               onWrite(value);
               retainWriteButtonFocus(e);
             }}
-            disabled={disabled || value === ''}
-            style={sendBtn(sendFit, primaryBtn(disabled || value === ''))}
+            disabled={sendDisabled || value === ''}
+            style={sendBtn(sendFit, primaryBtn(sendDisabled || value === '', irrelevantSend()))}
           >
             <Send size={14} /> Write
           </button>
           {sendEnd}
         </div>
-      </>
     );
   }
 
   if (subtype && dptMain === 19) {
-    return (
-      <>
+    return placeSlots(
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueFieldShell unit={unit} showUnit={Boolean(value.trim())}>
             <ThemedDatetimePicker
@@ -634,7 +709,7 @@ export function WriteControls({
               style={{ ...bareInput, flex: '1 1 auto', width: 'auto', textAlign: 'left' }}
             />
           </ValueFieldShell>
-        </div>
+        </div>,
         <div {...sendCol(1)}>
           <button
             type="button"
@@ -644,14 +719,13 @@ export function WriteControls({
               onWrite(value);
               retainWriteButtonFocus(e);
             }}
-            disabled={disabled || value === ''}
-            style={sendBtn(sendFit, primaryBtn(disabled || value === ''))}
+            disabled={sendDisabled || value === ''}
+            style={sendBtn(sendFit, primaryBtn(sendDisabled || value === '', irrelevantSend()))}
           >
             <Send size={14} /> Write
           </button>
           {sendEnd}
         </div>
-      </>
     );
   }
 
@@ -675,7 +749,7 @@ export function WriteControls({
 
   // Text DPTs (4/16/28) may send an empty field as space-padded / UTF-8 text
   // (#410). Other DPTs still require a non-empty value.
-  const writeDisabled = disabled || (!isTextDpt && value.trim() === '');
+  const writeDisabled = sendDisabled || (!isTextDpt && value.trim() === '');
   // Short placeholder keeps the measured value track content-sized (like delay/every).
   const valuePlaceholder = 'Value';
   const inputCh = isTextDpt && textWidth != null
@@ -688,17 +762,45 @@ export function WriteControls({
     if (!hasRecents) return;
     setRecentsHighlight(0);
     recentsKeyboardNav.current = false;
+    setRecentsTypedWhileOpen(false);
     setRecentsOpen(true);
+  };
+
+  const closeRecents = () => {
+    setRecentsOpen(false);
+    setRecentsTypedWhileOpen(false);
   };
 
   const pickRecent = (val: string) => {
     onValueChange(val);
-    setRecentsOpen(false);
+    closeRecents();
+    // Chevron stays visible with recents — land focus there after a Werthilfe pick.
+    queueMicrotask(() => valueChevronRef.current?.focus());
+  };
+
+  /** Chevron ↑/↓: commit previous/next from the full (unfiltered) recents list, wrapping. */
+  const stepRecentFromChevron = (dir: 1 | -1) => {
+    if (recents.length === 0) return;
+    let idx = recents.indexOf(value);
+    if (idx < 0) idx = dir > 0 ? -1 : 0;
+    const next = (idx + dir + recents.length) % recents.length;
+    const val = recents[next];
+    if (val == null) return;
+    onValueChange(val);
+    setRecentsTypedWhileOpen(false);
+    setRecentsHighlight(next);
+    setRecentsOpen(true);
+    queueMicrotask(() => valueChevronRef.current?.focus());
   };
 
   const onValueKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
-      if (recentsOpen) { e.preventDefault(); setRecentsOpen(false); }
+      // Keep Escape from dismissing a parent popover while the value Werthilfe is open.
+      if (recentsOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRecents();
+      }
       return;
     }
     if (hasRecents && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
@@ -719,7 +821,7 @@ export function WriteControls({
         pickRecent(filteredRecents[recentsActive]);
         return;
       }
-      if (recentsOpen) setRecentsOpen(false);
+      if (recentsOpen) closeRecents();
       if (!writeDisabled) {
         commitFreeValue();
         // Keep focus on the value field after Enter-to-write without reopening recents.
@@ -728,8 +830,22 @@ export function WriteControls({
     }
   };
 
-  return (
-    <>
+  const onValueChevronKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      if (recentsOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRecents();
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepRecentFromChevron(e.key === 'ArrowDown' ? 1 : -1);
+    }
+  };
+
+  return placeSlots(
       <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
         <ValueFieldShell
           shellRef={valueShellRef}
@@ -739,17 +855,21 @@ export function WriteControls({
             if (disabled || !hasRecents) return;
             const target = e.target as HTMLElement;
             if (target.closest('[data-value-chevron]')) return;
-            if (e.target !== valueInputRef.current) e.preventDefault();
+            if (e.defaultPrevented) return;
+            const input = valueInputRef.current;
+            const placingCaret = e.target === input && document.activeElement === input;
+            if (!placingCaret) e.preventDefault();
             if (recentsOpen) {
               skipRecentsFocusOpen.current = true;
-              setRecentsOpen(false);
+              closeRecents();
             } else {
               openRecents();
             }
-            valueInputRef.current?.focus();
+            if (!placingCaret) input?.focus();
           }}
           trailing={hasRecents ? (
             <button
+              ref={valueChevronRef}
               type="button"
               className="icon-button"
               data-value-chevron
@@ -757,11 +877,12 @@ export function WriteControls({
               disabled={disabled}
               tabIndex={disabled ? -1 : 0}
               onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+              onKeyDown={onValueChevronKeyDown}
               onClick={() => {
                 if (disabled) return;
                 if (recentsOpen) {
                   skipRecentsFocusOpen.current = true;
-                  setRecentsOpen(false);
+                  closeRecents();
                   valueInputRef.current?.blur();
                 } else {
                   openRecents();
@@ -788,22 +909,28 @@ export function WriteControls({
             placeholder={valuePlaceholder}
             value={value}
             maxLength={textWidth ?? undefined}
+            onMouseDown={selectAllMouseDown}
             onChange={e => {
+              if (disabled) return;
               recentsKeyboardNav.current = false;
               setRecentsHighlight(-1);
+              setRecentsTypedWhileOpen(true);
               onValueChange(e.target.value);
               if (hasRecents) setRecentsOpen(true);
             }}
             onKeyDown={onValueKeyDown}
-            onFocus={() => {
+            onFocus={e => {
+              const el = e.currentTarget;
               if (skipRecentsFocusOpen.current) {
                 skipRecentsFocusOpen.current = false;
+                selectInputText(el);
                 return;
               }
               if (hasRecents) openRecents();
+              selectInputText(el);
             }}
             onBlur={() => {
-              setRecentsOpen(false);
+              closeRecents();
               rememberValue();
             }}
             disabled={disabled}
@@ -823,6 +950,7 @@ export function WriteControls({
         </ValueFieldShell>
         {recentsOpen && filteredRecents.length > 0 && recentsBox && createPortal(
           <div
+            ref={recentsMenuRef}
             data-portaled-menu
             role="listbox"
             aria-label="Recent values"
@@ -871,20 +999,19 @@ export function WriteControls({
           </div>,
           document.body,
         )}
-      </div>
+      </div>,
       <div {...sendCol(1)}>
         <button
           type="button"
           className="wtb-write-btn"
           onClick={e => { commitFreeValue(); retainWriteButtonFocus(e); }}
           disabled={writeDisabled}
-          style={sendBtn(sendFit, primaryBtn(writeDisabled))}
+          style={sendBtn(sendFit, primaryBtn(writeDisabled, irrelevantSend()))}
         >
           <Send size={14} /> Write
         </button>
         {sendEnd}
-      </div>
-    </>
+      </div>,
   );
 }
 
@@ -943,26 +1070,31 @@ function ValueChoiceSelect({
   const pick = (i: number) => {
     onChange(i);
     setOpen(false);
+    // Trigger owns the chevron — keep focus there after a Werthilfe pick.
+    queueMicrotask(() => triggerRef.current?.focus());
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (disabled) return;
     if (e.key === 'Escape') {
-      if (open) { e.preventDefault(); setOpen(false); }
+      // Keep Escape from dismissing a parent popover while the value list is open.
+      if (open) {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+      }
       return;
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      if (!open) {
-        setHighlight(index);
-        setOpen(true);
-        return;
-      }
+      if (choices.length === 0) return;
       const dir = e.key === 'ArrowDown' ? 1 : -1;
-      setHighlight(h => {
-        const current = Math.min(h, Math.max(choices.length - 1, 0));
-        return Math.max(0, Math.min(choices.length - 1, current + dir));
-      });
+      // Rolling select through the full list; commit on each step (trigger owns the chevron).
+      const current = Math.max(0, Math.min(index, choices.length - 1));
+      const next = (current + dir + choices.length) % choices.length;
+      setHighlight(next);
+      setOpen(true);
+      onChange(next);
       return;
     }
     if (e.key === 'Enter' && open) {
