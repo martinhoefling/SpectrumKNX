@@ -1199,17 +1199,17 @@ function SendToGaPopoverPanel({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'max-content max-content minmax(0, 1fr)',
+                  gridTemplateColumns: 'minmax(0, 1fr) max-content',
                   gridTemplateAreas: showValue
                     ? `
-                      "dpt dpt dpt"
-                      "value write ."
-                      "sched . read"
+                      "dpt dpt"
+                      "value write"
+                      "sched read"
                     `
                     : `
-                      "dpt dpt dpt"
-                      "write write ."
-                      "sched . read"
+                      "dpt dpt"
+                      "write write"
+                      "sched read"
                     `,
                   columnGap: '0.4rem',
                   rowGap: '0.65rem',
@@ -1251,7 +1251,14 @@ function SendToGaPopoverPanel({
                         onBlur: commitScheduleLink,
                       }
                     : { style: { display: 'none' } }}
-                  sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
+                  sendColProps={{
+                    style: {
+                      gridArea: 'write',
+                      width: 'max-content',
+                      // Same right column as Read when a value field is shown.
+                      ...(showValue ? { justifySelf: 'end' as const } : null),
+                    },
+                  }}
                   reserveValueSlot={false}
                 />
                 {scheduleFields}
