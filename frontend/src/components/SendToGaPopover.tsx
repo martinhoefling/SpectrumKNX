@@ -1247,7 +1247,7 @@ function SendToGaPopoverPanel({
                   focusToken={focusToken}
                   valueColProps={showValue
                     ? {
-                        style: { gridArea: 'value', width: 'max-content' },
+                        style: { gridArea: 'value', width: '100%', minWidth: 0 },
                         onBlur: commitScheduleLink,
                       }
                     : { style: { display: 'none' } }}
