@@ -232,7 +232,8 @@ describe('useTelegramCache', () => {
         telegram_type: 'GroupValueResponse',
       }));
     });
-    // GA read phase follows ingested, so a Response still in the pause buffer answers the Read.
+    // The pause backlog stays out of the published snapshot. GA read phase
+    // follows `ingested`, so a Response still in the backlog still answers.
     expect(gaReadPhases(result.current.telegrams).get('9/9/9')).toBeUndefined();
     expect(gaReadPhases(result.current.ingested).get('9/9/9')).toBe('answered');
 

@@ -3,7 +3,6 @@ import {
   pauseModeForListFollow,
   pauseModeForToggle,
   cachePausedForMode,
-  readPhaseRows,
   type PauseMode,
 } from './bufferPauseMode';
 
@@ -38,20 +37,6 @@ describe('pauseModeForToggle', () => {
   test('while paused, Pause icon toggles auto ↔ manual', () => {
     expect(pauseModeForToggle('auto')).toBe('manual');
     expect(pauseModeForToggle('manual')).toBe('auto');
-  });
-});
-
-describe('readPhaseRows', () => {
-  const frozen = ['old'];
-  const ingested = ['old', 'live-response'];
-
-  test('playing and auto-pause follow the live buffer', () => {
-    expect(readPhaseRows('playing', frozen, ingested)).toBe(ingested);
-    expect(readPhaseRows('auto', frozen, ingested)).toBe(ingested);
-  });
-
-  test('manual pause keeps the frozen snapshot', () => {
-    expect(readPhaseRows('manual', frozen, ingested)).toBe(frozen);
   });
 });
 

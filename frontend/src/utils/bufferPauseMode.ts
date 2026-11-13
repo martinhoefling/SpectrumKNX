@@ -32,12 +32,3 @@ export function pauseModeForToggle(mode: PauseMode): PauseMode {
 export function cachePausedForMode(mode: PauseMode): boolean {
   return mode !== 'playing';
 }
-
-/**
- * Rows the GA read phase and the telegram-list READ color follow.
- * Live ingestion, including the auto-pause backlog. Manual pause keeps the
- * frozen snapshot, so a newer Response does not recolor until resume.
- */
-export function readPhaseRows<T>(mode: PauseMode, frozen: T[], ingested: T[]): T[] {
-  return mode === 'manual' ? frozen : ingested;
-}

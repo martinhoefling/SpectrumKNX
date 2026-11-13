@@ -29,8 +29,8 @@ interface TelegramTableProps {
   telegrams: Telegram[];
   /**
    * Telegrams that decide whether a visible Read is answered.
-   * The live list passes the GA-read source (live buffer, or the frozen
-   * snapshot while manually paused). Omitted → the displayed rows.
+   * The live list passes the full buffer, including the pause backlog.
+   * Omitted → the rows passed as `telegrams`.
    */
   readPhaseTelegrams?: Telegram[];
   visibleColumns: { [key: string]: boolean };
@@ -496,8 +496,8 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // computed regardless of sort column, respecting whatever hierarchy is
   // active (#311).
   // A later Response on the same GA turns that Read green. The live list passes
-  // the GA-read source so auto-pause still follows new Responses; manual pause
-  // passes the frozen snapshot. Without the prop, the displayed rows decide.
+  // the full buffer, including the pause backlog. Without the prop, the rows
+  // passed as `telegrams` decide.
   const answeredReads = useMemo(
     () => answeredReadIds(readPhaseTelegrams ?? telegrams),
     [readPhaseTelegrams, telegrams],

@@ -37,7 +37,6 @@ import {
   pauseModeForListFollow,
   pauseModeForToggle,
   cachePausedForMode,
-  readPhaseRows,
 } from './utils/bufferPauseMode';
 import { rangeToMs } from './utils/historyLoad';
 import { HistorySearch } from './components/HistorySearch';
@@ -378,12 +377,8 @@ function App() {
   // Snapshot frozen in auto/manual; flush moves mode to playing without
   // necessarily enabling live-follow (edge flush keeps the viewport + pill).
   const isPaused = cachePausedForMode(pauseMode);
-  // GA read phase and the list's READ color follow live Responses, including
-  // during auto-pause. Manual pause holds the frozen snapshot.
-  const gaReadRows = useMemo(
-    () => readPhaseRows(pauseMode, liveTelegrams, ingestedTelegrams),
-    [pauseMode, liveTelegrams, ingestedTelegrams],
-  );
+  // Popover, send panel, and list READ color follow the full buffer, including
+  // telegrams still sitting in the pause backlog.
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -817,10 +812,7 @@ function App() {
 
   const handleAltSend = useCallback(() => {
     setIsSendOpen(o => {
-      if (o) {
-        setSendPanelTopHint(null);
-        setCtrlSendRequest(null);
-      }
+      if (o) setCtrlSendRequest(null);
       return !o;
     });
   }, []);
@@ -1037,7 +1029,7 @@ function App() {
 
   return (
     <DptCatalogProvider value={filterOptions.dpts}>
-    <GaReadPhaseProvider rows={gaReadRows}>
+    <GaReadPhaseProvider rows={ingestedTelegrams}>
     <div className="container dashboard-grid" style={{ padding: '1.5rem', gap: '1.5rem' }}>
 
       {/* ── Main area (Full Width) ─── */}
@@ -1184,10 +1176,7 @@ function App() {
                       className="icon-button"
                       onClick={() => {
                         setIsSendOpen(o => {
-                          if (o) {
-                            setSendPanelTopHint(null);
-                            setCtrlSendRequest(null);
-                          }
+                          if (o) setCtrlSendRequest(null);
                           return !o;
                         });
                       }}
@@ -1619,7 +1608,7 @@ function App() {
                     </div>
                     <TelegramTable
                     telegrams={filteredLiveTelegrams}
-                    readPhaseTelegrams={gaReadRows}
+                    readPhaseTelegrams={ingestedTelegrams}
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
                     onSort={handleSort}

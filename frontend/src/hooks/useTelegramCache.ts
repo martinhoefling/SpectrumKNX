@@ -36,8 +36,8 @@ export interface TelegramCache {
   telegrams: Telegram[];
   /**
    * Full buffer, newest first, including telegrams ingested while the
-   * published snapshot is frozen. GA read phase follows this unless the
-   * list is manually paused.
+   * published snapshot is frozen. GA read phase follows this buffer
+   * (published list plus pause backlog).
    */
   ingested: Telegram[];
   /** Ingest a live telegram from the WebSocket. */
