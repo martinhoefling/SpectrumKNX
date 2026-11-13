@@ -8,7 +8,14 @@ import {
   textDptCharWidth,
   textDptWritePayload,
 } from '../utils/knxSend';
-import { discreteDptValues, type BusPayload } from '../utils/dptValues';
+import {
+  discreteDptValues,
+  formatDiscreteChoiceLabel,
+  nextDiscreteLabelMode,
+  type BusPayload,
+  type DiscreteChoice,
+  type DiscreteLabelMode,
+} from '../utils/dptValues';
 import { boolBtn, primaryBtn } from '../utils/buttonStyles';
 import { focusVisible, useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
 import { ThemedDatetimePicker } from './ThemedDatetimePicker';
@@ -296,6 +303,25 @@ export function WriteControls({
   // The select index belongs to one DPT. A different key reads as the first entry,
   // so changing the DPT does not need an effect to clear a stale pick.
   const [picked, setPicked] = useState({ key: dptKey, index: 0 });
+  /** Decoded / 0x / 0b labels for ≤4-bit named send buttons (Ctrl-click cycles). */
+  const [labelModeState, setLabelModeState] = useState<{ key: string | null | undefined; mode: DiscreteLabelMode }>({
+    key: dptKey,
+    mode: 'name',
+  });
+  const labelMode: DiscreteLabelMode = labelModeState.key === dptKey ? labelModeState.mode : 'name';
+  const cycleLabelMode = (e: MouseEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    setLabelModeState(prev => ({
+      key: dptKey,
+      mode: nextDiscreteLabelMode(prev.key === dptKey ? prev.mode : 'name'),
+    }));
+    return true;
+  };
+  const discreteButtonLabel = (choice: DiscreteChoice) => (
+    formatDiscreteChoiceLabel(choice, dptKey, labelMode)
+  );
   const recents = useMemo(
     () => getRecentValues(address, dptKey, dptMain),
     [address, dptKey, dptMain, recentsTick],
@@ -451,19 +477,26 @@ export function WriteControls({
       <>
         {valueSlot}
         <div {...sendCol(choices.length)}>
-          {choices.map(choice => (
-            <button
-              key={choice.label}
-              type="button"
-              className="wtb-write-btn"
-              disabled={disabled}
-              onClick={e => { onWrite(choice.payload); retainWriteButtonFocus(e); }}
-              style={sendBtn(sendFit, boolBtn(disabled))}
-              title={`Write ${choice.label}`}
-            >
-              <Send size={13} /> {choice.label}
-            </button>
-          ))}
+          {choices.map(choice => {
+            const shown = discreteButtonLabel(choice);
+            return (
+              <button
+                key={choice.label}
+                type="button"
+                className="wtb-write-btn"
+                disabled={disabled}
+                onClick={e => {
+                  if (cycleLabelMode(e)) return;
+                  onWrite(choice.payload);
+                  retainWriteButtonFocus(e);
+                }}
+                style={sendBtn(sendFit, boolBtn(disabled))}
+                title={`Write ${choice.label}${labelMode === 'name' ? '' : ` (${shown})`} · ctrl/cmd-click to cycle name / hex / bin`}
+              >
+                <Send size={13} /> {shown}
+              </button>
+            );
+          })}
           {sendEnd}
         </div>
       </>
@@ -471,15 +504,41 @@ export function WriteControls({
   }
 
   if (subtype && dptMain === 1) {
+    const onChoice: DiscreteChoice = { label: 'on', payload: true };
+    const offChoice: DiscreteChoice = { label: 'off', payload: false };
+    const onShown = discreteButtonLabel(onChoice);
+    const offShown = discreteButtonLabel(offChoice);
     return (
       <>
         {valueSlot}
         <div {...sendCol(2)}>
-          <button type="button" className="wtb-write-btn" disabled={disabled} onClick={e => { onWrite(true); retainWriteButtonFocus(e); }} style={sendBtn(sendFit, boolBtn(disabled))} title="Write on">
-            <Send size={13} /> on
+          <button
+            type="button"
+            className="wtb-write-btn"
+            disabled={disabled}
+            onClick={e => {
+              if (cycleLabelMode(e)) return;
+              onWrite(true);
+              retainWriteButtonFocus(e);
+            }}
+            style={sendBtn(sendFit, boolBtn(disabled))}
+            title={`Write on${labelMode === 'name' ? '' : ` (${onShown})`} · ctrl/cmd-click to cycle name / hex / bin`}
+          >
+            <Send size={13} /> {onShown}
           </button>
-          <button type="button" className="wtb-write-btn" disabled={disabled} onClick={e => { onWrite(false); retainWriteButtonFocus(e); }} style={sendBtn(sendFit, boolBtn(disabled))} title="Write off">
-            <Send size={13} /> off
+          <button
+            type="button"
+            className="wtb-write-btn"
+            disabled={disabled}
+            onClick={e => {
+              if (cycleLabelMode(e)) return;
+              onWrite(false);
+              retainWriteButtonFocus(e);
+            }}
+            style={sendBtn(sendFit, boolBtn(disabled))}
+            title={`Write off${labelMode === 'name' ? '' : ` (${offShown})`} · ctrl/cmd-click to cycle name / hex / bin`}
+          >
+            <Send size={13} /> {offShown}
           </button>
           {sendEnd}
         </div>

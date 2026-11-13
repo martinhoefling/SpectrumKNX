@@ -672,3 +672,26 @@ test('DPT 19 renders a themed datetime picker and handles write', () => {
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
   expect(onWrite).toHaveBeenCalledWith('2026-07-18T12:30:00');
 });
+
+test('ctrl-click cycles ≤4-bit write button labels name → hex → bin without writing', () => {
+  const onWrite = vi.fn();
+  render(
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={onWrite} />,
+  );
+  const on = screen.getByRole('button', { name: /^on$/i });
+  fireEvent.click(on, { ctrlKey: true });
+  expect(onWrite).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /^0x1$/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^0x0$/i })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /^0x1$/i }), { ctrlKey: true });
+  expect(screen.getByRole('button', { name: /^0b1$/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^0b0$/i })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /^0b1$/i }), { ctrlKey: true });
+  expect(screen.getByRole('button', { name: /^on$/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^off$/i })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /^on$/i }));
+  expect(onWrite).toHaveBeenCalledWith(true);
+});

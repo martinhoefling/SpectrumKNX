@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { discreteDptValues, formatBusValueForDpt } from './dptValues';
+import {
+  discreteDptValues,
+  discretePayloadRawBits,
+  formatBusValueForDpt,
+  formatDiscreteChoiceLabel,
+  nextDiscreteLabelMode,
+} from './dptValues';
 
 test('discreteDptValues labels are lowercase', () => {
   expect(discreteDptValues('1.001')?.map(c => c.label)).toEqual(['off', 'on']);
@@ -72,4 +78,25 @@ test('formatBusValueForDpt keeps and pads spaces for fixed-width text DPTs', () 
     text: 'Café',
     unit: '',
   });
+});
+
+test('discretePayloadRawBits packs DPT 1/2/3 payloads', () => {
+  expect(discretePayloadRawBits(false, '1.001')).toBe(0);
+  expect(discretePayloadRawBits(true, '1.001')).toBe(1);
+  expect(discretePayloadRawBits({ control: false, value: 'off' }, '2.001')).toBe(0);
+  expect(discretePayloadRawBits({ control: true, value: 'on' }, '2.001')).toBe(3);
+  expect(discretePayloadRawBits({ control: 'increase', step_code: 3 }, '3.007')).toBe(0b1011);
+});
+
+test('formatDiscreteChoiceLabel cycles name / hex / bin', () => {
+  const on = discreteDptValues('1.001')![1];
+  expect(formatDiscreteChoiceLabel(on, '1.001', 'name')).toBe('on');
+  expect(formatDiscreteChoiceLabel(on, '1.001', 'hex')).toBe('0x1');
+  expect(formatDiscreteChoiceLabel(on, '1.001', 'bin')).toBe('0b1');
+  const controlled = discreteDptValues('2.001')!.find(c => c.label === 'on (control)')!;
+  expect(formatDiscreteChoiceLabel(controlled, '2.001', 'hex')).toBe('0x3');
+  expect(formatDiscreteChoiceLabel(controlled, '2.001', 'bin')).toBe('0b11');
+  expect(nextDiscreteLabelMode('name')).toBe('hex');
+  expect(nextDiscreteLabelMode('hex')).toBe('bin');
+  expect(nextDiscreteLabelMode('bin')).toBe('name');
 });

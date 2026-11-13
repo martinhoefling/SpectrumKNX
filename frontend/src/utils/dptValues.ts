@@ -144,6 +144,83 @@ export function describeBusPayload(payload: BusPayload, dptKey?: string | null):
   return String(payload);
 }
 
+/** Bit width of a ≤4-bit discrete DPT main (1 / 2 / 3), else null. */
+export function discreteDptBitWidth(dptKey?: string | null): number | null {
+  const parsed = dptKey ? parseDptKey(dptKey) : null;
+  if (!parsed) return null;
+  if (parsed.main === 1) return 1;
+  if (parsed.main === 2) return 2;
+  if (parsed.main === 3) return 4;
+  return null;
+}
+
+/**
+ * Raw nibble / bit pattern for a discrete ≤4-bit payload (same packing as
+ * formatBusValueForDpt / the bus). Null when the payload is not a known
+ * discrete encoding for this DPT.
+ */
+export function discretePayloadRawBits(
+  payload: BusPayload,
+  dptKey?: string | null,
+): number | null {
+  const parsed = dptKey ? parseDptKey(dptKey) : null;
+  if (!parsed) return null;
+
+  if (parsed.main === 1) {
+    if (typeof payload === 'boolean') return payload ? 1 : 0;
+    return null;
+  }
+
+  if (parsed.main === 2 && parsed.sub != null) {
+    const pair = DPT2[parsed.sub];
+    if (!pair || typeof payload !== 'object' || payload == null || !('value' in payload)) return null;
+    const control = Boolean((payload as { control: boolean }).control);
+    const name = String((payload as { value: string }).value);
+    const valueBit = pair.indexOf(name);
+    if (valueBit < 0) return null;
+    return (control ? 2 : 0) | valueBit;
+  }
+
+  if (parsed.main === 3 && parsed.sub != null) {
+    const pair = DPT3[parsed.sub];
+    if (!pair || typeof payload !== 'object' || payload == null || !('step_code' in payload)) return null;
+    const control = String((payload as { control: string }).control);
+    const step = Number((payload as { step_code: number }).step_code);
+    if (!Number.isFinite(step) || step < 0 || step > 7) return null;
+    const dirBit = pair.indexOf(control);
+    if (dirBit < 0) return null;
+    return (dirBit ? 8 : 0) | (step & 7);
+  }
+
+  return null;
+}
+
+export type DiscreteLabelMode = 'name' | 'hex' | 'bin';
+
+/** Cycle decoded → hex → binary → decoded (Ctrl-click on ≤4-bit send buttons). */
+export function nextDiscreteLabelMode(mode: DiscreteLabelMode): DiscreteLabelMode {
+  if (mode === 'name') return 'hex';
+  if (mode === 'hex') return 'bin';
+  return 'name';
+}
+
+/** Button label for a discrete choice under the active display mode. */
+export function formatDiscreteChoiceLabel(
+  choice: DiscreteChoice,
+  dptKey: string | null | undefined,
+  mode: DiscreteLabelMode,
+): string {
+  if (mode === 'name') return choice.label;
+  const bits = discretePayloadRawBits(choice.payload, dptKey);
+  const width = discreteDptBitWidth(dptKey);
+  if (bits == null || width == null) return choice.label;
+  if (mode === 'hex') {
+    const hexDigits = Math.max(1, Math.ceil(width / 4));
+    return `0x${bits.toString(16).toUpperCase().padStart(hexDigits, '0')}`;
+  }
+  return `0b${bits.toString(2).padStart(width, '0')}`;
+}
+
 export interface BusValueView {
   value_formatted?: string | null;
   value_numeric?: number | null;
