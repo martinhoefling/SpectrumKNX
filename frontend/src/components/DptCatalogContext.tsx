@@ -15,6 +15,7 @@ export function DptCatalogProvider({ value, children }: {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- catalog hook beside its provider
 export function useDptCatalog(): FilterOption[] {
   return useContext(DptCatalogContext);
 }

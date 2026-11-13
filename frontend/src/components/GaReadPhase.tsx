@@ -43,11 +43,13 @@ export function GaReadPhaseProvider({
   return <GaReadPhaseContext.Provider value={value}>{children}</GaReadPhaseContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- phase hook beside its provider
 export function useGaReadPhaseMap(): Map<string, GaReadPhase> {
   return useContext(GaReadPhaseContext).phases;
 }
 
 /** Green READ only when a Response in the known telegrams is strictly newer. */
+// eslint-disable-next-line react-refresh/only-export-components -- phase hook beside its provider
 export function useReadAnswered(
   read: Parameters<typeof readEventAnswered>[0],
 ): boolean {
@@ -55,6 +57,7 @@ export function useReadAnswered(
   return readEventAnswered(read, rows);
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- phase hook beside its provider
 export function useGaReadPhase(address: string | null | undefined): GaReadPhase {
   const map = useGaReadPhaseMap();
   const addr = (address ?? '').trim();
@@ -62,6 +65,7 @@ export function useGaReadPhase(address: string | null | undefined): GaReadPhase 
   return map.get(addr) ?? 'none';
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- phase hook beside its provider
 export function useGaReadPhaseFor(addresses: string[]): GaReadPhase {
   const map = useGaReadPhaseMap();
   return combineGaReadPhase(map, addresses);

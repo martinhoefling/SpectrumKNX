@@ -427,6 +427,7 @@ export function SendToGaPopover({
     const dir = latestTelegram.direction;
     if (dir !== 'Outgoing' && dir !== 'Incoming') return;
     const gen = ++flashGenRef.current;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pulse the icon when this GA's telegram arrives
     setBusPulse(dir);
     window.clearTimeout(pulseTimerRef.current);
     pulseTimerRef.current = window.setTimeout(() => {
@@ -589,6 +590,7 @@ function SendToGaPopoverPanel({
   const [posAway, setPosAway] = useState(false);
   const anchoredPosRef = useRef<{ top: number; left: number } | null>(null);
   const listSnapshotRef = useRef(listSnapshot);
+  // eslint-disable-next-line react-hooks/refs -- scroll listener reads the snapshot from this render
   listSnapshotRef.current = listSnapshot;
   const dragRef = useRef<{
     pointerId: number;
@@ -954,6 +956,7 @@ function SendToGaPopoverPanel({
   useLayoutEffect(() => {
     if (!panelOnly) return;
     anchorRef.current = panelAnchor ?? null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- host panel opens already placed
     adoptListSnapshot(panelListSnapshot ?? null);
     seenHostTriggerId.current = panelTriggerId;
     place('full');
@@ -1056,6 +1059,7 @@ function SendToGaPopoverPanel({
     setSeenLatest(latestTelegram);
     if (open && latestTelegram && latestTelegram.target_address === address) {
       if (isLastValueTelegram(latestTelegram)) {
+        // eslint-disable-next-line react-hooks/refs -- drop a late last-value fetch once this telegram wins
         loadLastGenRef.current += 1;
         setLast(latestTelegram);
       }

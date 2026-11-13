@@ -162,6 +162,7 @@ function dptHasSubtype(dptKey?: string | null): boolean {
  * Button-only DPTs (on/off, short named lists) do not.
  * A bare main or empty key still uses the free value field.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- shared layout helper
 export function needsValueColumn(dptKey?: string | null, dptMain?: number | null): boolean {
   const choices = discreteDptValues(dptKey);
   const subtype = dptHasSubtype(dptKey);
@@ -238,6 +239,7 @@ function payloadsEqual(a: unknown, b: unknown): boolean {
  * a read fades them. A discrete button passes its payload and fades when it
  * is not the job's value.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- shared button-tone helper
 export function valueSendMuted(
   locked: boolean,
   job: Pick<ScheduledSendStatus, 'read' | 'payload'> | null | undefined,
@@ -251,6 +253,7 @@ export function valueSendMuted(
 
 /** Read fades during a write (it is not the value). Response fades with the
  * write button that sends the value. */
+// eslint-disable-next-line react-refresh/only-export-components -- shared button-tone helper
 export function readModeButtonMuted(
   respond: boolean,
   locked: boolean,
@@ -523,8 +526,10 @@ export function WriteControls({
 
   const sendCol = (columns: number): HTMLAttributes<HTMLDivElement> & { ref: typeof sendColRef } => ({
     ...sendColProps,
+    // eslint-disable-next-line react-hooks/refs -- attach the send-column node for focus restore
     ref: sendColRef,
     onClickCapture: e => {
+      // eslint-disable-next-line react-hooks/refs -- click handler reads the column node
       onSendColClickCapture(e);
       sendColProps?.onClickCapture?.(e);
     },

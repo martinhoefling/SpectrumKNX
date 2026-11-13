@@ -410,6 +410,7 @@ export function ThemedDatetimePicker({
       return;
     }
     const p = parseParts(value, mode) ?? parseParts('', mode)!;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- copy the committed value into the open picker
     setDraft(p);
     setViewY(p.y);
     setViewMo(p.mo);
@@ -677,6 +678,7 @@ export function ThemedDatetimePicker({
   const setInputRef = (el: HTMLInputElement | null) => {
     localInputRef.current = el;
     if (typeof inputRef === 'function') inputRef(el);
+    // eslint-disable-next-line react-hooks/immutability -- forward the node to the caller's ref
     else if (inputRef && 'current' in inputRef) (inputRef as { current: HTMLInputElement | null }).current = el;
   };
 
@@ -894,6 +896,7 @@ export function ThemedDatetimePicker({
         onMouseDown={onWrapMouseDown}
       >
         <input
+          // eslint-disable-next-line react-hooks/immutability -- callback ref merges the local node with inputRef
           ref={setInputRef}
           type="text"
           disabled={disabled}

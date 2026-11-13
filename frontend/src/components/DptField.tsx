@@ -74,6 +74,8 @@ export function DptField({
   if (value !== seenValue) {
     setSeenValue(value);
     setDraft(value);
+    // Keep the blur handler on the value this render just adopted.
+    // eslint-disable-next-line react-hooks/refs -- mirror the committed DPT into the draft ref
     draftRef.current = value;
   }
   // Close the menu when the field becomes disabled (no valid GA) without an

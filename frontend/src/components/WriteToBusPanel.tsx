@@ -202,6 +202,12 @@ function resolveName(text: string, options: FilterOption[]): FilterOption | 'amb
 }
 const POLL_INTERVAL_MS = 1000;
 
+/** Optimistic next-send time for a delayed job. Kept outside render so the clock read stays in the send handler. */
+function optimisticNextSendAt(delaySeconds: number): string | null {
+  if (delaySeconds <= 0) return null;
+  return new Date(Date.now() + delaySeconds * 1000).toISOString();
+}
+
 let rowSeq = 0;
 const newRow = (): Row => ({
   id: `row-${rowSeq++}`, address: '', name: '', dpt: '', value: '', delay: '', every: '', respond: false, busy: false, feedback: null,
@@ -437,6 +443,7 @@ function paneMinWidth(widths: number[]): string {
  * same width, so a longer name or DPT on one row cannot shove that row's
  * later fields out of line with the others.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- unit-tested layout helper
 export function midPaneMinWidth(colTracks: number[] | null, showValueCol: boolean): string | null {
   if (!colTracks) return null;
   const slice = colTracks.slice(WTB_MID_START, WTB_MID_END);
@@ -669,11 +676,13 @@ function loadStoredRows(): Row[] | null {
 }
 
 /** Expected panel DPT for a telegram/project GA (or empty when unknown). */
+// eslint-disable-next-line react-refresh/only-export-components -- shared DPT helper
 export function expectedPanelDpt(dptMain?: number | null, dptSub?: number | null): string {
   return dptMain != null ? formatDpt(dptMain, dptSub) : '';
 }
 
 /** Top-row hint when GA is set and delay/every are empty; otherwise null. */
+// eslint-disable-next-line react-refresh/only-export-components -- shared row-hint helper
 export function topRowHintFromRow(
   row: Pick<Row, 'address' | 'dpt' | 'delay' | 'every'> | null | undefined,
 ): SendPanelTopRowHint | null {
@@ -684,6 +693,7 @@ export function topRowHintFromRow(
 }
 
 /** True when a top-row hint matches this GA + expected DPT. */
+// eslint-disable-next-line react-refresh/only-export-components -- shared row-hint helper
 export function topRowHintMatches(
   hint: SendPanelTopRowHint | null | undefined,
   address: string,
@@ -696,6 +706,7 @@ export function topRowHintMatches(
 }
 
 /** Unique trimmed GAs present in send-panel rows (order of first appearance). */
+// eslint-disable-next-line react-refresh/only-export-components -- shared address helper
 export function panelAddressesFromRows(
   rows: Array<{ address: string }>,
 ): string[] {
@@ -1386,6 +1397,7 @@ export function WriteToBusPanel({
         every: key.every,
       };
       setRows(rs => [...rs, next]);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- remember the GA the popover just ensured
       if (key.address) rememberGa(key.address);
       finish({ rowId: next.id, created: true, matched: false });
       return;
@@ -1425,8 +1437,10 @@ export function WriteToBusPanel({
   }, [sendPanelCommand?.nonce]);
 
   const onLinkedRowStatusesChangeRef = useRef(onLinkedRowStatusesChange);
+  // eslint-disable-next-line react-hooks/refs -- latest status callback for the emit effect
   onLinkedRowStatusesChangeRef.current = onLinkedRowStatusesChange;
   const onGaJobStatusesChangeRef = useRef(onGaJobStatusesChange);
+  // eslint-disable-next-line react-hooks/refs -- latest job-status callback for the emit effect
   onGaJobStatusesChangeRef.current = onGaJobStatusesChange;
   useEffect(() => {
     const emit = onLinkedRowStatusesChangeRef.current;
@@ -1574,6 +1588,7 @@ export function WriteToBusPanel({
     setSeenLatest(latestTelegram);
     if (latestTelegram) {
       if (isReadTelegram(latestTelegram)) {
+        // eslint-disable-next-line react-hooks/refs -- remember this render's Read for the job that just sent it
         latestReadByAddressRef.current.set(latestTelegram.target_address.trim(), latestTelegram);
       }
       const addr = latestTelegram.target_address;
@@ -1659,9 +1674,7 @@ export function WriteToBusPanel({
           failRow(row.id, 'Interval must be at least 1 second');
           return;
         }
-        const nextAt = delaySeconds > 0
-          ? new Date(Date.now() + delaySeconds * 1000).toISOString()
-          : null;
+        const nextAt = optimisticNextSendAt(delaySeconds);
         // Arm countdown/count before the network round-trip so Write feels instant.
         watchingRef.current = true;
         updateRow(row.id, { scheduledJobId: null });
@@ -1717,9 +1730,7 @@ export function WriteToBusPanel({
           failRow(row.id, 'Interval must be at least 1 second');
           return;
         }
-        const nextAt = delaySeconds > 0
-          ? new Date(Date.now() + delaySeconds * 1000).toISOString()
-          : null;
+        const nextAt = optimisticNextSendAt(delaySeconds);
         watchingRef.current = true;
         updateRow(row.id, { scheduledJobId: null });
         const optimistic: ScheduledSendStatus = {
@@ -1749,9 +1760,12 @@ export function WriteToBusPanel({
       updateRow(row.id, { busy: false });
     }
   };
+  // eslint-disable-next-line react-hooks/refs -- popover commands call the latest write
   writeRef.current = write;
+  // eslint-disable-next-line react-hooks/refs -- popover commands call the latest read
   readRef.current = read;
   // cancelJob is a nested function declaration (hoisted) below the return.
+  // eslint-disable-next-line react-hooks/refs -- popover commands call the latest cancel
   cancelJobRef.current = cancelJob;
 
   return (

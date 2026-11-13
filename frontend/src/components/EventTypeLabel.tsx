@@ -8,6 +8,7 @@ import type { GaReadPhase } from '../utils/telegramCellStyles';
 export type ReadIconDim = 'disabled' | 'muted';
 
 /** Display color for an event-kind word (and its icon, when the icon is part of the label). */
+// eslint-disable-next-line react-refresh/only-export-components -- shared event color helper
 export function eventTypeColor(kind: string, answered = false): string {
   const u = kind.trim().toUpperCase();
   if (u === 'WRITE' || u.includes('WRITE')) return 'var(--accent-primary)';
@@ -20,6 +21,7 @@ export function eventTypeColor(kind: string, answered = false): string {
 
 /** Radio color on a Read button: blue, then orange, then green.
  * An inactive button fades that color; `muted` is the stronger fade. */
+// eslint-disable-next-line react-refresh/only-export-components -- shared read-phase color helper
 export function readPhaseIconColor(phase: GaReadPhase, dim?: ReadIconDim): string {
   const base = phase === 'answered'
     ? 'var(--success)'
