@@ -83,3 +83,19 @@ test('text DPTs render padded values in monospace', () => {
   expect(el.textContent).toBe('Hi'.padEnd(14, ' '));
   expect(el).toHaveStyle({ fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre' });
 });
+
+test('allowFocus=false keeps the toggle out of the tab order', () => {
+  render(
+    <BusValueText
+      value={{ value_formatted: 'On', raw_hex: '0x01' }}
+      dpt="1.001"
+      allowFocus={false}
+    />,
+  );
+  const el = screen.getByRole('button', { name: 'on' });
+  expect(el).toHaveAttribute('tabIndex', '-1');
+  fireEvent.mouseDown(el);
+  expect(el).not.toHaveFocus();
+  fireEvent.click(el);
+  expect(screen.getByRole('button', { name: '0x01' })).toBe(el);
+});

@@ -5,6 +5,7 @@ import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot, Download } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaHost, SendToGaPopover, type ListScrollSnapshot } from './SendToGaPopover';
+import { topRowHintMatches, type SendPanelTopRowHint } from './WriteToBusPanel';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
@@ -37,6 +38,17 @@ interface TelegramTableProps {
   onGotoTelegram?: (telegram: Telegram) => void;
   /** Live bus feed for the send popover's wait-for-read-response. */
   latestTelegram?: Telegram | null;
+  /** Alt-click on a row send icon → toggle the send panel. */
+  onAltSend?: () => void;
+  /** Ctrl/Cmd-click on a row send icon → clear or insert that GA in the send panel. */
+  onCtrlSend?: (info: {
+    address: string;
+    name?: string | null;
+    dptMain?: number | null;
+    dptSub?: number | null;
+  }) => void;
+  /** Top send-panel row hint while the panel is open (send-icon blue). */
+  sendPanelTopHint?: SendPanelTopRowHint | null;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -212,7 +224,7 @@ function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascendi
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
-  latestTelegram,
+  latestTelegram, onAltSend, onCtrlSend, sendPanelTopHint = null,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -2221,6 +2233,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   buttonClassName="quick-send-btn"
                   onGotoTelegram={onGotoTelegram}
                   latestTelegram={latestTelegram}
+                  onAltSend={onAltSend}
+                  onCtrlSend={onCtrlSend}
+                  panelMatched={topRowHintMatches(
+                    sendPanelTopHint,
+                    t.target_address,
+                    t.dpt_main,
+                    t.dpt_sub,
+                  )}
                 />
               )}
             </div>

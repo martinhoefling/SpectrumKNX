@@ -1,6 +1,16 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { WriteToBusPanel, mergeColTracks, midTracksTemplate, resolvePanelHeight, scrollLeftOnViewportResize, shouldAutoGrowPanelHeight } from './WriteToBusPanel';
+import {
+  WriteToBusPanel,
+  expectedPanelDpt,
+  topRowHintFromRow,
+  topRowHintMatches,
+  mergeColTracks,
+  midTracksTemplate,
+  resolvePanelHeight,
+  scrollLeftOnViewportResize,
+  shouldAutoGrowPanelHeight,
+} from './WriteToBusPanel';
 
 test('hiding the value column drops that track, not the DPT track', () => {
   const tracks = [90, 100, 20, 30, 40, 50, 60, 70, 80, 90];
@@ -53,7 +63,7 @@ const HEIGHT_PREF = 'spectrum-knx.send-panel-height';
 
 test('the height resize handle resets a remembered panel height', () => {
   localStorage.setItem(HEIGHT_PREF, '240');
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   expect(screen.getByTitle(HEIGHT_HANDLE)).toBeInTheDocument();
   fireEvent.doubleClick(screen.getByTitle(HEIGHT_HANDLE));
   expect(localStorage.getItem(HEIGHT_PREF)).toBe('');
@@ -143,7 +153,7 @@ test('the value column is hidden when every row is a button DPT', () => {
     { address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '' },
     { address: '4/5/6', dpt: '1.001', value: '', delay: '', every: '' },
   ]));
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   expect(container.querySelector('[data-wtb-col="5"]')).toBeNull();
   expect(screen.getAllByRole('button', { name: /^on$/i })).toHaveLength(2);
   expect(midTrackCount(container)).toBe(8);
@@ -154,7 +164,7 @@ test('the value column stays when one row needs a value field', () => {
     { address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '' },
     { address: '4/5/6', dpt: '9.001', value: '21', delay: '', every: '' },
   ]));
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   const cells = Array.from(container.querySelectorAll('[data-wtb-col="5"]'));
   expect(cells).toHaveLength(2);
   expect(cells.filter(el => el.querySelector('input'))).toHaveLength(1);
@@ -196,7 +206,7 @@ test('changing a row DPT reoptimizes column tracks', () => {
     localStorage.setItem(ROWS_KEY, JSON.stringify([
       { address: '1/2/3', dpt: '9.001', value: '21.5', delay: '', every: '' },
     ]));
-    const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+    const { container } = render(<WriteToBusPanel targets={[]} />);
     const template = () => (container.querySelector('.wtb-mid-inner') as HTMLElement).style.gridTemplateColumns;
     const before = midTrackPx(template());
     const dptBefore = before[3];
@@ -224,7 +234,7 @@ test('sends immediately from a row when no delay or interval is set', async () =
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
@@ -239,13 +249,25 @@ test('adds and removes rows, sending to multiple GAs independently (#215)', asyn
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
 
   // One row initially; plain delete is blocked (aria-disabled), ctrl-reset stays available.
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
-  expect(screen.getByRole('button', { name: /At least one row is required/ }))
-    .toHaveAttribute('aria-disabled', 'true');
-  fireEvent.click(screen.getByRole('button', { name: /At least one row is required/ }));
+  const minus = screen.getByRole('button', { name: /At least one row is required/ });
+  const plus = screen.getByRole('button', { name: /Add a row below/ });
+  expect(minus).toHaveAttribute('aria-disabled', 'true');
+  // Dim via color, not opacity — so a focus ring would stay full strength.
+  expect(minus.style.opacity).toBe('');
+  expect(minus.style.color).toMatch(/color-mix/);
+  // Minus/Plus share the same icon box and stroke so they read as equal size.
+  expect(minus.style.width).toBe(plus.style.width);
+  expect(minus.style.height).toBe(plus.style.height);
+  const minusSvg = minus.querySelector('svg');
+  const plusSvg = plus.querySelector('svg');
+  expect(minusSvg?.getAttribute('width')).toBe(plusSvg?.getAttribute('width'));
+  expect(minusSvg?.getAttribute('height')).toBe(plusSvg?.getAttribute('height'));
+  expect(minusSvg?.getAttribute('stroke-width')).toBe(plusSvg?.getAttribute('stroke-width'));
+  fireEvent.click(minus);
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
 
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
@@ -266,7 +288,7 @@ test('adds and removes rows, sending to multiple GAs independently (#215)', asyn
 });
 
 test('plus inserts a row below the clicked one and minus removes that row', async () => {
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
 
@@ -285,7 +307,7 @@ test('plus inserts a row below the clicked one and minus removes that row', asyn
 });
 
 test('ctrl-click minus resets the row instead of removing it', async () => {
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('every'), { target: { value: '5' } });
@@ -303,6 +325,20 @@ test('ctrl-click minus resets the row instead of removing it', async () => {
   expect((screen.getAllByPlaceholderText('every')[0] as HTMLInputElement).value).toBe('');
 });
 
+test('ctrl-click on aria-disabled minus still initializes the sole row', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '1.001', value: '1', delay: '2', every: '5' },
+  ]));
+  render(<WriteToBusPanel targets={[]} />);
+  const minus = screen.getByRole('button', { name: /At least one row is required/ });
+  expect(minus).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(minus, { ctrlKey: true });
+  expect(screen.getByPlaceholderText('GA')).toHaveValue('');
+  expect(screen.getByPlaceholderText('delay')).toHaveValue('');
+  expect(screen.getByPlaceholderText('every')).toHaveValue('');
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
+});
+
 test('ctrl-click plus duplicates the row without an active job', async () => {
   const fetchMock = mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
@@ -310,7 +346,7 @@ test('ctrl-click plus duplicates the row without an active job', async () => {
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '2' } });
@@ -340,7 +376,7 @@ test('starts a single scheduled job from a row and shows the cancel control', as
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('every'), { target: { value: '5' } });
@@ -377,7 +413,7 @@ test('minus removes a row and cancels its running scheduled job by id', async ()
     { address: '4/5/6', dpt: '', value: '', delay: '', every: '' },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
 
@@ -410,7 +446,7 @@ test('removing a row while start is pending cancels the job once the server retu
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   fireEvent.change(screen.getAllByPlaceholderText('GA')[0], { target: { value: '1/2/3' } });
   fireEvent.change(screen.getAllByPlaceholderText(/Value/)[0], { target: { value: '50' } });
@@ -435,7 +471,7 @@ test('delay and every are locked while that row job is waiting or running', asyn
       { address: '1/2/3', dpt: '', value: '50', delay: '2', every: '5', scheduledJobId: job.id },
       { address: '4/5/6', dpt: '', value: '', delay: '', every: '' },
     ]));
-    const view = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+    const view = render(<WriteToBusPanel targets={[]} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
 
     const delays = screen.getAllByPlaceholderText('delay') as HTMLInputElement[];
@@ -463,7 +499,7 @@ test('picks up an already-running job on mount', async () => {
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '', value: '', delay: '', every: '', scheduledJobId: RUNNING_JOB.id },
   ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
   expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
   const shell = screen.getByLabelText(/cyclic send to 1\/2\/3/).closest('[data-status-field]')!;
@@ -493,7 +529,7 @@ test('a status error cancels only that row\'s active job', async () => {
     { address: '4/5/6', dpt: '5', value: '1', delay: '', every: '5', scheduledJobId: 'job-b' },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
 
   fireEvent.click(screen.getAllByRole('button', { name: /Write/ })[0]);
@@ -523,7 +559,7 @@ test('count column stays hidden until a cyclic job has sent at least once', asyn
     { address: '1/2/3', dpt: '', value: '', delay: '', every: '5', scheduledJobId: 'cyc-0' },
     { address: '', dpt: '', value: '', delay: '', every: '' },
   ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
   const shells = document.querySelectorAll('[data-status-field]');
   expect(shells).toHaveLength(2);
@@ -540,7 +576,7 @@ test('delayed job opens the countdown metric column on every row', async () => {
     { address: '1/2/3', dpt: '', value: '', delay: '30', every: '', scheduledJobId: WAITING_JOB.id },
     { address: '', dpt: '', value: '', delay: '', every: '' },
   ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
   const shells = document.querySelectorAll('[data-status-field]');
   expect(shells).toHaveLength(2);
@@ -557,7 +593,7 @@ test('delayed job shows a countdown before the first send', async () => {
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '', value: '', delay: '30', every: '', scheduledJobId: WAITING_JOB.id },
   ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
   const shell = screen.getByRole('button', { name: /^Cancel$/ }).closest('[data-status-field]')!;
   expect(shell.textContent).toMatch(/-\d+s|-\d+:\d{2}/);
@@ -574,7 +610,7 @@ test('metric columns stay hidden until a delayed or cyclic job is active', async
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const shells = () => Array.from(document.querySelectorAll('[data-status-field]'));
   expect(shells()).toHaveLength(2);
@@ -603,7 +639,7 @@ test('action column hides again when every row status is cleared', async () => {
     '/api/knx/send/scheduled/status': IDLE,
     '/api/knx/send': { status: 'sent' },
   }));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   expect(document.querySelector('[data-status-action]')).toBeNull();
 
@@ -639,7 +675,7 @@ test('action column is narrow for Clear-only and widens for Cancel', async () =>
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
@@ -672,7 +708,7 @@ test('shows countdown immediately on delayed Write click', async () => {
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '15' } });
@@ -690,10 +726,11 @@ test('shows countdown immediately on delayed Write click', async () => {
 });
 
 test('delay and every show unit s beside the value inside the field shell', () => {
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   expect(container.querySelectorAll('[data-seconds-field]')).toHaveLength(2);
   expect(screen.queryByText('s')).not.toBeInTheDocument();
 
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   const delay = screen.getByPlaceholderText('delay');
   const every = screen.getByPlaceholderText('every');
   fireEvent.change(delay, { target: { value: '2' } });
@@ -710,8 +747,23 @@ test('delay and every show unit s beside the value inside the field shell', () =
   expect(every).toHaveStyle({ textAlign: 'right' });
 });
 
+test('delay and every are disabled until a GA is entered', () => {
+  render(<WriteToBusPanel targets={[]} />);
+  const delay = screen.getByPlaceholderText('delay');
+  const every = screen.getByPlaceholderText('every');
+  expect(delay).toBeDisabled();
+  expect(every).toBeDisabled();
+  expect(delay).toHaveAttribute('title', 'Enter a group address first');
+  expect(every).toHaveAttribute('title', 'Enter a group address first');
+
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
+  expect(delay).not.toBeDisabled();
+  expect(every).not.toBeDisabled();
+});
+
 test('delay and every clear invalid input only on blur', () => {
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
+  fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   const delay = screen.getByPlaceholderText('delay');
   const every = screen.getByPlaceholderText('every');
 
@@ -750,7 +802,7 @@ test('restores persisted rows on mount (#254)', () => {
     { address: '4/5/6', dpt: '', value: '1', delay: '2', every: '10' },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
 
   const gaInputs = screen.getAllByPlaceholderText('GA');
   expect(gaInputs).toHaveLength(2);
@@ -762,7 +814,7 @@ test('restores persisted rows on mount (#254)', () => {
 });
 
 test('persists row edits so toggling the panel keeps them (#254)', async () => {
-  const { unmount } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { unmount } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '7/0/1' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '42' } });
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '3' } });
@@ -779,7 +831,7 @@ test('persists row edits so toggling the panel keeps them (#254)', async () => {
 
   // Simulate the visibility toggle: unmount and mount a fresh panel.
   unmount();
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   expect(screen.getByPlaceholderText('GA')).toHaveValue('7/0/1');
   expect(screen.getByPlaceholderText(/Value/)).toHaveValue('42');
   expect(screen.getByPlaceholderText('delay')).toHaveValue('3');
@@ -792,7 +844,7 @@ test('persists status feedback and bus telegram across panel toggle', async () =
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  const { unmount, rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { unmount, rerender } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
@@ -801,7 +853,7 @@ test('persists status feedback and bus telegram across panel toggle', async () =
   const writeTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T12:00:00.000000+00:00', value_formatted: '50', unit: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
 
   await waitFor(() => {
@@ -817,7 +869,7 @@ test('persists status feedback and bus telegram across panel toggle', async () =
   });
 
   unmount();
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   // Bound bus telegram drives the stable shell tooltip (with timestamp).
   expect(screen.getByLabelText(/written '50' to 1\/2\/3/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Go to status telegram' })).toBeInTheDocument();
@@ -827,7 +879,7 @@ test('persists status feedback and bus telegram across panel toggle', async () =
 
 test('falls back to a single empty row on malformed storage', () => {
   localStorage.setItem(ROWS_KEY, '{broken');
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   const gaInputs = screen.getAllByPlaceholderText('GA');
   expect(gaInputs).toHaveLength(1);
   expect(gaInputs[0]).toHaveValue('');
@@ -839,7 +891,7 @@ test('DPT-1 target renders On/Off and records the GA in recents', async () => {
     '/api/knx/send': { status: 'sent' },
   }));
 
-  render(<WriteToBusPanel targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '12/0/0' } });
   fireEvent.click(screen.getByRole('button', { name: /^on$/ }));
 
@@ -848,7 +900,7 @@ test('DPT-1 target renders On/Off and records the GA in recents', async () => {
 });
 
 test('committing a GA address records it in recents without sending', () => {
-  render(<WriteToBusPanel targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[{ address: '12/0/0', name: 'Heating mode', main: 1, sub: 1 }]} />);
   const ga = screen.getByPlaceholderText('GA');
   fireEvent.change(ga, { target: { value: '12/0/0' } });
   fireEvent.blur(ga);
@@ -879,7 +931,7 @@ test('shows the last value of the entered group address (#439)', async () => {
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   // Nothing to show until a complete group address is entered.
   expect(document.querySelector('.wtb-last-value')).toBeNull();
   expect(screen.queryByText('Last:')).not.toBeInTheDocument();
@@ -907,7 +959,6 @@ test('last value follows the row DPT like send buttons (0 → off for 1.001)', a
   render(
     <WriteToBusPanel
       targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
-      onClose={() => {}}
     />,
   );
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
@@ -927,7 +978,6 @@ test('last value decodes DPT 3.007 raw 0 as decrease 0 and toggles hex', async (
   render(
     <WriteToBusPanel
       targets={[{ address: '1/2/3', name: 'Dim', main: 3, sub: 7 }]}
-      onClose={() => {}}
     />,
   );
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
@@ -942,7 +992,7 @@ test('last value keeps decoded/raw when a new telegram arrives', async () => {
     '/api/knx/send/scheduled/status': IDLE,
     '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
   }));
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   const value = await waitFor(() => lastValueOf().querySelector('strong') as HTMLElement);
   expect(value).toHaveAttribute('aria-label', '21.5 °C');
@@ -952,7 +1002,6 @@ test('last value keeps decoded/raw when a new telegram arrives', async () => {
   rerender(
     <WriteToBusPanel
       targets={[]}
-      onClose={() => {}}
       latestTelegram={telegramOn('1/2/3', {
         timestamp: '2026-01-01T10:00:05.000000+00:00',
         value_formatted: '22.0',
@@ -970,7 +1019,7 @@ test('bare DPT main 2 sends hex and binary and refuses values outside 0-3', asyn
     '/api/knx/send': { status: 'sent' },
   });
   vi.stubGlobal('fetch', fetchMock);
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
 
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   const dpt = container.querySelector('input[aria-label="Datapoint type"]') as HTMLInputElement;
@@ -1009,7 +1058,7 @@ test('offers a go-to button in the event cell beside time and kind', async () =>
     '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
   }));
   const { rerender } = render(
-    <WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />,
+    <WriteToBusPanel targets={[]} onGotoTelegram={onGotoTelegram} />,
   );
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   const button = await screen.findByRole('button', { name: 'Go to telegram' });
@@ -1037,7 +1086,7 @@ test('offers a go-to button in the event cell beside time and kind', async () =>
     target_address: '1/2/3', value_formatted: '21.5',
   }));
 
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />);
+  rerender(<WriteToBusPanel targets={[]} onGotoTelegram={onGotoTelegram} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2' } });
   expect(screen.queryByRole('button', { name: 'Go to telegram' })).not.toBeInTheDocument();
 });
@@ -1054,7 +1103,7 @@ test('offers a go-to button in the event cell for a Read last telegram', async (
     '/api/knx/send/scheduled/status': IDLE,
     '/api/telegrams/last': { telegrams: [readTg] },
   }));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />);
+  render(<WriteToBusPanel targets={[]} onGotoTelegram={onGotoTelegram} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '0/7/1' } });
 
   const button = await screen.findByRole('button', { name: 'Go to telegram' });
@@ -1076,7 +1125,7 @@ test('leaves last empty when the group address has no recorded value', async () 
     '/api/knx/send/scheduled/status': IDLE,
     '/api/telegrams/last': { telegrams: [] },
   }));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   await waitFor(() => expect(
     document.querySelectorAll('[data-wtb-col="0"]').length,
@@ -1092,7 +1141,7 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
     '/api/telegrams/last': { telegrams: [telegramOn('1/2/3')] },
     '/api/knx/read': { status: 'sent' },
   }));
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('21.5 °C'));
 
@@ -1118,7 +1167,7 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
     timestamp: '2026-01-01T10:05:00.000000+00:00', telegram_type: 'GroupValueRead', simplified_type: 'Read',
     value_numeric: null, value_formatted: null, raw_data: null, raw_hex: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readRequest} onGotoTelegram={onGotoTelegram} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={readRequest} onGotoTelegram={onGotoTelegram} />);
   expect(lastValueOf()).toHaveTextContent('21.5 °C');
   expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
   const statusJump = await screen.findByRole('button', { name: 'Go to status telegram' });
@@ -1134,14 +1183,14 @@ test('a read waits for the response, ignoring the read request itself (#439)', a
   }));
 
   // A telegram for another address changes nothing.
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={telegramOn('9/9/9', { value_formatted: '99' })} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={telegramOn('9/9/9', { value_formatted: '99' })} />);
   expect(lastValueOf()).toHaveTextContent('21.5 °C');
 
   const response = telegramOn('1/2/3', {
     timestamp: '2026-01-01T10:05:00.120000+00:00', telegram_type: 'GroupValueResponse', simplified_type: 'Response',
     value_numeric: 22.3, value_formatted: '22.3',
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={response} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={response} />);
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('22.3 °C'));
   // Event column and Status both show the Response once the wait ends.
   expect(screen.getAllByText('RESPONSE').length).toBeGreaterThanOrEqual(1);
@@ -1161,7 +1210,7 @@ test('a Write on the same GA does not end a read wait — only Response does', a
     '/api/telegrams/last': { telegrams: [] },
     '/api/knx/read': { status: 'sent' },
   }));
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
   await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
@@ -1171,7 +1220,7 @@ test('a Write on the same GA does not end a read wait — only Response does', a
     value_formatted: 'On',
     value_numeric: 1,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
   expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument();
 
@@ -1182,7 +1231,7 @@ test('a Write on the same GA does not end a read wait — only Response does', a
     value_numeric: 1,
     value_formatted: 'On',
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={response} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={response} />);
   await waitFor(() => expect(screen.queryByLabelText(/read request sent/)).not.toBeInTheDocument());
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
   expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/RESPONSE/);
@@ -1195,7 +1244,7 @@ test('waiting Cancel clears the status wait', async () => {
     '/api/knx/read': { status: 'sent' },
     '/api/knx/send': { status: 'sent' },
   }));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   await waitFor(() => expect(lastValueOf()).toHaveTextContent('21.5 °C'));
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
@@ -1223,7 +1272,7 @@ test('waiting Cancel keeps unanswered Read instead of restoring the last write',
     '/api/knx/read': { status: 'sent' },
     '/api/telegrams/last': { telegrams: [] },
   }));
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
@@ -1232,7 +1281,7 @@ test('waiting Cancel keeps unanswered Read instead of restoring the last write',
   const writeTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T11:00:00.000000+00:00', value_formatted: '50', unit: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
 
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
@@ -1257,7 +1306,7 @@ test('delayed Write keeps a prior Read event visible during the countdown', asyn
     '/api/telegrams/last': { telegrams: [] },
   }));
 
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
   await waitFor(() => expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument());
@@ -1269,7 +1318,7 @@ test('delayed Write keeps a prior Read event visible during the countdown', asyn
     value_numeric: null,
     value_formatted: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={readTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
   expect(screen.getByRole('button', { name: 'Go to status telegram' }).closest('[data-status-field]')!.textContent)
     .toMatch(/READ/);
@@ -1311,7 +1360,7 @@ test('countdown stays visible after delayed start when server omits next_send_at
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '15' } });
@@ -1355,7 +1404,7 @@ test('Write while a job is active cancels and restarts the countdown', async () 
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('delay'), { target: { value: '10' } });
@@ -1399,7 +1448,7 @@ test('two rows can run scheduled sends concurrently', async () => {
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const gaInputs = screen.getAllByPlaceholderText('GA');
   fireEvent.change(gaInputs[0], { target: { value: '1/2/3' } });
@@ -1458,7 +1507,7 @@ test('two rows with the same GA each keep their own scheduled job', async () => 
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const gaInputs = screen.getAllByPlaceholderText('GA');
   fireEvent.change(gaInputs[0], { target: { value: '1/2/3' } });
@@ -1527,7 +1576,7 @@ test('remount reattaches scheduled jobs by persisted job id, not GA', async () =
     { address: '1/2/3', dpt: '', value: '0', delay: '20', every: '', scheduledJobId: 'job-b' },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
   const shells = document.querySelectorAll('[data-status-field]');
   expect(shells[0].querySelector('.lucide-timer')).not.toBeNull();
@@ -1547,7 +1596,7 @@ test('Write on one row does not clear Read-wait on another row with the same GA'
     '/api/telegrams/last': { telegrams: [] },
   }));
 
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const gaInputs = screen.getAllByPlaceholderText('GA');
   fireEvent.change(gaInputs[0], { target: { value: '1/2/3' } });
@@ -1563,7 +1612,7 @@ test('Write on one row does not clear Read-wait on another row with the same GA'
   const writeTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T13:00:00.000000+00:00', value_formatted: '50', unit: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
 
   expect(screen.getByLabelText(/read request sent to 1\/2\/3 without response/)).toBeInTheDocument();
   const shells = document.querySelectorAll('[data-status-field]');
@@ -1586,7 +1635,7 @@ test('shows write errors in the status shell without widening the status column'
     throw new Error(`Unexpected fetch: ${url}`);
   });
 
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
 
@@ -1613,7 +1662,7 @@ test('shows write errors in the status shell without widening the status column'
 });
 
 test('failed rewrite does not flash last send time or widen status from telegram', async () => {
-  const { container, rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container, rerender } = render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
 
@@ -1627,7 +1676,7 @@ test('failed rewrite does not flash last send time or widen status from telegram
   const writeTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T11:00:00.000000+00:00', value_formatted: '50', unit: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
   const beforeTrack = (container.querySelector('[data-wtb-col="10"]') as HTMLElement)
     .getBoundingClientRect().width;
@@ -1675,7 +1724,7 @@ test('status shell shows write event like Event column and clears', async () => 
   vi.stubGlobal('fetch', fetchMock);
 
   const { container, rerender } = render(
-    <WriteToBusPanel targets={[]} onClose={() => {}} onGotoTelegram={onGotoTelegram} />,
+    <WriteToBusPanel targets={[]} onGotoTelegram={onGotoTelegram} />,
   );
   const emptyShell = container.querySelector('[data-status-field]') as HTMLElement;
   expect(emptyShell).not.toBeNull();
@@ -1698,7 +1747,7 @@ test('status shell shows write event like Event column and clears', async () => 
     timestamp: '2026-01-01T11:00:00.000000+00:00', value_formatted: '50', unit: null,
   });
   rerender(
-    <WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} onGotoTelegram={onGotoTelegram} />,
+    <WriteToBusPanel targets={[]} latestTelegram={writeTg} onGotoTelegram={onGotoTelegram} />,
   );
   const jump = await screen.findByRole('button', { name: 'Go to status telegram' });
   const statusShell = jump.closest('[data-status-field]')!;
@@ -1752,7 +1801,7 @@ test('cyclic send shows countdown and count; both stay after Read during the job
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '', value: '50', delay: '', every: '5', scheduledJobId: 'cyc-1' },
   ]));
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
   const shell = screen.getByLabelText(/cyclic send to 1\/2\/3/).closest('[data-status-field]')!;
   // Cyclic running: interval countdown + send count.
@@ -1771,7 +1820,7 @@ test('cyclic send shows countdown and count; both stay after Read during the job
   const cyclicWrite = telegramOn('1/2/3', {
     timestamp: '2026-01-01T12:00:00.000000+00:00', value_formatted: '50',
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={cyclicWrite} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={cyclicWrite} />);
   afterRead = screen.getByLabelText(/read request sent to 1\/2\/3 without response/);
   expect(afterRead.querySelector('.lucide-radio')).not.toBeNull();
   expect(screen.getByLabelText(/Sends done 2/)).toHaveTextContent('2');
@@ -1784,7 +1833,7 @@ test('cyclic send shows countdown and count; both stay after Read during the job
     value_numeric: 22.3,
     value_formatted: '22.3',
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={response} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={response} />);
   await waitFor(() => expect(screen.queryByLabelText(/read request sent/)).not.toBeInTheDocument());
   expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument();
 });
@@ -1821,7 +1870,7 @@ test('each row keeps its own send job and read-wait status', async () => {
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const gaInputs = screen.getAllByPlaceholderText('GA');
   fireEvent.change(gaInputs[0], { target: { value: '1/2/3' } });
@@ -1890,7 +1939,7 @@ test('Cancel during cyclic Read-wait ends the job but keeps unanswered Read', as
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '', value: '', delay: '', every: '5', scheduledJobId: 'cyc-2' },
   ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
 
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
@@ -1944,13 +1993,13 @@ test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not t
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '', value: '50', delay: '', every: '5', scheduledJobId: 'cyc-read-keep' },
   ]));
-  const { rerender } = render(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={null} />);
+  const { rerender } = render(<WriteToBusPanel targets={[]} latestTelegram={null} />);
   await waitFor(() => expect(screen.getByLabelText(/cyclic send to 1\/2\/3/)).toBeInTheDocument());
 
   const writeTg = telegramOn('1/2/3', {
     timestamp: '2026-01-01T12:00:00.000000+00:00', value_formatted: '50', unit: null,
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={writeTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={writeTg} />);
   await screen.findByRole('button', { name: 'Go to status telegram' });
 
   fireEvent.click(screen.getByRole('button', { name: /Read/ }));
@@ -1961,7 +2010,7 @@ test('Cancel after cyclic Write + unanswered Read keeps the Read telegram, not t
     telegram_type: 'GroupValueRead',
     simplified_type: 'Read',
   });
-  rerender(<WriteToBusPanel targets={[]} onClose={() => {}} latestTelegram={readTg} />);
+  rerender(<WriteToBusPanel targets={[]} latestTelegram={readTg} />);
   await waitFor(() => {
     expect(document.querySelector('[data-status-field]')?.textContent).toMatch(/READ/);
   });
@@ -2005,7 +2054,7 @@ test('Cancel on a cyclic job zeroes sends_done and hides the count column', asyn
     { address: '1/2/3', dpt: '', value: '', delay: '', every: '5', scheduledJobId: 'cyc-zero' },
     { address: '', dpt: '', value: '', delay: '', every: '' },
   ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByLabelText(/Sends done 4/)).toBeInTheDocument());
   expect(document.querySelectorAll('[data-status-metric="count"]')).toHaveLength(2);
 
@@ -2032,7 +2081,7 @@ test('keeps scheduled job cancel in the status shell without clear', async () =>
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('every'), { target: { value: '5' } });
@@ -2053,38 +2102,29 @@ test('keeps scheduled job cancel in the status shell without clear', async () =>
 
 // ── Panel header: Close / Reset / Cancel ─────────────────────────────────────
 
-test('header Close calls onClose', () => {
-  const onClose = vi.fn();
-  render(<WriteToBusPanel targets={[]} onClose={onClose} />);
-  expect(screen.getByText('Write to bus')).toBeInTheDocument();
-  expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
-  const closeBtn = screen.getByRole('button', { name: 'Close send panel' });
-  expect(closeBtn).toHaveClass('wtb-close-button');
-  expect(closeBtn.parentElement).toHaveClass('wtb-panel-header');
-  fireEvent.click(closeBtn);
-  expect(onClose).toHaveBeenCalledTimes(1);
-});
-
-test('hides the Cancel/Reset header row when only one send row is present', () => {
-  const { unmount } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
-  expect(screen.queryByRole('button', { name: 'Reset panel' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Cancel all' })).not.toBeInTheDocument();
-  unmount();
-
-  localStorage.setItem(ROWS_KEY, JSON.stringify([
-    { address: '1/2/3', dpt: '', value: '', delay: '', every: '' },
-    { address: '4/5/6', dpt: '', value: '', delay: '', every: '' },
-  ]));
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+test('title lives in the top grid row with Reset/Add (no separate header band)', () => {
+  const { container } = render(<WriteToBusPanel targets={[]} />);
+  const title = container.querySelector('.wtb-header-grid .wtb-panel-title');
+  expect(title).toBeTruthy();
+  expect(title).toHaveTextContent('Write to bus');
+  expect(container.querySelector('.wtb-panel-header')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Reset panel' })).toBeInTheDocument();
 });
 
+test('header Reset/Add row stay visible with a single send row', () => {
+  render(<WriteToBusPanel targets={[]} />);
+  expect(screen.getByRole('button', { name: 'Reset panel' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Add row at top' })).toBeInTheDocument();
+  // Cancel stays mounted but hidden until multiple cancellable rows exist.
+  expect(screen.getByRole('button', { name: 'Cancel all', hidden: true })).toBeInTheDocument();
+});
+
 test('only the mid pane has a horizontal scrollbar host (GA and status stay pinned)', () => {
-  const { container } = render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  const { container } = render(<WriteToBusPanel targets={[]} />);
   const outer = container.querySelector('.wtb-h-scroll') as HTMLElement;
   expect(outer).toBeTruthy();
   expect(outer.style.overflowX).toBe('hidden');
-  expect(outer.style.padding).toBe('0px 0px 0px 0.85rem');
+  expect(outer.style.padding).toBe('0.45rem 0px 0px 0.85rem');
   expect(container.querySelector('.wtb-mid-h-scroll')).toBeTruthy();
   expect(container.querySelector('.wtb-mid-clip')).toBeTruthy();
   expect(container.querySelector('.wtb-rows-grid')).toBeTruthy();
@@ -2112,7 +2152,7 @@ test('header Reset cancels all jobs and clears the panel to one empty row', asyn
     { address: '4/5/6', dpt: '', value: '1', delay: '', every: '' },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   // One live job → row Cancel, but not header Cancel.
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
   expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
@@ -2137,7 +2177,7 @@ test('header Cancel is reserved in layout and only visible with two or more row 
     { address: '4/5/6', dpt: '', value: '1', delay: '', every: '5', scheduledJobId: jobB.id },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
   const cancelAll = screen.getByRole('button', { name: 'Cancel all' });
   expect(cancelAll).toHaveAttribute('title', 'Cancel all jobs and read waits');
@@ -2174,7 +2214,7 @@ test('header Cancel ends jobs and read waits but keeps row addresses', async () 
     { address: '4/5/6', dpt: '', value: '1', delay: '', every: '' },
   ]));
 
-  render(<WriteToBusPanel targets={[]} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={[]} />);
   await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/ })).toBeInTheDocument());
   expect(screen.queryByTitle('Cancel all jobs and read waits')).not.toBeInTheDocument();
 
@@ -2204,7 +2244,7 @@ const NAMED = [
 ];
 
 test('leaving the address field fills the matching name', () => {
-  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={NAMED} />);
   const address = screen.getByPlaceholderText('GA');
   const name = screen.getByPlaceholderText('Group name');
   fireEvent.change(address, { target: { value: '1/1/97' } });
@@ -2215,7 +2255,7 @@ test('leaving the address field fills the matching name', () => {
 });
 
 test('leaving the name field fills the matching address', () => {
-  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={NAMED} />);
   const address = screen.getByPlaceholderText('GA');
   const name = screen.getByPlaceholderText('Group name');
   fireEvent.change(name, { target: { value: 'Living room light' } });
@@ -2225,22 +2265,27 @@ test('leaving the name field fills the matching address', () => {
   expect(name).toHaveValue('Living room light');
 });
 
-test('Enter in the name field selects the highlighted suggestion', () => {
-  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+test('Enter in the name field selects the highlighted suggestion', async () => {
+  render(<WriteToBusPanel targets={NAMED} />);
   const name = screen.getByPlaceholderText('Group name');
   fireEvent.change(name, { target: { value: 'Helligkeit' } });
+  // Typing clears the highlight; ArrowDown selects the top match for Enter.
+  fireEvent.keyDown(name, { key: 'ArrowDown' });
+  await waitFor(() => expect(screen.getByRole('option', { name: /Helligkeit/ })).toBeInTheDocument());
   fireEvent.keyDown(name, { key: 'Enter' });
   expect(screen.getByPlaceholderText('GA')).toHaveValue('1/1/97');
   expect(name).toHaveValue('EGD_BWM55TG2A_Helligkeit');
 });
 
-test('an incomplete value resolves both fields of that row only', () => {
-  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+test('an incomplete value resolves both fields of that row only', async () => {
+  render(<WriteToBusPanel targets={NAMED} />);
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   const addresses = screen.getAllByPlaceholderText('GA');
   const names = screen.getAllByPlaceholderText('Group name');
 
   fireEvent.change(addresses[0], { target: { value: '1/1' } });
+  fireEvent.keyDown(addresses[0], { key: 'ArrowDown' });
+  await waitFor(() => expect(screen.getByRole('option', { name: /1\/1\/97/ })).toBeInTheDocument());
   fireEvent.blur(addresses[0]);
   expect(addresses[0]).toHaveValue('1/1/97');
   expect(names[0]).toHaveValue('EGD_BWM55TG2A_Helligkeit');
@@ -2248,6 +2293,8 @@ test('an incomplete value resolves both fields of that row only', () => {
   expect(names[1]).toHaveValue('');
 
   fireEvent.change(names[1], { target: { value: 'Living' } });
+  fireEvent.keyDown(names[1], { key: 'ArrowDown' });
+  await waitFor(() => expect(screen.getByRole('option', { name: /Living room light/ })).toBeInTheDocument());
   fireEvent.blur(names[1]);
   expect(addresses[1]).toHaveValue('1/2/3');
   expect(names[1]).toHaveValue('Living room light');
@@ -2256,10 +2303,307 @@ test('an incomplete value resolves both fields of that row only', () => {
 });
 
 test('choosing a name suggestion updates both fields', () => {
-  render(<WriteToBusPanel targets={NAMED} onClose={() => {}} />);
+  render(<WriteToBusPanel targets={NAMED} />);
   const name = screen.getByPlaceholderText('Group name');
   fireEvent.change(name, { target: { value: 'Living' } });
   fireEvent.mouseDown(screen.getByRole('option', { name: /Living room light/ }));
   expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3');
   expect(name).toHaveValue('Living room light');
+});
+
+// ── GA blur: empty initializes; invalid / incomplete / unknown reverts ───────
+
+test('clearing the GA field on blur initializes the whole row', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '1.001', value: '1', delay: '2', every: '5' },
+  ]));
+  render(<WriteToBusPanel targets={NAMED} />);
+  const ga = screen.getByPlaceholderText('GA');
+  expect(ga).toHaveValue('1/2/3');
+  fireEvent.focus(ga);
+  fireEvent.change(ga, { target: { value: '' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('');
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('');
+  expect(screen.getByLabelText('Datapoint type')).toHaveValue('');
+  expect(screen.getByPlaceholderText('Value')).toHaveValue('');
+  expect(screen.getByPlaceholderText('delay')).toHaveValue('');
+  expect(screen.getByPlaceholderText('every')).toHaveValue('');
+});
+
+test('incomplete GA with a project loaded reverts on blur', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={NAMED} />);
+  const ga = screen.getByPlaceholderText('GA');
+  fireEvent.focus(ga);
+  // Typing clears the highlight so blur commits free text instead of picking a suggestion.
+  fireEvent.change(ga, { target: { value: '1/' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('1/2/3');
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('Living room light');
+});
+
+test('invalid GA with a project loaded reverts on blur', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={NAMED} />);
+  const ga = screen.getByPlaceholderText('GA');
+  fireEvent.focus(ga);
+  fireEvent.change(ga, { target: { value: 'not-a-ga' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('1/2/3');
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('Living room light');
+});
+
+test('unknown complete GA with a project loaded reverts on blur', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={NAMED} />);
+  const ga = screen.getByPlaceholderText('GA');
+  fireEvent.focus(ga);
+  fireEvent.change(ga, { target: { value: '9/9/9' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('1/2/3');
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('Living room light');
+});
+
+test('valid project GA still commits name on blur', () => {
+  render(<WriteToBusPanel targets={NAMED} />);
+  const ga = screen.getByPlaceholderText('GA');
+  fireEvent.focus(ga);
+  fireEvent.change(ga, { target: { value: '1/1/97' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('1/1/97');
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('EGD_BWM55TG2A_Helligkeit');
+});
+
+test('unknown GA name reverts on blur', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={NAMED} />);
+  const name = screen.getByPlaceholderText('Group name');
+  fireEvent.focus(name);
+  fireEvent.change(name, { target: { value: 'Custom free name' } });
+  fireEvent.blur(name);
+  expect(name).toHaveValue('Living room light');
+  expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3');
+});
+
+test('clearing the GA name on blur leaves it empty', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Living room light', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={NAMED} />);
+  const name = screen.getByPlaceholderText('Group name');
+  fireEvent.focus(name);
+  fireEvent.change(name, { target: { value: '' } });
+  fireEvent.blur(name);
+  expect(name).toHaveValue('');
+  expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3');
+});
+
+test('without a project, complete free-entry GA is kept and invalid reverts', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={[]} />);
+  const ga = screen.getByPlaceholderText('GA');
+
+  fireEvent.focus(ga);
+  fireEvent.change(ga, { target: { value: '5/5/5' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('5/5/5');
+
+  fireEvent.focus(ga);
+  fireEvent.change(ga, { target: { value: 'nope' } });
+  fireEvent.blur(ga);
+  expect(ga).toHaveValue('5/5/5');
+});
+
+test('topRowHintFromRow / topRowHintMatches use only the top row semantics', () => {
+  expect(expectedPanelDpt(9, 1)).toBe('9.001');
+  expect(expectedPanelDpt(null, 1)).toBe('');
+  const top = { address: '1/2/3', dpt: '9.001', delay: '', every: '' };
+  const hint = topRowHintFromRow(top);
+  expect(hint).toEqual({ address: '1/2/3', dpt: '9.001' });
+  expect(topRowHintMatches(hint, '1/2/3', 9, 1)).toBe(true);
+  expect(topRowHintMatches(hint, '4/5/6', 9, 1)).toBe(false);
+  expect(topRowHintMatches(hint, '1/2/3', 5, 1)).toBe(false);
+  // Delay/every must be empty for a hint.
+  expect(topRowHintFromRow({ ...top, delay: '2' })).toBeNull();
+  expect(topRowHintFromRow({ ...top, every: '5' })).toBeNull();
+  expect(topRowHintFromRow({ address: '', dpt: '9.001', delay: '', every: '' })).toBeNull();
+});
+
+test('onTopRowHintChange reports the top row and clears on unmount', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '9.001', value: '21', delay: '', every: '' },
+    { address: '4/5/6', dpt: '5.001', value: '1', delay: '', every: '' },
+  ]));
+  const onTopRowHintChange = vi.fn();
+  const { unmount } = render(
+    <WriteToBusPanel targets={[]} onTopRowHintChange={onTopRowHintChange} />,
+  );
+  expect(onTopRowHintChange).toHaveBeenCalledWith({ address: '1/2/3', dpt: '9.001' });
+  unmount();
+  expect(onTopRowHintChange).toHaveBeenLastCalledWith(null);
+});
+
+test('header Add row at top inserts a blank row at index 0', () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '9.001', value: '21', delay: '', every: '' },
+    { address: '4/5/6', dpt: '5.001', value: '1', delay: '', every: '' },
+  ]));
+  render(<WriteToBusPanel targets={[]} />);
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: /^Add row at top$/i }));
+  const gas = screen.getAllByPlaceholderText('GA');
+  expect(gas).toHaveLength(3);
+  expect(gas[0]).toHaveValue('');
+  expect(gas[1]).toHaveValue('1/2/3');
+  expect(gas[2]).toHaveValue('4/5/6');
+});
+
+// ── Ctrl-send request: clear matching top row or insert above ────────────────
+
+test('ctrlSendRequest clears a matching top row (same GA, DPT, empty delay/every)', async () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Light', dpt: '1.001', value: '1', delay: '', every: '' },
+  ]));
+  const onCtrlSendHandled = vi.fn();
+  const { rerender } = render(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
+      ctrlSendRequest={null}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3');
+
+  rerender(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
+      ctrlSendRequest={{ nonce: 1, address: '1/2/3', dptMain: 1, dptSub: 1 }}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  await waitFor(() => expect(screen.getByPlaceholderText('GA')).toHaveValue(''));
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('');
+  expect(onCtrlSendHandled).toHaveBeenCalled();
+});
+
+test('ctrlSendRequest fills an empty top row instead of inserting', async () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '', dpt: '', value: '', delay: '', every: '' },
+  ]));
+  const onCtrlSendHandled = vi.fn();
+  const { rerender } = render(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
+      ctrlSendRequest={null}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
+
+  rerender(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
+      ctrlSendRequest={{ nonce: 4, address: '1/2/3', dptMain: 1, dptSub: 1 }}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  await waitFor(() => expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3'));
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
+  expect(screen.getByPlaceholderText('Group name')).toHaveValue('Light');
+  expect(onCtrlSendHandled).toHaveBeenCalled();
+});
+
+test('ctrlSendRequest inserts at top when DPT differs or delay/every set', async () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '5.001', value: '', delay: '', every: '' },
+  ]));
+  const onCtrlSendHandled = vi.fn();
+  const { rerender, container } = render(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
+      ctrlSendRequest={null}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+
+  rerender(
+    <WriteToBusPanel
+      targets={[{ address: '1/2/3', name: 'Light', main: 1, sub: 1 }]}
+      ctrlSendRequest={{ nonce: 2, address: '1/2/3', name: 'Light', dptMain: 1, dptSub: 1 }}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  await waitFor(() => expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2));
+  const gas = screen.getAllByPlaceholderText('GA');
+  expect(gas[0]).toHaveValue('1/2/3');
+  expect(gas[1]).toHaveValue('1/2/3');
+  expect(screen.getAllByPlaceholderText('Group name')[0]).toHaveValue('Light');
+  expect(container.querySelector('.row-outline-flash')).toBeTruthy();
+  expect(onCtrlSendHandled).toHaveBeenCalled();
+});
+
+test('ctrlSendRequest inserts a new GA at the top', async () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '4/5/6', dpt: '5.001', value: '', delay: '', every: '' },
+  ]));
+  const { rerender } = render(
+    <WriteToBusPanel
+      targets={[
+        { address: '1/2/3', name: 'Light', main: 1, sub: 1 },
+        { address: '4/5/6', name: 'Other', main: 5, sub: 1 },
+      ]}
+      ctrlSendRequest={null}
+    />,
+  );
+  rerender(
+    <WriteToBusPanel
+      targets={[
+        { address: '1/2/3', name: 'Light', main: 1, sub: 1 },
+        { address: '4/5/6', name: 'Other', main: 5, sub: 1 },
+      ]}
+      ctrlSendRequest={{ nonce: 3, address: '1/2/3', dptMain: 1, dptSub: 1 }}
+    />,
+  );
+  await waitFor(() => expect(screen.getAllByPlaceholderText('GA')[0]).toHaveValue('1/2/3'));
+  expect(screen.getAllByPlaceholderText('GA')[1]).toHaveValue('4/5/6');
+});
+
+test('ctrlSendRequest is a no-op when the panel already has more than one row', async () => {
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '' },
+    { address: '4/5/6', dpt: '5.001', value: '', delay: '', every: '' },
+  ]));
+  const onCtrlSendHandled = vi.fn();
+  const { rerender } = render(
+    <WriteToBusPanel
+      targets={[]}
+      ctrlSendRequest={null}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
+
+  rerender(
+    <WriteToBusPanel
+      targets={[]}
+      ctrlSendRequest={{ nonce: 9, address: '7/8/9', dptMain: 1, dptSub: 1 }}
+      onCtrlSendHandled={onCtrlSendHandled}
+    />,
+  );
+  await waitFor(() => expect(onCtrlSendHandled).toHaveBeenCalled());
+  const gas = screen.getAllByPlaceholderText('GA');
+  expect(gas).toHaveLength(2);
+  expect(gas[0]).toHaveValue('1/2/3');
+  expect(gas[1]).toHaveValue('4/5/6');
 });

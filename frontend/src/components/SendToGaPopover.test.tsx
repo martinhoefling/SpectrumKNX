@@ -247,6 +247,8 @@ test('triggers a GroupValueRead from the Read button', async () => {
   expect(document.querySelector('[data-status-field] .lucide-radio')).not.toBeNull();
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Datapoint type')).toBeInTheDocument();
+  expect(read).toHaveClass('wtb-read-btn');
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Read$/ })).toHaveFocus());
 });
 
 test('read wait ends only on Response; Write is ignored; close clears wait', async () => {
@@ -289,10 +291,11 @@ test('read wait ends only on Response; Write is ignored; close clears wait', asy
   rerender(
     <SendToGaPopover address="1/1/97" name="Helligkeit" dptMain={9} dptSub={4} latestTelegram={writeTg as never} />,
   );
-  // Write must not end the wait or replace last value.
+  // Write updates last value/timestamp but must not end the wait.
   expect(screen.getByLabelText(/^read request sent$/i)).toBeInTheDocument();
-  expect(screen.getByText('21.5')).toBeInTheDocument();
-  expect(screen.queryByText('99')).not.toBeInTheDocument();
+  expect(screen.getByText('99')).toBeInTheDocument();
+  expect(screen.queryByText('21.5')).not.toBeInTheDocument();
+  expect(screen.getByText(format(new Date('2026-07-17T09:05:01Z'), 'yyyy-MM-dd HH:mm:ss'))).toBeInTheDocument();
 
   const response = {
     timestamp: '2026-07-17T09:05:02Z',
@@ -701,4 +704,184 @@ test('value unit follows the selected DPT over the last telegram unit', async ()
   expect(dpt).toHaveValue('9.001');
   expect(valueField()).toHaveTextContent('°C');
   expect(valueField()).not.toHaveTextContent('lx');
+});
+
+test('hosted same-GA click on another row moves the popover instead of closing', async () => {
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+  const captureListScroll = vi.fn(() => ({ scrollTop: 10, key: 'a', offset: 2 }));
+
+  const rect = (top: number) => () => ({
+    x: 120, y: top, top, left: 120, right: 144, bottom: top + 24, width: 24, height: 24,
+    toJSON() { return this; },
+  });
+
+  render(
+    <div data-telegram-table style={{ position: 'fixed', top: 0, left: 0, width: 600, height: 400 }}>
+      <SendToGaHost captureListScroll={captureListScroll}>
+        <SendToGaPopover address="1/1/1" dptMain={9} dptSub={1} triggerId="row-a" />
+        <SendToGaPopover address="1/1/1" dptMain={9} dptSub={1} triggerId="row-b" />
+      </SendToGaHost>
+    </div>,
+  );
+  const triggers = screen.getAllByRole('button', { name: /Send to this GA/ });
+  triggers[0].getBoundingClientRect = rect(100);
+  triggers[1].getBoundingClientRect = rect(200);
+
+  fireEvent.click(triggers[0]);
+  await waitFor(() => expect(screen.getByText('1/1/1')).toBeInTheDocument());
+  expect(triggers[0]).toHaveAttribute('data-send-popover-open');
+  expect(triggers[1]).toHaveAttribute('data-send-popover-open');
+  expect(captureListScroll).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(triggers[1]);
+  await waitFor(() => expect(screen.getByText('1/1/1')).toBeInTheDocument());
+  expect(screen.getByText('1/1/1')).toBeInTheDocument();
+  expect(captureListScroll).toHaveBeenCalledTimes(2);
+  expect(triggers[0]).toHaveAttribute('data-send-popover-open');
+  expect(triggers[1]).toHaveAttribute('data-send-popover-open');
+
+  fireEvent.click(triggers[1]);
+  await waitFor(() => expect(screen.queryByText('1/1/1')).not.toBeInTheDocument());
+});
+
+test('opens the free value field focused when possible', async () => {
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+  render(<SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  await waitFor(() => expect(screen.getByLabelText('Value')).toBeInTheDocument());
+  expect(screen.getByLabelText('Value')).toHaveFocus();
+});
+
+test('alt-click on hosted trigger calls onAltSend and does not open the popover', () => {
+  const onAltSend = vi.fn();
+  render(
+    <SendToGaHost>
+      <SendToGaPopover
+        address="2/3/4"
+        name="Lamp"
+        dptMain={1}
+        dptSub={1}
+        triggerId="t1"
+        onAltSend={onAltSend}
+      />
+    </SendToGaHost>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }), { altKey: true });
+  expect(onAltSend).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText('2/3/4')).not.toBeInTheDocument();
+});
+
+test('ctrl-click on hosted trigger calls onCtrlSend and does not open the popover', () => {
+  const onCtrlSend = vi.fn();
+  render(
+    <SendToGaHost>
+      <SendToGaPopover
+        address="2/3/4"
+        name="Lamp"
+        dptMain={1}
+        dptSub={1}
+        triggerId="t1"
+        onCtrlSend={onCtrlSend}
+      />
+    </SendToGaHost>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }), { ctrlKey: true });
+  expect(onCtrlSend).toHaveBeenCalledWith({
+    address: '2/3/4',
+    name: 'Lamp',
+    dptMain: 1,
+    dptSub: 1,
+  });
+  expect(screen.queryByText('2/3/4')).not.toBeInTheDocument();
+});
+
+test('opening a DPT-1 popover focuses the leftmost write button, not on or Read', async () => {
+  render(<SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />);
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: /^off$/i })).toHaveFocus());
+  expect(screen.getByRole('button', { name: /^on$/i })).not.toHaveFocus();
+  expect(screen.getByRole('button', { name: /^Read$/i })).not.toHaveFocus();
+});
+
+test('panelMatched keeps the send icon blue via data-send-panel-match', () => {
+  render(
+    <SendToGaHost>
+      <SendToGaPopover address="2/3/4" triggerId="t1" panelMatched />
+    </SendToGaHost>,
+  );
+  const btn = screen.getByRole('button', { name: /Send to this GA/ });
+  expect(btn).toHaveAttribute('data-send-panel-match');
+  expect(btn.style.color).toBe('var(--accent-primary)');
+});
+
+test('live Write updates last value and timestamp while open', async () => {
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/telegrams': {
+      telegrams: [{
+        value_formatted: '21.5', unit: '°C', timestamp: '2026-07-17T09:00:00Z',
+        simplified_type: 'Write', target_address: '1/1/97',
+      }],
+    },
+  }));
+  const { rerender } = render(
+    <SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} latestTelegram={null} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  await waitFor(() => expect(screen.getByText('21.5')).toBeInTheDocument());
+
+  const writeTg = {
+    timestamp: '2026-07-17T09:10:00Z',
+    telegram_type: 'GroupValueWrite',
+    simplified_type: 'Write',
+    target_address: '1/1/97',
+    value_formatted: '18.0',
+    unit: '°C',
+  };
+  rerender(
+    <SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} latestTelegram={writeTg as never} />,
+  );
+  expect(screen.getByText('18.0')).toBeInTheDocument();
+  expect(screen.getByText(format(new Date('2026-07-17T09:10:00Z'), 'yyyy-MM-dd HH:mm:ss'))).toBeInTheDocument();
+});
+
+test('late loadLast does not overwrite a newer live last value', async () => {
+  let resolveFetch: ((body: unknown) => void) | null = null;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/telegrams')) {
+      const body = await new Promise<unknown>(resolve => { resolveFetch = resolve; });
+      return { ok: true, json: async () => body } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  const { rerender } = render(
+    <SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} latestTelegram={null} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  await waitFor(() => expect(resolveFetch).toBeTruthy());
+
+  const writeTg = {
+    timestamp: '2026-07-17T09:10:00Z',
+    telegram_type: 'GroupValueWrite',
+    simplified_type: 'Write',
+    target_address: '1/1/97',
+    value_formatted: '18.0',
+    unit: '°C',
+  };
+  rerender(
+    <SendToGaPopover address="1/1/97" dptMain={9} dptSub={1} latestTelegram={writeTg as never} />,
+  );
+  expect(screen.getByText('18.0')).toBeInTheDocument();
+
+  resolveFetch?.({
+    telegrams: [{
+      value_formatted: '21.5', unit: '°C', timestamp: '2026-07-17T09:00:00Z',
+      simplified_type: 'Write', target_address: '1/1/97',
+    }],
+  });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  expect(screen.getByText('18.0')).toBeInTheDocument();
+  expect(screen.queryByText('21.5')).not.toBeInTheDocument();
 });

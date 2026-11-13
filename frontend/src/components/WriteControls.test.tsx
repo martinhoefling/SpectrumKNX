@@ -1,7 +1,11 @@
 import { useState } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { expect, test, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { WriteControls, needsValueColumn } from './WriteControls';
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 test('needsValueColumn is false only for button DPTs', () => {
   expect(needsValueColumn('1.001', 1)).toBe(false);
@@ -241,25 +245,25 @@ test('ASCII text DPT reports charset errors instead of writing', () => {
   expect(onError).toHaveBeenCalledWith('Character not allowed for DPT 16.000 (ASCII)');
 });
 
-test('DPT 10 renders a time input field and handles write', () => {
+test('DPT 10 renders a themed time picker and handles write', () => {
   const onWrite = vi.fn();
   const onValueChange = vi.fn();
-  const { container } = render(<WriteControls dptMain={10} dptKey="10.001" value="12:30:00" onValueChange={onValueChange} onWrite={onWrite} />);
+  render(<WriteControls dptMain={10} dptKey="10.001" value="12:30:00" onValueChange={onValueChange} onWrite={onWrite} />);
 
-  const input = container.querySelector('input[type="time"]');
-  expect(input).toBeInTheDocument();
+  const input = screen.getByLabelText('Value');
+  expect(input).toHaveAttribute('type', 'text');
   expect(input).toHaveValue('12:30:00');
 
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
   expect(onWrite).toHaveBeenCalledWith('12:30:00');
 });
 
-test('DPT 11 renders a date input field and handles write', () => {
+test('DPT 11 renders a themed date picker and handles write', () => {
   const onWrite = vi.fn();
-  const { container } = render(<WriteControls dptMain={11} dptKey="11.001" value="2026-07-18" onValueChange={() => {}} onWrite={onWrite} />);
+  render(<WriteControls dptMain={11} dptKey="11.001" value="2026-07-18" onValueChange={() => {}} onWrite={onWrite} />);
 
-  const input = container.querySelector('input[type="date"]');
-  expect(input).toBeInTheDocument();
+  const input = screen.getByLabelText('Value');
+  expect(input).toHaveAttribute('type', 'text');
   expect(input).toHaveValue('2026-07-18');
 
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
@@ -377,6 +381,184 @@ test('Enter after typing writes the typed value instead of a recent', () => {
   fireEvent.keyDown(input, { key: 'Enter' });
   expect(onWrite).toHaveBeenCalledWith(21);
   expect(screen.queryByRole('listbox', { name: 'Recent values' })).not.toBeInTheDocument();
+  expect(input).toHaveFocus();
+});
+
+test('focusToken focuses the value input and may open recents', () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40']));
+  const { rerender } = render(
+    <WriteControls
+      dptMain={5}
+      dptKey="5.001"
+      address="1/2/3"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      focusToken={null}
+    />,
+  );
+  rerender(
+    <WriteControls
+      dptMain={5}
+      dptKey="5.001"
+      address="1/2/3"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      focusToken={1}
+    />,
+  );
+  expect(screen.getByLabelText('Value')).toHaveFocus();
+  expect(screen.getByRole('listbox', { name: 'Recent values' })).toBeInTheDocument();
+});
+
+test('focusToken focuses the leftmost write button when there is no value field', () => {
+  const { rerender } = render(
+    <WriteControls
+      dptMain={1}
+      dptKey="1.001"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      focusToken={null}
+      reserveValueSlot={false}
+    />,
+  );
+  rerender(
+    <WriteControls
+      dptMain={1}
+      dptKey="1.001"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      focusToken={1}
+      reserveValueSlot={false}
+    />,
+  );
+  const on = screen.getByRole('button', { name: /^on$/i });
+  const off = screen.getByRole('button', { name: /^off$/i });
+  // 1.001 choices render off then on — leftmost write button is off.
+  expect(off).toHaveFocus();
+  expect(on).not.toHaveFocus();
+});
+
+test('recent values list is placed below the value field shell', async () => {
+  localStorage.setItem('recent_val_ga_1/2/3', JSON.stringify(['40']));
+  const { container } = render(
+    <WriteControls
+      dptMain={5}
+      dptKey="5.001"
+      address="1/2/3"
+      value=""
+      onValueChange={() => {}}
+      onWrite={() => {}}
+      focusToken={1}
+    />,
+  );
+  const shell = container.querySelector('[data-value-field]') as HTMLElement;
+  shell.getBoundingClientRect = () => ({
+    top: 200, bottom: 230, left: 40, right: 160, width: 120, height: 30,
+    x: 40, y: 200, toJSON() { return {}; },
+  });
+  // Re-open placement after mocking geometry (focus already opened recents).
+  fireEvent.focus(screen.getByLabelText('Value'));
+  await waitFor(() => {
+    const list = screen.getByRole('listbox', { name: 'Recent values' });
+    expect(Number.parseFloat(list.style.top)).toBeGreaterThanOrEqual(234);
+  });
+});
+
+test('write button click keeps focus on the button', async () => {
+  const onWrite = vi.fn();
+  render(
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={onWrite} />,
+  );
+  const on = screen.getByRole('button', { name: /^on$/i });
+  on.focus();
+  fireEvent.click(on);
+  expect(onWrite).toHaveBeenCalledWith(true);
+  await vi.waitFor(() => expect(on).toHaveFocus());
+});
+
+test('write button keeps visible focus after a busy disable cycle', async () => {
+  const onWrite = vi.fn();
+  const { rerender } = render(
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={onWrite} />,
+  );
+  const off = screen.getByRole('button', { name: /^off$/i });
+  fireEvent.click(off);
+  expect(onWrite).toHaveBeenCalledWith(false);
+  // Parent busy→disabled steals focus from the actuated button.
+  rerender(
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={onWrite} disabled />,
+  );
+  expect(off).toBeDisabled();
+  rerender(
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={onWrite} />,
+  );
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: /^off$/i })).toHaveFocus());
+});
+
+test('Enter on the value field keeps focus after a busy disable cycle', async () => {
+  const onWrite = vi.fn();
+  function Harness({ disabled = false }: { disabled?: boolean }) {
+    const [value, setValue] = useState('42');
+    return (
+      <WriteControls
+        dptMain={5}
+        dptKey="5.001"
+        value={value}
+        onValueChange={setValue}
+        onWrite={onWrite}
+        disabled={disabled}
+      />
+    );
+  }
+  const { rerender } = render(<Harness />);
+  const input = screen.getByLabelText('Value');
+  fireEvent.focus(input);
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onWrite).toHaveBeenCalledWith(42);
+  rerender(<Harness disabled />);
+  expect(screen.getByLabelText('Value')).toBeDisabled();
+  rerender(<Harness />);
+  await vi.waitFor(() => expect(screen.getByLabelText('Value')).toHaveFocus());
+});
+
+test('read button in sendEnd keeps focus after a busy disable cycle', async () => {
+  const onWrite = vi.fn();
+  const onRead = vi.fn();
+  function Harness({ disabled = false }: { disabled?: boolean }) {
+    return (
+      <WriteControls
+        dptMain={1}
+        dptKey="1.001"
+        value=""
+        onValueChange={() => {}}
+        onWrite={onWrite}
+        disabled={disabled}
+        sendEnd={(
+          <button
+            type="button"
+            className="wtb-read-btn"
+            disabled={disabled}
+            onClick={onRead}
+          >
+            Read
+          </button>
+        )}
+      />
+    );
+  }
+  const { rerender } = render(<Harness />);
+  const read = screen.getByRole('button', { name: /^Read$/i });
+  expect(read).toHaveClass('wtb-read-btn');
+  fireEvent.click(read);
+  expect(onRead).toHaveBeenCalled();
+  rerender(<Harness disabled />);
+  expect(screen.getByRole('button', { name: /^Read$/i })).toBeDisabled();
+  rerender(<Harness />);
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: /^Read$/i })).toHaveFocus());
 });
 
 test('typing filters recent values; clearing the input restores the MRU list', () => {
@@ -479,14 +661,14 @@ test('recent values stay in the document when the value cell clips overflow', ()
   expect(menu?.parentElement).toBe(document.body);
 });
 
-test('DPT 19 renders a datetime-local input field and handles write', () => {
+test('DPT 19 renders a themed datetime picker and handles write', () => {
   const onWrite = vi.fn();
-  const { container } = render(<WriteControls dptMain={19} dptKey="19.001" value="2026-07-18T12:30" onValueChange={() => {}} onWrite={onWrite} />);
+  render(<WriteControls dptMain={19} dptKey="19.001" value="2026-07-18T12:30:00" onValueChange={() => {}} onWrite={onWrite} />);
 
-  const input = container.querySelector('input[type="datetime-local"]');
-  expect(input).toBeInTheDocument();
-  expect(input).toHaveValue('2026-07-18T12:30');
+  const input = screen.getByLabelText('Value');
+  expect(input).toHaveAttribute('type', 'text');
+  expect(input).toHaveValue('2026-07-18T12:30:00');
 
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
-  expect(onWrite).toHaveBeenCalledWith('2026-07-18T12:30');
+  expect(onWrite).toHaveBeenCalledWith('2026-07-18T12:30:00');
 });

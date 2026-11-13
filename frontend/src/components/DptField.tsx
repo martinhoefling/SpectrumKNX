@@ -282,6 +282,7 @@ export function DptField({ value, options, disabled, overridden, title, onChange
           data-dpt-chevron
           aria-label="Toggle datapoint type list"
           disabled={disabled}
+          tabIndex={disabled ? -1 : 0}
           onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
           onClick={() => {
             if (disabled) return;
@@ -292,7 +293,12 @@ export function DptField({ value, options, disabled, overridden, title, onChange
               inputRef.current?.focus();
             }
           }}
-          style={{ color: 'var(--text-dim)', padding: '0.05rem', flexShrink: 0 }}
+          style={{
+            color: 'var(--text-dim)',
+            padding: '0.05rem',
+            flexShrink: 0,
+            pointerEvents: disabled ? 'none' : undefined,
+          }}
         >
           <ChevronDown size={13} />
         </button>

@@ -50,7 +50,11 @@ import { LastSeenOverlay } from './components/LastSeenOverlay';
 import { StatisticsOverlay } from './components/StatisticsOverlay';
 import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
-import { WriteToBusPanel } from './components/WriteToBusPanel';
+import {
+  WriteToBusPanel,
+  type CtrlSendRequest,
+  type SendPanelTopRowHint,
+} from './components/WriteToBusPanel';
 import { DptCatalogProvider } from './components/DptCatalogContext';
 import { UpdateNotification } from './components/UpdateNotification';
 import { LegacyTimestampBanner } from './components/LegacyTimestampBanner';
@@ -280,6 +284,11 @@ function App() {
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(initialWorkspace?.view === 'database');
   const [isSendOpen, setIsSendOpen] = useState(false);
+  /** Top send-panel row hint for TT send-icon blue (cleared when panel closes). */
+  const [sendPanelTopHint, setSendPanelTopHint] = useState<SendPanelTopRowHint | null>(null);
+  /** Ctrl-click send-icon request consumed by WriteToBusPanel (clear or insert top row). */
+  const [ctrlSendRequest, setCtrlSendRequest] = useState<CtrlSendRequest | null>(null);
+  const ctrlSendNonceRef = useRef(0);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -775,6 +784,35 @@ function App() {
     setListGoto({ id: listGotoSeq.current, telegram });
   }, [handleListFollowChange]);
 
+  const handleAltSend = useCallback(() => {
+    setIsSendOpen(o => {
+      if (o) {
+        setSendPanelTopHint(null);
+        setCtrlSendRequest(null);
+      }
+      return !o;
+    });
+  }, []);
+
+  const handleCtrlSend = useCallback((info: {
+    address: string;
+    name?: string | null;
+    dptMain?: number | null;
+    dptSub?: number | null;
+  }) => {
+    setIsSendOpen(true);
+    ctrlSendNonceRef.current += 1;
+    setCtrlSendRequest({ ...info, nonce: ctrlSendNonceRef.current });
+  }, []);
+
+  const handleCtrlSendHandled = useCallback(() => {
+    setCtrlSendRequest(null);
+  }, []);
+
+  const handleSendPanelTopHintChange = useCallback((hint: SendPanelTopRowHint | null) => {
+    setSendPanelTopHint(hint);
+  }, []);
+
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
     setLastSeenMode(mode);
@@ -1022,7 +1060,15 @@ function App() {
                   }}>
                     <button
                       className="icon-button"
-                      onClick={() => setIsSendOpen(o => !o)}
+                      onClick={() => {
+                        setIsSendOpen(o => {
+                          if (o) {
+                            setSendPanelTopHint(null);
+                            setCtrlSendRequest(null);
+                          }
+                          return !o;
+                        });
+                      }}
                       title="Send / read telegrams"
                       aria-pressed={isSendOpen}
                       style={{
@@ -1310,9 +1356,11 @@ function App() {
               <WriteToBusPanel
                 targets={filterOptions.targets}
                 dptCatalog={filterOptions.dpts}
-                onClose={() => setIsSendOpen(false)}
                 latestTelegram={latestTelegram}
                 onGotoTelegram={handleGotoTelegram}
+                onTopRowHintChange={handleSendPanelTopHintChange}
+                ctrlSendRequest={ctrlSendRequest}
+                onCtrlSendHandled={handleCtrlSendHandled}
               />
             )}
             {/* Content row: filter panel + table */}
@@ -1449,6 +1497,9 @@ function App() {
                     onQuickLastSeen={handleQuickLastSeen}
                     canSend={serverConfig?.status?.write_enabled}
                     onGotoTelegram={handleGotoTelegram}
+                    onAltSend={handleAltSend}
+                    onCtrlSend={handleCtrlSend}
+                    sendPanelTopHint={isSendOpen ? sendPanelTopHint : null}
                     latestTelegram={latestTelegram}
                     quickFilterOpen={quickFilterOpen}
                     onQuickFilterOpenChange={setQuickFilterOpen}

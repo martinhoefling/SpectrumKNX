@@ -25,17 +25,73 @@ import { buildWriteDptOptions, dptUnit } from '../utils/dpt';
 import { describeBusPayload, formatBusValueForDpt, type BusPayload } from '../utils/dptValues';
 import { BusValueText } from './BusValueText';
 import { getPref, setPref } from '../utils/prefs';
+import {
+  ROW_OUTLINE_FLASH_CLASS,
+  ROW_OUTLINE_FLASH_CSS,
+  ROW_OUTLINE_FLASH_MS,
+} from '../utils/rowOutlineFlash';
+import { useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
+
+/** Panel Read button: keeps visible focus through the row busy→disabled cycle. */
+function RetainFocusReadButton({
+  disabled,
+  onRead,
+  title,
+  'data-wtb-col': dataWtbCol,
+}: {
+  disabled: boolean;
+  onRead: () => void;
+  title: string;
+  'data-wtb-col'?: string;
+}) {
+  const { retainClickFocus } = useRetainFocusThroughDisabled(disabled);
+  return (
+    <button
+      type="button"
+      className="wtb-read-btn"
+      data-wtb-col={dataWtbCol}
+      disabled={disabled}
+      style={secondaryBtn(disabled)}
+      title={title}
+      onClick={e => {
+        retainClickFocus(e);
+        onRead();
+      }}
+    >
+      <Radio size={14} /> Read
+    </button>
+  );
+}
+
+/** Top send-panel row hint for TT send-icon blue state (GA + DPT; delay/every empty). */
+export type SendPanelTopRowHint = { address: string; dpt: string };
+
+/** Ctrl-click send-icon request: clear matching top row or insert at top. */
+export type CtrlSendRequest = {
+  nonce: number;
+  address: string;
+  name?: string | null;
+  dptMain?: number | null;
+  dptSub?: number | null;
+};
 
 interface Props {
   /** Group addresses from the loaded project (with optional DPT main/sub). */
   targets: FilterOption[];
-  onClose: () => void;
   /** Newest telegram from the live feed; keeps each row's last value current (#439). */
   latestTelegram?: Telegram | null;
   /** Project DPT catalog (`label` is "5.001 - Percent") so hints can name types the project uses. */
   dptCatalog?: FilterOption[];
   /** Jump the telegram list to the telegram that carried this row's last value. */
   onGotoTelegram?: (telegram: Telegram) => void;
+  /** Reports the top row's GA/DPT when delay/every are empty (for send-icon blue). */
+  onTopRowHintChange?: (hint: SendPanelTopRowHint | null) => void;
+  /** Ctrl-click from TT send icon: clear matching top row or insert at top. */
+  ctrlSendRequest?: CtrlSendRequest | null;
+  /** Called after a ctrlSendRequest has been applied. */
+  onCtrlSendHandled?: () => void;
+  /** Fill the workspace tabpanel (no docked height chrome). */
+  embedded?: boolean;
 }
 
 interface Row {
@@ -362,7 +418,6 @@ function SecondsField({
           gap: showUnit ? '0.3rem' : undefined,
           fontSize: '0.72rem',
           opacity: disabled ? 0.45 : 1,
-          cursor: disabled ? 'not-allowed' : undefined,
         }}
       >
         <input
@@ -376,14 +431,13 @@ function SecondsField({
             if (next !== value) onChange(next);
           }}
           inputMode="numeric"
-          title={disabled ? `${title} (locked while this job is running)` : title}
+          title={title}
           style={{
             ...secondsBareInput,
             flex: '1 1 auto',
             width: `${inputCh}ch`,
             minWidth: `${inputCh}ch`,
             textAlign: 'right',
-            cursor: disabled ? 'not-allowed' : undefined,
           }}
         />
         {showUnit && (
@@ -571,6 +625,33 @@ function loadStoredRows(): Row[] | null {
   }
 }
 
+/** Expected panel DPT for a telegram/project GA (or empty when unknown). */
+export function expectedPanelDpt(dptMain?: number | null, dptSub?: number | null): string {
+  return dptMain != null ? formatDpt(dptMain, dptSub) : '';
+}
+
+/** Top-row hint when GA is set and delay/every are empty; otherwise null. */
+export function topRowHintFromRow(
+  row: Pick<Row, 'address' | 'dpt' | 'delay' | 'every'> | null | undefined,
+): SendPanelTopRowHint | null {
+  if (!row) return null;
+  const address = row.address.trim();
+  if (!address || row.delay.trim() || row.every.trim()) return null;
+  return { address, dpt: row.dpt.trim() };
+}
+
+/** True when a top-row hint matches this GA + expected DPT. */
+export function topRowHintMatches(
+  hint: SendPanelTopRowHint | null | undefined,
+  address: string,
+  dptMain?: number | null,
+  dptSub?: number | null,
+): boolean {
+  if (!hint) return false;
+  return hint.address === address.trim()
+    && hint.dpt === expectedPanelDpt(dptMain, dptSub);
+}
+
 function saveRows(rows: Row[]): void {
   try {
     const stored: StoredRow[] = rows.map(({
@@ -604,9 +685,19 @@ function isPendingJobId(id: string | undefined): boolean {
  *
  * Rows persist to localStorage so toggling the panel keeps its state (#254).
  */
-export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onClose, onGotoTelegram }: Props) {
+export function WriteToBusPanel({
+  targets, latestTelegram, dptCatalog = [], onGotoTelegram,
+  onTopRowHintChange,
+  ctrlSendRequest = null,
+  onCtrlSendHandled,
+  embedded = false,
+}: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
   const [recentGas, setRecentGas] = useState<string[]>(loadRecentGas);
+  const [flashRowId, setFlashRowId] = useState<string | null>(null);
+  const [flashNonce, setFlashNonce] = useState(0);
+  /** Bumped after ctrl-insert so the top row's WriteControls focus value/write. */
+  const [focusToken, setFocusToken] = useState<number | null>(null);
   /** Active scheduled job per row id (optimistic pending-* ids until POST returns). */
   const [jobsByRowId, setJobsByRowId] = useState<Record<string, ScheduledSendStatus>>({});
   const [colTracks, setColTracks] = useState<number[] | null>(null);
@@ -644,6 +735,10 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   const watchingRef = useRef(false);
   const rowsRef = useRef(rows);
   const jobsByRowIdRef = useRef(jobsByRowId);
+  /** Pre-edit GA/name/dpt per row, captured when the GA field focuses (blur revert). */
+  const gaFocusSnapshotRef = useRef<Map<string, { address: string; name: string; dpt: string }>>(new Map());
+  /** Pre-edit name per row, captured when the name field focuses (unknown-name revert). */
+  const nameFocusSnapshotRef = useRef<Map<string, string>>(new Map());
   /** Row ids whose pending start should be cancelled once the server returns a real UUID. */
   const cancelWhenStartedRef = useRef<Set<string>>(new Set());
   // Keep callback/poll closures current without reading refs during render.
@@ -850,19 +945,14 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
         ? Math.max(1, (addrCells[1] as HTMLElement).offsetTop - first.offsetTop)
         : Math.max(1, ...firstRowPanes.map(c => c.offsetHeight));
       const rowsH = Math.max(oneRowH, grid.scrollHeight);
-      // Header wrapper includes the gap under the header row (absent with one send row).
+      // Header wrapper includes title + actions and the gap under the header row.
       const headerWrap = headerGrid?.parentElement as HTMLElement | null;
       const headerBlockH = headerWrap?.offsetHeight ?? headerGrid?.offsetHeight ?? 0;
       const hCs = getComputedStyle(hScroll);
       const padTop = parseFloat(hCs.paddingTop) || 0;
-      // Title band is in flow. offsetHeight is the highlight only; the gap under
-      // it is margin-bottom and must be counted separately.
-      const titleHeader = host.querySelector('.wtb-panel-header') as HTMLElement | null;
-      const titleMargin = titleHeader ? (parseFloat(getComputedStyle(titleHeader).marginBottom) || 0) : 0;
-      const titleBlockH = (titleHeader?.offsetHeight ?? 0) + titleMargin;
       // Gap below the V-scrollport (not inside it) + mid H-scrollbar gutter + resize handle.
       const belowRowsGap = parseFloat(getComputedStyle(scroll).marginBottom) || 0;
-      const chrome = padTop + titleBlockH + headerBlockH + belowRowsGap + SCROLLBAR_GUTTER_PX + HEIGHT_HANDLE_PX;
+      const chrome = padTop + headerBlockH + belowRowsGap + SCROLLBAR_GUTTER_PX + HEIGHT_HANDLE_PX;
       // The host border sits inside the border-box, under the resize handle.
       // The first row still clears without that pixel, so the drag floor is one shorter.
       const min = Math.ceil(chrome + oneRowH) - 1;
@@ -981,6 +1071,21 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     saveRows(rows);
   }, [rows]);
 
+  useEffect(() => {
+    if (!flashRowId) return;
+    const t = window.setTimeout(() => setFlashRowId(null), ROW_OUTLINE_FLASH_MS);
+    return () => window.clearTimeout(t);
+  }, [flashRowId, flashNonce]);
+
+  // Keep the telegram-table send-icon blue state in sync with the top row.
+  useEffect(() => {
+    onTopRowHintChange?.(topRowHintFromRow(rows[0]));
+  }, [rows, onTopRowHintChange]);
+
+  useEffect(() => () => {
+    onTopRowHintChange?.(null);
+  }, [onTopRowHintChange]);
+
   const updateRow = (id: string, patch: Partial<Row>) =>
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
 
@@ -1057,6 +1162,11 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     });
   };
 
+  /** Insert a blank row at the top (header Plus). */
+  const addRowAtTop = () => {
+    setRows(rs => [newRow(), ...rs]);
+  };
+
   const resetRow = (id: string) => {
     const owned = detachRowJob(id);
     setRows(rs => rs.map(r => (r.id === id ? { ...newRow(), id: r.id } : r)));
@@ -1076,6 +1186,52 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     if (!trimmed) return;
     setRecentGas(pushRecentGa(trimmed));
   };
+
+  // Ctrl-click from TT: only when the panel has exactly one row.
+  // Then: clear matching top, fill empty top, otherwise insert + flash + focus.
+  useEffect(() => {
+    if (!ctrlSendRequest) return;
+    if (rowsRef.current.length !== 1) {
+      onCtrlSendHandled?.();
+      return;
+    }
+    const { address, name, dptMain, dptSub } = ctrlSendRequest;
+    const trimmed = address.trim();
+    const top = rowsRef.current[0];
+    const expectedDpt = expectedPanelDpt(dptMain, dptSub);
+    const matches = Boolean(
+      top
+      && top.address.trim() === trimmed
+      && top.dpt.trim() === expectedDpt
+      && !top.delay.trim()
+      && !top.every.trim(),
+    );
+    const known = byAddress.get(trimmed);
+    const resolved = {
+      address: trimmed,
+      name: (known?.name ?? name ?? '').toString(),
+      dpt: known && known.main != null ? formatDpt(known.main, known.sub) : expectedDpt,
+    };
+    if (matches && top) {
+      resetRow(top.id);
+    } else if (top && !top.address.trim()) {
+      // Empty first row → fill in place (no extra row).
+      setRows(rs => rs.map(r => (r.id === top.id ? { ...r, ...resolved, ...clearStatusPatch() } : r)));
+      setFlashRowId(top.id);
+      setFlashNonce(n => n + 1);
+      setFocusToken(t => (t ?? 0) + 1);
+      if (trimmed) rememberGa(trimmed);
+    } else {
+      const next: Row = { ...newRow(), ...resolved };
+      setRows(rs => [next, ...rs]);
+      setFlashRowId(next.id);
+      setFlashNonce(n => n + 1);
+      setFocusToken(t => (t ?? 0) + 1);
+      if (trimmed) rememberGa(trimmed);
+    }
+    onCtrlSendHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only on request nonce
+  }, [ctrlSendRequest?.nonce]);
 
   const applyResolved = (id: string, option: FilterOption) => {
     updateRow(id, {
@@ -1102,10 +1258,46 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
     });
   };
 
+  const snapshotGaFocus = (id: string) => {
+    const row = rowsRef.current.find(r => r.id === id);
+    if (!row) return;
+    gaFocusSnapshotRef.current.set(id, {
+      address: row.address,
+      name: row.name,
+      dpt: row.dpt,
+    });
+  };
+
+  const restoreGaFocusSnapshot = (id: string) => {
+    const snap = gaFocusSnapshotRef.current.get(id);
+    if (!snap) {
+      updateRow(id, { address: '', name: '', dpt: '', ...clearStatusPatch() });
+      return;
+    }
+    updateRow(id, { ...snap, ...clearStatusPatch() });
+  };
+
   const onAddressCommit = (id: string, text: string) => {
     const trimmed = text.trim();
+    // Empty GA clears the whole row (same as initialize / reset).
+    if (!trimmed) {
+      resetRow(id);
+      return;
+    }
     const match = byAddress.get(trimmed);
-    updateRow(id, { name: match?.name ?? '' });
+    if (match) {
+      updateRow(id, { name: match.name ?? '' });
+      rememberGa(trimmed);
+      return;
+    }
+    // Project loaded: incomplete (not 1/2/3-level), invalid, or unknown → revert.
+    // No project: keep only complete GA_RE free-entry; otherwise revert.
+    const projectLoaded = byAddress.size > 0;
+    if (projectLoaded || !GA_RE.test(trimmed)) {
+      restoreGaFocusSnapshot(id);
+      return;
+    }
+    updateRow(id, { name: '' });
     rememberGa(trimmed);
   };
 
@@ -1115,6 +1307,12 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       return;
     }
     updateRow(id, { name: next, ...clearStatusPatch() });
+  };
+
+  const snapshotNameFocus = (id: string) => {
+    const row = rowsRef.current.find(r => r.id === id);
+    if (!row) return;
+    nameFocusSnapshotRef.current.set(id, row.name);
   };
 
   const onNameCommit = (id: string, text: string) => {
@@ -1132,7 +1330,9 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
       applyResolved(id, match);
       return;
     }
-    updateRow(id, { name: text, address: '', dpt: '', ...clearStatusPatch() });
+    // Unknown name → restore the pre-edit name (do not keep free-entry names).
+    const prev = nameFocusSnapshotRef.current.get(id) ?? '';
+    updateRow(id, { name: prev, ...clearStatusPatch() });
   };
 
   // Editable DPT (#342): overriding the project default. When the DPT *main*
@@ -1282,36 +1482,25 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
   return (
     <div
       ref={hostRef}
-      className="wtb-panel-host"
+      className={`wtb-panel-host${embedded ? ' wtb-embedded' : ''}`}
       style={{
         position: 'relative',
-        flexShrink: 0,
+        flexShrink: embedded ? 1 : 0,
+        flex: embedded ? 1 : undefined,
+        minHeight: embedded ? 0 : undefined,
         width: '100%',
         maxWidth: '100%',
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        height: appliedPanelHeight != null ? `${appliedPanelHeight}px` : undefined,
-        background: 'var(--bg-subtle)',
-        borderBottom: '1px solid var(--border-color)',
+        height: embedded
+          ? '100%'
+          : appliedPanelHeight != null ? `${appliedPanelHeight}px` : undefined,
+        /* Match monitor header / workspace tabpanel (opaque panel over bg-dark). */
+        background: 'linear-gradient(var(--bg-panel), var(--bg-panel)), var(--bg-dark)',
+        borderBottom: embedded ? undefined : '1px solid var(--border-color)',
       }}
     >
-      {/* Title band (highlight only). Gap under it is margin, not part of the fill. */}
-      <div className="wtb-panel-header">
-        <div className="wtb-panel-title">
-          <Send size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} aria-hidden />
-          Write to bus
-        </div>
-        <button
-          type="button"
-          className="wtb-close-button"
-          onClick={onClose}
-          title="Close send panel"
-          aria-label="Close send panel"
-        >
-          <X size={16} />
-        </button>
-      </div>
       {/* H-scroll wraps header + rows so columns stay aligned; only rows V-scroll.
           No right padding — the V-scrollbar sits on the panel's right edge. */}
       <div
@@ -1324,7 +1513,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           flexDirection: 'column',
           overflowX: 'hidden',
           overflowY: 'hidden',
-          padding: '0 0 0 0.85rem',
+          padding: '0.45rem 0 0 0.85rem',
           boxSizing: 'border-box',
           // Mid-pane horizontal offset (name … read).
           ['--wtb-mid-x' as string]: `-${midScrollLeftApplied}px`,
@@ -1341,7 +1530,6 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
             width: '100%',
           }}
         >
-        {rows.length > 1 && (
         <div
           style={{
             display: 'flex',
@@ -1365,10 +1553,16 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
               whiteSpace: 'nowrap',
             }}
           >
-            <div aria-hidden style={{ minWidth: 0 }} />
-            <div aria-hidden style={{ minWidth: 0 }} />
+            <div
+              className="wtb-panel-title"
+              style={{ gridColumn: '1 / 3', minWidth: 0 }}
+            >
+              <Send size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} aria-hidden />
+              Write to bus
+            </div>
             <div
               style={{
+                gridColumn: 3,
                 display: 'grid',
                 gridTemplateColumns: rightTemplateColumns,
                 columnGap: WTB_COL_GAP,
@@ -1411,14 +1605,32 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
               >
                 <RotateCcw size={15} />
               </button>
-              <span data-wtb-col="12" aria-hidden style={{ display: 'inline-block', width: 15, height: 15 }} />
+              <button
+                type="button"
+                className="icon-button"
+                data-wtb-col="12"
+                onClick={addRowAtTop}
+                title="Add a blank row at the top"
+                aria-label="Add row at top"
+                style={{
+                  color: 'var(--text-dim)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 22,
+                  height: 22,
+                  padding: 0,
+                  boxSizing: 'border-box',
+                }}
+              >
+                <Plus size={15} strokeWidth={2.5} />
+              </button>
             </div>
           </div>
           {/* Match body content inset + V-scrollbar gutter so header/body columns align. */}
           <span aria-hidden style={{ flexShrink: 0, width: '0.85rem' }} />
           <span aria-hidden style={{ flexShrink: 0, width: SCROLLBAR_GUTTER_PX }} />
         </div>
-        )}
         <div
           ref={scrollRef}
           className="wtb-scrollport"
@@ -1491,16 +1703,44 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           const delayPlaceholder = 'delay';
           const everyPlaceholder = 'every';
           const gridRow = rowIndex + 1;
+          const rowFlashing = flashRowId === row.id;
+          // Keep the first send row pinned while the rest of the grid scrolls.
+          const stickyFirst: CSSProperties | undefined = rowIndex === 0
+            ? {
+                position: 'sticky',
+                top: 0,
+                zIndex: 5,
+                background: 'linear-gradient(var(--bg-panel), var(--bg-panel)), var(--bg-dark)',
+              }
+            : undefined;
           return (
             <Fragment key={row.id}>
               <div
+                data-wtb-row-id={row.id}
+                aria-hidden
+                className={rowFlashing ? ROW_OUTLINE_FLASH_CLASS : undefined}
+                // Remount the flash overlay so the animation restarts on nonce bump.
+                key={rowFlashing ? `flash-${row.id}-${flashNonce}` : `flash-${row.id}`}
+                style={{
+                  gridColumn: '1 / -1',
+                  gridRow,
+                  pointerEvents: 'none',
+                  position: stickyFirst ? 'sticky' : 'relative',
+                  top: stickyFirst ? 0 : undefined,
+                  zIndex: stickyFirst ? 6 : 4,
+                  alignSelf: 'stretch',
+                }}
+              />
+              <div
                 data-wtb-col="0"
-                style={{ gridColumn: 1, gridRow, width: '100%', minWidth: 0 }}
+                data-wtb-row-id={row.id}
+                style={{ gridColumn: 1, gridRow, width: '100%', minWidth: 0, ...stickyFirst }}
               >
                 <GaCombobox
                   value={row.address}
                   onChange={(next, option) => onAddressChange(row.id, next, option)}
                   onCommit={text => onAddressCommit(row.id, text)}
+                  onFocus={() => snapshotGaFocus(row.id)}
                   options={targets}
                   recentAddresses={recentGas}
                   placeholder="GA"
@@ -1510,7 +1750,8 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
               <div
                 ref={rowIndex === 0 ? midClipRef : undefined}
                 className="wtb-mid-clip"
-                style={{ gridColumn: 2, gridRow, minWidth: 0, overflow: 'hidden' }}
+                data-wtb-row-id={row.id}
+                style={{ gridColumn: 2, gridRow, minWidth: 0, overflow: 'hidden', ...stickyFirst }}
               >
                 <div
                   ref={rowIndex === 0 ? midInnerRef : undefined}
@@ -1530,6 +1771,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                       value={row.name}
                       onChange={(next, option) => onNameChange(row.id, next, option)}
                       onCommit={text => onNameCommit(row.id, text)}
+                      onFocus={() => snapshotNameFocus(row.id)}
                       options={targets}
                       recentAddresses={recentGas}
                       placeholder="Group name"
@@ -1588,35 +1830,46 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                     valueColProps={{ 'data-wtb-col': '5', style: { width: '100%', minWidth: 0, overflow: 'hidden' } }}
                     sendColProps={{ 'data-wtb-col': '6' }}
                     reserveValueSlot={showValueCol}
+                    focusToken={rowIndex === 0 ? focusToken : null}
                   />
                   <SecondsField
                     col="7"
                     placeholder={delayPlaceholder}
                     value={row.delay}
                     onChange={v => updateRow(row.id, { delay: v })}
-                    title="delay"
-                    disabled={showJob}
+                    title={
+                      !addressValid
+                        ? 'Enter a group address first'
+                        : showJob
+                          ? 'delay (locked while this job is running)'
+                          : 'delay'
+                    }
+                    disabled={showJob || !addressValid}
                   />
                   <SecondsField
                     col="8"
                     placeholder={everyPlaceholder}
                     value={row.every}
                     onChange={v => updateRow(row.id, { every: v })}
-                    title="every"
-                    disabled={showJob}
+                    title={
+                      !addressValid
+                        ? 'Enter a group address first'
+                        : showJob
+                          ? 'every (locked while this job is running)'
+                          : 'every'
+                    }
+                    disabled={showJob || !addressValid}
                   />
-                  <button
+                  <RetainFocusReadButton
                     data-wtb-col="9"
-                    onClick={() => void read(row)}
                     disabled={row.busy || !addressValid}
-                    style={secondaryBtn(row.busy || !addressValid)}
+                    onRead={() => void read(row)}
                     title="Send a GroupValueRead; the response shows up as this row's last value"
-                  >
-                    <Radio size={14} /> Read
-                  </button>
+                  />
                 </div>
               </div>
               <div
+                data-wtb-row-id={row.id}
                 style={{
                   gridColumn: 3,
                   gridRow,
@@ -1625,6 +1878,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                   columnGap: WTB_COL_GAP,
                   alignItems: 'center',
                   minWidth: 0,
+                  ...stickyFirst,
                 }}
               >
                 <div data-wtb-col="10" style={{ minWidth: 0 }}>
@@ -1672,9 +1926,21 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                       ? 'At least one row is required · ctrl/cmd-click to reset'
                       : 'Delete this row · ctrl/cmd-click to reset'
                   }
-                  style={{ color: 'var(--text-dim)', opacity: rows.length === 1 ? 0.4 : 1 }}
+                  style={{
+                    color: rows.length === 1
+                      ? 'color-mix(in srgb, var(--text-dim) 40%, transparent)'
+                      : 'var(--text-dim)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 22,
+                    height: 22,
+                    padding: 0,
+                    boxSizing: 'border-box',
+                  }}
                 >
-                  <Minus size={15} />
+                  {/* Slightly heavier stroke: Minus is a single bar and reads smaller than Plus at the same box size. */}
+                  <Minus size={15} strokeWidth={2.5} />
                 </button>
                 <button
                   data-wtb-col="12"
@@ -1683,9 +1949,18 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
                     addRowAfter(row.id, { copy: e.ctrlKey || e.metaKey })
                   }
                   title="Add a row below · ctrl/cmd-click to duplicate"
-                  style={{ color: 'var(--text-dim)' }}
+                  style={{
+                    color: 'var(--text-dim)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 22,
+                    height: 22,
+                    padding: 0,
+                    boxSizing: 'border-box',
+                  }}
                 >
-                  <Plus size={15} />
+                  <Plus size={15} strokeWidth={2.5} />
                 </button>
               </div>
             </Fragment>
@@ -1736,18 +2011,15 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
         </div>
       </div>
       {/* In-flow under the H-scroll so it sits below the H-scrollbar, not over it. */}
-      <div
-        className={`wtb-height-resize-handle${heightDragging ? ' dragging' : ''}`}
-        onMouseDown={onHeightResizeStart}
-        onDoubleClick={onHeightResizeReset}
-        title="Drag to resize · double-click to reset"
-      />
+      {!embedded && (
+        <div
+          className={`wtb-height-resize-handle${heightDragging ? ' dragging' : ''}`}
+          onMouseDown={onHeightResizeStart}
+          onDoubleClick={onHeightResizeReset}
+          title="Drag to resize · double-click to reset"
+        />
+      )}
       <style>{`
-        .wtb-panel-host {
-          /* Highlight height. The gap under it is margin on the header, outside the fill. */
-          --wtb-header-h: calc(1.05rem + 16px);
-          --wtb-header-gap: 0.45rem;
-        }
         .wtb-h-scroll::-webkit-scrollbar,
         .wtb-scrollport::-webkit-scrollbar,
         .wtb-mid-h-scroll::-webkit-scrollbar {
@@ -1755,51 +2027,22 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           height: ${SCROLLBAR_GUTTER_PX}px;
         }
         .wtb-mid-clip {
-          background: var(--bg-subtle);
+          background: transparent;
         }
         .wtb-mid-inner {
           transform: translateX(var(--wtb-mid-x, 0px));
         }
-        .wtb-panel-header {
-          position: relative;
-          flex-shrink: 0;
-          height: var(--wtb-header-h);
-          margin-bottom: var(--wtb-header-gap);
-          background: color-mix(in srgb, var(--bg-tag) 55%, transparent);
-          border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
-          z-index: 5;
-        }
         .wtb-panel-title {
-          position: absolute;
-          top: 0.2rem;
-          left: 0.25rem;
-          z-index: 1;
           display: flex;
           align-items: center;
           gap: 0.45rem;
-          padding: 0.2rem;
           font-size: 0.82rem;
           font-weight: 600;
           color: var(--text-main);
           pointer-events: none;
-        }
-        .wtb-close-button {
-          position: absolute;
-          top: 0.2rem;
-          right: 0.25rem;
-          z-index: 6;
-          display: flex;
-          padding: 0.2rem;
-          cursor: pointer;
-          color: var(--text-dim);
-          background: transparent;
-          border: 1px solid var(--border-color);
-          border-radius: 6px;
-          transition: color 0.15s, background 0.15s;
-        }
-        .wtb-close-button:hover {
-          color: var(--text-main);
-          background: var(--bg-hover);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .wtb-height-resize-handle {
           flex-shrink: 0;
@@ -1815,6 +2058,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
           right: 0;
           bottom: 0;
           height: 2px;
+          pointer-events: none;
           background: var(--accent-primary);
           opacity: 0;
           transition: opacity 0.15s;
@@ -1823,6 +2067,7 @@ export function WriteToBusPanel({ targets, latestTelegram, dptCatalog = [], onCl
         .wtb-height-resize-handle.dragging::after {
           opacity: 0.7;
         }
+        ${ROW_OUTLINE_FLASH_CSS}
       `}</style>
     </div>
   );

@@ -10,6 +10,20 @@ import {
 } from '../utils/knxSend';
 import { discreteDptValues, type BusPayload } from '../utils/dptValues';
 import { boolBtn, primaryBtn } from '../utils/buttonStyles';
+import { focusVisible, useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
+import { ThemedDatetimePicker } from './ThemedDatetimePicker';
+
+/** Leftmost write/send button in the send column (DOM order; skip Read / sendEnd). */
+function firstWriteButton(col: HTMLElement | null | undefined): HTMLButtonElement | null {
+  if (!col) return null;
+  const marked = [...col.querySelectorAll<HTMLButtonElement>('button.wtb-write-btn:not(:disabled)')];
+  if (marked.length > 0) return marked[0];
+  const buttons = [...col.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+    .filter(b => !/^\s*read\s*$/i.test((b.textContent || '').replace(/\s+/g, ' ').trim()));
+  if (buttons.length === 0) return null;
+  return buttons.find(b => /write/i.test(b.getAttribute('title') || '') || /write/i.test(b.textContent || ''))
+    || buttons[0];
+}
 
 interface Props {
   /** DPT main number of the target GA, when known. */
@@ -44,6 +58,11 @@ interface Props {
   sendFit?: 'fill' | 'hug';
   /** Appended after the send buttons (e.g. popover Read). */
   sendEnd?: ReactNode;
+  /**
+   * Bump to programmatically focus: value input (recents may open) when
+   * available, otherwise the first enabled write/send button.
+   */
+  focusToken?: number | null;
 }
 
 const getRecentValues = (address?: string | null, dptKey?: string | null, dptMain?: number | null): string[] => {
@@ -260,6 +279,7 @@ function ValueFieldShell({
 export function WriteControls({
   dptMain, dptKey, address, value, onValueChange, onWrite, onError, disabled = false, unit = null,
   valueColProps, sendColProps, reserveValueSlot = true, sendFit = 'fill', sendEnd,
+  focusToken = null,
 }: Props) {
   const [recentsOpen, setRecentsOpen] = useState(false);
   const [recentsHighlight, setRecentsHighlight] = useState(0);
@@ -267,9 +287,12 @@ export function WriteControls({
   const [recentsBox, setRecentsBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const valueInputRef = useRef<HTMLInputElement>(null);
   const valueShellRef = useRef<HTMLDivElement>(null);
+  const sendColRef = useRef<HTMLDivElement>(null);
   const recentsOptionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const { retainFocusOn, retainClickFocus, setBeforeRestore } = useRetainFocusThroughDisabled(disabled);
   const recentsKeyboardNav = useRef(false);
   const skipRecentsFocusOpen = useRef(false);
+  const appliedFocusToken = useRef<number | null>(null);
   // The select index belongs to one DPT. A different key reads as the first entry,
   // so changing the DPT does not need an effect to clear a stale pick.
   const [picked, setPicked] = useState({ key: dptKey, index: 0 });
@@ -285,6 +308,7 @@ export function WriteControls({
     : Math.min(recentsHighlight, filteredRecents.length - 1);
 
   // Recent values are portaled so the send panel's overflow:hidden cannot clip them.
+  // Re-place after open (rAF ×2 + ResizeObserver) so popover layout settles below the value.
   useLayoutEffect(() => {
     if (!recentsOpen) return;
     const place = () => {
@@ -297,9 +321,19 @@ export function WriteControls({
       setRecentsBox({ top: r.bottom + 4, left, width });
     };
     place();
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      place();
+      raf2 = requestAnimationFrame(place);
+    });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(place) : null;
+    if (valueShellRef.current) ro?.observe(valueShellRef.current);
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
     return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      ro?.disconnect();
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
@@ -309,6 +343,65 @@ export function WriteControls({
     if (!recentsOpen || recentsActive < 0) return;
     recentsOptionRefs.current[recentsActive]?.scrollIntoView?.({ block: 'nearest' });
   }, [recentsOpen, recentsActive]);
+
+  useLayoutEffect(() => {
+    if (focusToken == null || appliedFocusToken.current === focusToken) return;
+    appliedFocusToken.current = focusToken;
+    // Allow recents to open on this programmatic focus (panel insert / popover open).
+    skipRecentsFocusOpen.current = false;
+
+    const applyFocus = () => {
+      // Only prefer the free-value input when this DPT actually shows one —
+      // button-only DPTs must land on the leftmost write button.
+      const input = valueInputRef.current;
+      if (needsValueColumn(dptKey, dptMain) && input && !input.disabled) {
+        focusVisible(input);
+        return true;
+      }
+      const btn = firstWriteButton(sendColRef.current);
+      if (btn) {
+        focusVisible(btn);
+        return true;
+      }
+      return false;
+    };
+
+    if (applyFocus()) return;
+    // Refs / button branch may not be committed yet (popover open) — retry once.
+    const raf = requestAnimationFrame(() => { applyFocus(); });
+    return () => cancelAnimationFrame(raf);
+  }, [focusToken, dptKey, dptMain]);
+
+  // Value Enter must not reopen the recents list when we re-focus after write.
+  useLayoutEffect(() => {
+    setBeforeRestore(el => {
+      if (el === valueInputRef.current) skipRecentsFocusOpen.current = true;
+    });
+    return () => setBeforeRestore(null);
+  }, [setBeforeRestore]);
+
+  const retainWriteButtonFocus = (e: MouseEvent<HTMLButtonElement>) => {
+    retainClickFocus(e);
+  };
+
+  /** Capture Write/Read clicks in sendEnd so busy→disabled can restore focus. */
+  const onSendColClickCapture = (e: MouseEvent<HTMLDivElement>) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
+      'button.wtb-write-btn, button.wtb-read-btn',
+    );
+    if (!btn || !sendColRef.current?.contains(btn)) return;
+    retainClickFocus({ currentTarget: btn });
+  };
+
+  const sendCol = (columns: number): HTMLAttributes<HTMLDivElement> & { ref: typeof sendColRef } => ({
+    ...sendColProps,
+    ref: sendColRef,
+    onClickCapture: e => {
+      onSendColClickCapture(e);
+      sendColProps?.onClickCapture?.(e);
+    },
+    style: { ...sendCell(sendFit, columns), ...sendColProps?.style },
+  });
 
   const rememberValue = (val: string = value) => {
     if (!val.trim()) return;
@@ -337,10 +430,11 @@ export function WriteControls({
             onChange={i => setPicked({ key: dptKey, index: i })}
           />
         </div>
-        <div {...sendColProps} style={{ ...sendCell(sendFit, 1), ...sendColProps?.style }}>
+        <div {...sendCol(1)}>
           <button
             type="button"
-            onClick={() => onWrite(choices[index].payload)}
+            className="wtb-write-btn"
+            onClick={e => { onWrite(choices[index].payload); retainWriteButtonFocus(e); }}
             disabled={disabled}
             style={sendBtn(sendFit, primaryBtn(disabled))}
           >
@@ -356,13 +450,14 @@ export function WriteControls({
     return (
       <>
         {valueSlot}
-        <div {...sendColProps} style={{ ...sendCell(sendFit, choices.length), ...sendColProps?.style }}>
+        <div {...sendCol(choices.length)}>
           {choices.map(choice => (
             <button
               key={choice.label}
               type="button"
+              className="wtb-write-btn"
               disabled={disabled}
-              onClick={() => onWrite(choice.payload)}
+              onClick={e => { onWrite(choice.payload); retainWriteButtonFocus(e); }}
               style={sendBtn(sendFit, boolBtn(disabled))}
               title={`Write ${choice.label}`}
             >
@@ -379,11 +474,11 @@ export function WriteControls({
     return (
       <>
         {valueSlot}
-        <div {...sendColProps} style={{ ...sendCell(sendFit, 2), ...sendColProps?.style }}>
-          <button type="button" disabled={disabled} onClick={() => onWrite(true)} style={sendBtn(sendFit, boolBtn(disabled))} title="Write on">
+        <div {...sendCol(2)}>
+          <button type="button" className="wtb-write-btn" disabled={disabled} onClick={e => { onWrite(true); retainWriteButtonFocus(e); }} style={sendBtn(sendFit, boolBtn(disabled))} title="Write on">
             <Send size={13} /> on
           </button>
-          <button type="button" disabled={disabled} onClick={() => onWrite(false)} style={sendBtn(sendFit, boolBtn(disabled))} title="Write off">
+          <button type="button" className="wtb-write-btn" disabled={disabled} onClick={e => { onWrite(false); retainWriteButtonFocus(e); }} style={sendBtn(sendFit, boolBtn(disabled))} title="Write off">
             <Send size={13} /> off
           </button>
           {sendEnd}
@@ -397,23 +492,28 @@ export function WriteControls({
       <>
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueFieldShell unit={unit} showUnit={Boolean(value.trim())}>
-            <input
-              type="time"
-              step="1"
+            <ThemedDatetimePicker
+              variant="bare"
+              mode="time"
+              withSeconds
+              inputRef={valueInputRef}
               aria-label="Value"
               value={value}
-              onChange={e => onValueChange(e.target.value)}
+              onChange={onValueChange}
               onBlur={() => rememberValue()}
               disabled={disabled}
               style={{ ...bareInput, flex: '1 1 auto', width: 'auto', textAlign: 'left' }}
             />
           </ValueFieldShell>
         </div>
-        <div {...sendColProps} style={{ ...sendCell(sendFit, 1), ...sendColProps?.style }}>
+        <div {...sendCol(1)}>
           <button
-            onClick={() => {
+            type="button"
+            className="wtb-write-btn"
+            onClick={e => {
               rememberValue();
               onWrite(value);
+              retainWriteButtonFocus(e);
             }}
             disabled={disabled || value === ''}
             style={sendBtn(sendFit, primaryBtn(disabled || value === ''))}
@@ -431,22 +531,27 @@ export function WriteControls({
       <>
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueFieldShell unit={unit} showUnit={Boolean(value.trim())}>
-            <input
-              type="date"
+            <ThemedDatetimePicker
+              variant="bare"
+              mode="date"
+              inputRef={valueInputRef}
               aria-label="Value"
               value={value}
-              onChange={e => onValueChange(e.target.value)}
+              onChange={onValueChange}
               onBlur={() => rememberValue()}
               disabled={disabled}
               style={{ ...bareInput, flex: '1 1 auto', width: 'auto', textAlign: 'left' }}
             />
           </ValueFieldShell>
         </div>
-        <div {...sendColProps} style={{ ...sendCell(sendFit, 1), ...sendColProps?.style }}>
+        <div {...sendCol(1)}>
           <button
-            onClick={() => {
+            type="button"
+            className="wtb-write-btn"
+            onClick={e => {
               rememberValue();
               onWrite(value);
+              retainWriteButtonFocus(e);
             }}
             disabled={disabled || value === ''}
             style={sendBtn(sendFit, primaryBtn(disabled || value === ''))}
@@ -464,23 +569,28 @@ export function WriteControls({
       <>
         <div {...valueColProps} style={{ ...valueCell, ...valueColProps?.style }}>
           <ValueFieldShell unit={unit} showUnit={Boolean(value.trim())}>
-            <input
-              type="datetime-local"
-              step="1"
+            <ThemedDatetimePicker
+              variant="bare"
+              mode="datetime"
+              withSeconds
+              inputRef={valueInputRef}
               aria-label="Value"
               value={value}
-              onChange={e => onValueChange(e.target.value)}
+              onChange={onValueChange}
               onBlur={() => rememberValue()}
               disabled={disabled}
               style={{ ...bareInput, flex: '1 1 auto', width: 'auto', textAlign: 'left' }}
             />
           </ValueFieldShell>
         </div>
-        <div {...sendColProps} style={{ ...sendCell(sendFit, 1), ...sendColProps?.style }}>
+        <div {...sendCol(1)}>
           <button
-            onClick={() => {
+            type="button"
+            className="wtb-write-btn"
+            onClick={e => {
               rememberValue();
               onWrite(value);
+              retainWriteButtonFocus(e);
             }}
             disabled={disabled || value === ''}
             style={sendBtn(sendFit, primaryBtn(disabled || value === ''))}
@@ -552,13 +662,17 @@ export function WriteControls({
       return;
     }
     if (e.key === 'Enter') {
+      e.preventDefault();
       if (recentsOpen && recentsActive >= 0 && filteredRecents[recentsActive] != null) {
-        e.preventDefault();
         pickRecent(filteredRecents[recentsActive]);
         return;
       }
       if (recentsOpen) setRecentsOpen(false);
-      if (!writeDisabled) commitFreeValue();
+      if (!writeDisabled) {
+        commitFreeValue();
+        // Keep focus on the value field after Enter-to-write without reopening recents.
+        retainFocusOn(valueInputRef.current);
+      }
     }
   };
 
@@ -570,7 +684,7 @@ export function WriteControls({
           unit={unit}
           showUnit={Boolean(value.trim())}
           onMouseDown={e => {
-            if (!hasRecents) return;
+            if (disabled || !hasRecents) return;
             const target = e.target as HTMLElement;
             if (target.closest('[data-value-chevron]')) return;
             if (e.target !== valueInputRef.current) e.preventDefault();
@@ -589,6 +703,7 @@ export function WriteControls({
               data-value-chevron
               aria-label="Toggle recent values"
               disabled={disabled}
+              tabIndex={disabled ? -1 : 0}
               onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
               onClick={() => {
                 if (disabled) return;
@@ -601,7 +716,13 @@ export function WriteControls({
                   valueInputRef.current?.focus();
                 }
               }}
-              style={{ color: 'var(--text-dim)', padding: '0.05rem', flexShrink: 0, marginLeft: 'auto' }}
+              style={{
+                color: 'var(--text-dim)',
+                padding: '0.05rem',
+                flexShrink: 0,
+                marginLeft: 'auto',
+                pointerEvents: disabled ? 'none' : undefined,
+              }}
             >
               <ChevronDown size={13} />
             </button>
@@ -699,9 +820,11 @@ export function WriteControls({
           document.body,
         )}
       </div>
-      <div {...sendColProps} style={{ ...sendCell(sendFit, 1), ...sendColProps?.style }}>
+      <div {...sendCol(1)}>
         <button
-          onClick={commitFreeValue}
+          type="button"
+          className="wtb-write-btn"
+          onClick={e => { commitFreeValue(); retainWriteButtonFocus(e); }}
           disabled={writeDisabled}
           style={sendBtn(sendFit, primaryBtn(writeDisabled))}
         >
@@ -822,7 +945,7 @@ function ValueChoiceSelect({
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '0.72rem',
           textAlign: 'left',
-          cursor: disabled ? 'not-allowed' : 'pointer',
+          cursor: disabled ? 'default' : 'pointer',
           opacity: disabled ? 0.45 : 1,
         }}
       >

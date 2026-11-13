@@ -18,6 +18,11 @@ interface Props {
   as?: 'strong' | 'span';
   /** Start in raw_hex mode when hex is available (TelegramTable DATA under VALUE). */
   defaultShowHex?: boolean;
+  /**
+   * When false, the toggle stays mouse-only (no Tab / focus ring). Use in the
+   * telegram-table scroll body where field focus is not allowed.
+   */
+  allowFocus?: boolean;
 }
 
 /**
@@ -29,6 +34,7 @@ interface Props {
 export function BusValueText({
   value, dpt, style, rawStyle, className, rawClassName, as = 'strong',
   defaultShowHex = false,
+  allowFocus = true,
 }: Props) {
   const [showHex, setShowHex] = useState(defaultShowHex);
   const hex = (value.raw_hex ?? '').trim();
@@ -63,14 +69,18 @@ export function BusValueText({
     <Tag
       className={TT.valueToggle}
       role="button"
-      tabIndex={0}
+      tabIndex={allowFocus ? 0 : -1}
       title={showingHex ? 'Show decoded value' : 'Show raw hex'}
       aria-label={showingHex ? hex : decodedLabel}
+      onMouseDown={(e: MouseEvent) => {
+        if (!allowFocus) e.preventDefault();
+      }}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
         setShowHex(v => !v);
       }}
       onKeyDown={(e: KeyboardEvent) => {
+        if (!allowFocus) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           e.stopPropagation();

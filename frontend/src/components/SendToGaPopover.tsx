@@ -29,12 +29,15 @@ type HostSession = {
   name?: string | null;
   dptMain?: number | null;
   dptSub?: number | null;
+  /** Identity of the row trigger that owns the current anchor (telegram anchorKey). */
+  triggerId: string;
   anchor: AnchorRect;
   listSnapshot: ListScrollSnapshot | null;
 };
 
 type HostApi = {
   activeAddress: string | null;
+  activeTriggerId: string | null;
   open: (session: HostSession) => void;
   close: () => void;
   captureListScroll: (() => ListScrollSnapshot | null) | null;
@@ -63,11 +66,12 @@ export function SendToGaHost({
   const [session, setSession] = useState<HostSession | null>(null);
   const api = useMemo<HostApi>(() => ({
     activeAddress: session?.address ?? null,
+    activeTriggerId: session?.triggerId ?? null,
     open: s => setSession(s),
     close: () => setSession(null),
     captureListScroll: captureListScroll ?? null,
     restoreListScroll: restoreListScroll ?? null,
-  }), [session?.address, captureListScroll, restoreListScroll]);
+  }), [session?.address, session?.triggerId, captureListScroll, restoreListScroll]);
 
   return (
     <SendToGaHostContext.Provider value={api}>
@@ -84,6 +88,7 @@ export function SendToGaHost({
           panelOnly
           panelAnchor={session.anchor}
           panelListSnapshot={session.listSnapshot}
+          panelTriggerId={session.triggerId}
           onPanelClose={() => setSession(null)}
         />
       )}
@@ -112,7 +117,33 @@ interface Props {
   panelOnly?: boolean;
   panelAnchor?: AnchorRect;
   panelListSnapshot?: ListScrollSnapshot | null;
+  /** Row trigger identity while the host panel is open (for same-GA move). */
+  panelTriggerId?: string;
   onPanelClose?: () => void;
+  /**
+   * Stable id for this trigger inside a host (telegram anchorKey). Used to
+   * distinguish toggle-close vs move-to-another-row for the same GA.
+   */
+  triggerId?: string;
+  /** Alt-click on the trigger → toggle the send panel (no popover). */
+  onAltSend?: () => void;
+  /**
+   * Ctrl/Cmd-click → clear or insert the GA in the send panel (no popover).
+   * Payload is the trigger's GA / DPT.
+   */
+  onCtrlSend?: (info: {
+    address: string;
+    name?: string | null;
+    dptMain?: number | null;
+    dptSub?: number | null;
+  }) => void;
+  /** Send panel top-row matches this GA — keep the icon blue while the panel is open. */
+  panelMatched?: boolean;
+  /**
+   * Keep the trigger out of Tab / field focus (telegram-table scroll body).
+   * Click still opens the popover; focus goes to the value field inside.
+   */
+  suppressTriggerFocus?: boolean;
 }
 
 function isReadTelegram(tg: Telegram | null | undefined): boolean {
@@ -124,6 +155,17 @@ function isReadTelegram(tg: Telegram | null | undefined): boolean {
 function isResponseTelegram(tg: Telegram | null | undefined): boolean {
   if (!tg) return false;
   return tg.simplified_type === 'Response' || Boolean(tg.telegram_type?.includes('Response'));
+}
+
+function isWriteTelegram(tg: Telegram | null | undefined): boolean {
+  if (!tg) return false;
+  if (tg.simplified_type === 'Write') return true;
+  return Boolean(tg.telegram_type?.includes('Write'));
+}
+
+/** Value-bearing bus event that should refresh the popover's last value/timestamp. */
+function isLastValueTelegram(tg: Telegram | null | undefined): boolean {
+  return isWriteTelegram(tg) || isResponseTelegram(tg);
 }
 
 function isReadRequestFeedback(feedback: { ok: boolean; msg: string } | null): boolean {
@@ -244,7 +286,13 @@ export function SendToGaPopover({
   panelOnly = false,
   panelAnchor,
   panelListSnapshot = null,
+  panelTriggerId,
   onPanelClose,
+  triggerId = '',
+  onAltSend,
+  onCtrlSend,
+  panelMatched = false,
+  suppressTriggerFocus = false,
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [hovered, setHovered] = useState(false);
@@ -254,35 +302,51 @@ export function SendToGaPopover({
   // is rendered by SendToGaHost so scrolling the list cannot unmount it.
   if (host && !panelOnly) {
     const active = host.activeAddress === address;
+    const lit = active || panelMatched || hovered;
     return (
       <button
         ref={btnRef}
         data-send-to-ga-trigger=""
         {...(active ? { 'data-send-popover-open': '' } : {})}
+        {...(panelMatched ? { 'data-send-panel-match': '' } : {})}
         className={buttonClassName}
+        tabIndex={suppressTriggerFocus ? -1 : undefined}
         style={{
           ...buttonStyle,
-          color: (active || hovered) ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
+          color: lit ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        onMouseDown={suppressTriggerFocus ? (e => { e.preventDefault(); }) : undefined}
         onClick={e => {
           e.stopPropagation();
-          if (active) {
-            host.close();
+          if (e.altKey) {
+            onAltSend?.();
+            return;
+          }
+          if (e.ctrlKey || e.metaKey) {
+            onCtrlSend?.({ address, name, dptMain, dptSub });
             return;
           }
           const b = btnRef.current?.getBoundingClientRect();
           if (!b) return;
+          const anchor = {
+            top: b.top, left: b.left, right: b.right, bottom: b.bottom,
+            width: b.width, height: b.height,
+          };
+          // Same GA + same row trigger → toggle closed. Same GA + other row →
+          // re-anchor the open panel and refresh the list-scroll snapshot.
+          if (active && host.activeTriggerId === triggerId) {
+            host.close();
+            return;
+          }
           host.open({
             address,
             name,
             dptMain,
             dptSub,
-            anchor: {
-              top: b.top, left: b.left, right: b.right, bottom: b.bottom,
-              width: b.width, height: b.height,
-            },
+            triggerId,
+            anchor,
             listSnapshot: host.captureListScroll?.() ?? null,
           });
         }}
@@ -308,7 +372,12 @@ export function SendToGaPopover({
       panelOnly={panelOnly}
       panelAnchor={panelAnchor}
       panelListSnapshot={panelListSnapshot}
+      panelTriggerId={panelTriggerId}
       onPanelClose={onPanelClose}
+      onAltSend={onAltSend}
+      onCtrlSend={onCtrlSend}
+      panelMatched={panelMatched}
+      suppressTriggerFocus={suppressTriggerFocus}
     />
   );
 }
@@ -320,22 +389,31 @@ function SendToGaPopoverPanel({
   panelOnly = false,
   panelAnchor,
   panelListSnapshot = null,
+  panelTriggerId,
   onPanelClose,
+  onAltSend,
+  onCtrlSend,
+  panelMatched = false,
+  suppressTriggerFocus = false,
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [open, setOpen] = useState(panelOnly);
   const [hovered, setHovered] = useState(false);
+  const [focusToken, setFocusToken] = useState(0);
   const btnRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<AnchorRect | null>(panelAnchor ?? null);
   const [pos, setPos] = useState<{ top: number; left: number; maxWidth: number; maxHeight: number } | null>(null);
   /** List position captured when this popover opened (restore jump). */
   const [listSnapshot, setListSnapshot] = useState<ListScrollSnapshot | null>(panelListSnapshot);
+  const bumpFocus = () => setFocusToken(t => t + 1);
 
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [last, setLast] = useState<Telegram | null>(null);
+  /** Bumped on live last updates so a late loadLast() cannot overwrite newer bus data. */
+  const loadLastGenRef = useRef(0);
   /** Active wait for a GroupValueResponse after Read. */
   const [awaitingRead, setAwaitingRead] = useState(false);
   /** Bound Read/Response while waiting or just after — for green Response chrome. */
@@ -520,29 +598,52 @@ function SendToGaPopoverPanel({
     setFeedback(null);
     setAwaitingRead(false);
     setStatusTelegram(null);
+    bumpFocus();
     void loadLast();
   };
 
   const loadLast = async () => {
+    const gen = ++loadLastGenRef.current;
     try {
-      const res = await fetch(apiUrl(`/api/telegrams?target_address=${encodeURIComponent(address)}&limit=1`));
+      const res = await fetch(apiUrl(
+        `/api/telegrams?target_address=${encodeURIComponent(address)}&limit=1&telegram_type=Write,Response`,
+      ));
       const json = await res.json();
+      if (gen !== loadLastGenRef.current) return;
       const t = json.telegrams?.[0] as Telegram | undefined;
       setLast(t ?? null);
     } catch {
+      if (gen !== loadLastGenRef.current) return;
       setLast(null);
     }
   };
 
-  // Host panel mounts already open — place once and load last value.
+  const seenHostTriggerId = useRef<string | undefined>(undefined);
+
+  // Host panel mounts already open — place once, focus value, load last value.
   useLayoutEffect(() => {
     if (!panelOnly) return;
     anchorRef.current = panelAnchor ?? null;
-    setListSnapshot(panelListSnapshot);
+    setListSnapshot(panelListSnapshot ?? null);
+    seenHostTriggerId.current = panelTriggerId;
     place('full');
+    bumpFocus();
     void loadLast();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panel mount only
   }, [panelOnly]);
+
+  // Same-GA move: host updates anchor + list snapshot without remounting.
+  useLayoutEffect(() => {
+    if (!panelOnly || !open || !panelAnchor) return;
+    if (seenHostTriggerId.current === undefined) return;
+    if (seenHostTriggerId.current === panelTriggerId) return;
+    seenHostTriggerId.current = panelTriggerId;
+    anchorRef.current = panelAnchor;
+    setListSnapshot(panelListSnapshot ?? null);
+    place('full');
+    bumpFocus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelOnly, open, panelTriggerId, panelAnchor, panelListSnapshot]);
 
   // Outside/Escape close only — never auto-dismiss on scroll/resize/overlap.
   // List scroll keeps top frozen; may shift left right to clear send overlaps.
@@ -609,20 +710,25 @@ function SendToGaPopoverPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- open only; place/close via refs+RO
   }, [open]);
 
-  // Bind Read/Response from the live feed while a wait is open.
+  // Live feed: refresh last value/timestamp on Write/Response; Read-wait status separate.
   const [seenLatest, setSeenLatest] = useState(latestTelegram);
   if (latestTelegram !== seenLatest) {
     setSeenLatest(latestTelegram);
-    if (open && awaitingRead && latestTelegram && latestTelegram.target_address === address) {
-      if (isReadTelegram(latestTelegram)) {
-        setStatusTelegram(latestTelegram);
-      } else if (isResponseTelegram(latestTelegram)) {
+    if (open && latestTelegram && latestTelegram.target_address === address) {
+      if (isLastValueTelegram(latestTelegram)) {
+        loadLastGenRef.current += 1;
         setLast(latestTelegram);
-        setStatusTelegram(latestTelegram);
-        setAwaitingRead(false);
-        setFeedback(null);
       }
-      // Writes never end a read wait.
+      if (awaitingRead) {
+        if (isReadTelegram(latestTelegram)) {
+          setStatusTelegram(latestTelegram);
+        } else if (isResponseTelegram(latestTelegram)) {
+          setStatusTelegram(latestTelegram);
+          setAwaitingRead(false);
+          setFeedback(null);
+        }
+        // Writes never end a read wait.
+      }
     }
   }
 
@@ -702,14 +808,28 @@ function SendToGaPopoverPanel({
           ref={btnRef}
           data-send-to-ga-trigger=""
           {...(open ? { 'data-send-popover-open': '' } : {})}
+          {...(panelMatched ? { 'data-send-panel-match': '' } : {})}
           className={buttonClassName}
+          tabIndex={suppressTriggerFocus ? -1 : undefined}
           style={{
             ...buttonStyle,
-            color: (open || hovered) ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
+            color: (open || panelMatched || hovered) ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
           }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
-          onClick={e => { e.stopPropagation(); toggle(); }}
+          onMouseDown={suppressTriggerFocus ? (e => { e.preventDefault(); }) : undefined}
+          onClick={e => {
+            e.stopPropagation();
+            if (e.altKey) {
+              onAltSend?.();
+              return;
+            }
+            if (e.ctrlKey || e.metaKey) {
+              onCtrlSend?.({ address, name, dptMain, dptSub });
+              return;
+            }
+            toggle();
+          }}
           title={title}
         >
           <Send size={12} />
@@ -805,12 +925,14 @@ function SendToGaPopoverPanel({
               disabled={controlsDisabled}
               unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
               sendFit="hug"
+              focusToken={focusToken}
               valueColProps={{ style: { gridArea: 'value', width: 'max-content' } }}
               sendColProps={{ style: { gridArea: 'write', width: '100%' } }}
               reserveValueSlot={false}
               sendEnd={(
                 <button
                   type="button"
+                  className="wtb-read-btn"
                   onClick={() => void read()}
                   disabled={controlsDisabled}
                   style={secondaryBtn(controlsDisabled)}
