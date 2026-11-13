@@ -695,3 +695,19 @@ test('ctrl-click cycles ≤4-bit write button labels name → hex → bin withou
   fireEvent.click(screen.getByRole('button', { name: /^on$/i }));
   expect(onWrite).toHaveBeenCalledWith(true);
 });
+
+test('≤4-bit label mode survives a DPT change', () => {
+  const { rerender } = render(
+    <WriteControls dptMain={1} dptKey="1.001" value="" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^on$/i }), { ctrlKey: true });
+  expect(screen.getByRole('button', { name: /^0x1$/i })).toBeInTheDocument();
+
+  rerender(
+    <WriteControls dptMain={1} dptKey="1.008" value="" onValueChange={() => {}} onWrite={() => {}} />,
+  );
+  // 1.008 words are up/down; hex mode must still be active after the DPT switch.
+  expect(screen.getByRole('button', { name: /^0x1$/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^0x0$/i })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^up$/i })).not.toBeInTheDocument();
+});

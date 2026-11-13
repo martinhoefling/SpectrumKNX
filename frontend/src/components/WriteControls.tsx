@@ -303,20 +303,13 @@ export function WriteControls({
   // The select index belongs to one DPT. A different key reads as the first entry,
   // so changing the DPT does not need an effect to clear a stale pick.
   const [picked, setPicked] = useState({ key: dptKey, index: 0 });
-  /** Decoded / 0x / 0b labels for ≤4-bit named send buttons (Ctrl-click cycles). */
-  const [labelModeState, setLabelModeState] = useState<{ key: string | null | undefined; mode: DiscreteLabelMode }>({
-    key: dptKey,
-    mode: 'name',
-  });
-  const labelMode: DiscreteLabelMode = labelModeState.key === dptKey ? labelModeState.mode : 'name';
+  /** Decoded / 0x / 0b labels for ≤4-bit named send buttons (Ctrl-click cycles; survives DPT changes). */
+  const [labelMode, setLabelMode] = useState<DiscreteLabelMode>('name');
   const cycleLabelMode = (e: MouseEvent) => {
     if (!(e.ctrlKey || e.metaKey)) return false;
     e.preventDefault();
     e.stopPropagation();
-    setLabelModeState(prev => ({
-      key: dptKey,
-      mode: nextDiscreteLabelMode(prev.key === dptKey ? prev.mode : 'name'),
-    }));
+    setLabelMode(prev => nextDiscreteLabelMode(prev));
     return true;
   };
   const discreteButtonLabel = (choice: DiscreteChoice) => (
