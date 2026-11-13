@@ -31,6 +31,16 @@ import {
   ROW_OUTLINE_FLASH_MS,
 } from '../utils/rowOutlineFlash';
 import { useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
+import {
+  sanitizeSecondsInput,
+  rowsEqualForCorrespondence,
+  type SendCorrespondenceKey,
+  type SendPanelCommand,
+  type SendPanelCommandResult,
+  type LinkedRowStatus,
+} from '../utils/sendCorrespondence';
+
+export type { SendCorrespondenceKey, SendPanelCommand, SendPanelCommandResult, LinkedRowStatus };
 
 /** Panel Read button: keeps visible focus through the row busy→disabled cycle. */
 function RetainFocusReadButton({
@@ -90,6 +100,12 @@ interface Props {
   ctrlSendRequest?: CtrlSendRequest | null;
   /** Called after a ctrlSendRequest has been applied. */
   onCtrlSendHandled?: () => void;
+  /** Popover ↔ panel correspondence commands (ensure / cancel / write). */
+  sendPanelCommand?: SendPanelCommand | null;
+  /** Called after a sendPanelCommand has been applied. */
+  onSendPanelCommandHandled?: (result: SendPanelCommandResult) => void;
+  /** Emits live status for rows (popover mirrors linked row). */
+  onLinkedRowStatusesChange?: (statuses: Record<string, LinkedRowStatus>) => void;
   /** Fill the workspace tabpanel (no docked height chrome). */
   embedded?: boolean;
 }
@@ -377,14 +393,6 @@ const secondsBareInput: CSSProperties = {
  * Delay/Every: glass shell fills the track; column width comes from text
  * (value + `s`, or placeholder), not the UA input default.
  */
-/** delay/every: positive integers only; applied on blur (0 / decimals / junk → clear). */
-function sanitizeSecondsInput(raw: string): string {
-  const t = raw.trim();
-  if (t === '') return '';
-  if (!/^[1-9]\d*$/.test(t)) return '';
-  return t;
-}
-
 function SecondsField({
   value,
   onChange,
@@ -571,7 +579,7 @@ const MAX_STORED_ROWS = 20;
 
 type StoredRow = Pick<
   Row,
-  | 'address' | 'dpt' | 'value' | 'delay' | 'every' | 'feedback' | 'readBaseline'
+  | 'address' | 'name' | 'dpt' | 'value' | 'delay' | 'every' | 'feedback' | 'readBaseline'
   | 'statusWatch' | 'statusTelegram' | 'lastSentTelegram' | 'scheduledJobId'
 >;
 
@@ -606,6 +614,7 @@ function loadStoredRows(): Row[] | null {
       return {
         ...newRow(),
         address: str(s?.address),
+        name: str(s?.name),
         dpt: str(s?.dpt),
         value: str(s?.value),
         delay: str(s?.delay),
@@ -655,10 +664,10 @@ export function topRowHintMatches(
 function saveRows(rows: Row[]): void {
   try {
     const stored: StoredRow[] = rows.map(({
-      address, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
+      address, name, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
       scheduledJobId,
     }) => ({
-      address, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
+      address, name, dpt, value, delay, every, feedback, readBaseline, statusWatch, statusTelegram, lastSentTelegram,
       scheduledJobId,
     }));
     localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(stored));
@@ -690,6 +699,9 @@ export function WriteToBusPanel({
   onTopRowHintChange,
   ctrlSendRequest = null,
   onCtrlSendHandled,
+  sendPanelCommand = null,
+  onSendPanelCommandHandled,
+  onLinkedRowStatusesChange,
   embedded = false,
 }: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
@@ -1233,6 +1245,86 @@ export function WriteToBusPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only on request nonce
   }, [ctrlSendRequest?.nonce]);
 
+  const writeRef = useRef<(row: Row, payload: BusPayload) => Promise<void>>(async () => {});
+  const cancelJobRef = useRef<(rowId: string) => Promise<void>>(async () => {});
+
+  // Popover correspondence: ensure / cancel / write via panel rows.
+  useEffect(() => {
+    if (!sendPanelCommand) return;
+    const cmd = sendPanelCommand;
+    const finish = (result: Omit<SendPanelCommandResult, 'nonce'>) => {
+      onSendPanelCommandHandled?.({ nonce: cmd.nonce, ...result });
+    };
+
+    if (cmd.type === 'ensureRow') {
+      const key = cmd.key;
+      const rowsNow = rowsRef.current;
+      const matched = rowsNow.find(r => rowsEqualForCorrespondence({
+        address: r.address.trim(),
+        dpt: r.dpt.trim(),
+        value: r.value,
+        delay: sanitizeSecondsInput(r.delay),
+        every: sanitizeSecondsInput(r.every),
+      }, key));
+      if (matched) {
+        finish({ rowId: matched.id, created: false, matched: true });
+        return;
+      }
+      const known = byAddress.get(key.address);
+      const next: Row = {
+        ...newRow(),
+        address: key.address,
+        name: (known?.name ?? cmd.name ?? '').toString(),
+        dpt: key.dpt || (known && known.main != null ? formatDpt(known.main, known.sub) : ''),
+        value: key.value,
+        delay: key.delay,
+        every: key.every,
+      };
+      setRows(rs => [...rs, next]);
+      if (key.address) rememberGa(key.address);
+      finish({ rowId: next.id, created: true, matched: false });
+      return;
+    }
+
+    if (cmd.type === 'cancelRow') {
+      void cancelJobRef.current(cmd.rowId).finally(() => {
+        finish({ rowId: cmd.rowId, created: false, matched: true });
+      });
+      return;
+    }
+
+    if (cmd.type === 'writeViaRow') {
+      const row = rowsRef.current.find(r => r.id === cmd.rowId);
+      if (!row) {
+        finish({ rowId: null, created: false, matched: false });
+        return;
+      }
+      // Apply draft fields already ensured; write uses current row delay/every.
+      void writeRef.current(row, cmd.payload).finally(() => {
+        finish({ rowId: row.id, created: false, matched: true });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only on command nonce
+  }, [sendPanelCommand?.nonce]);
+
+  const onLinkedRowStatusesChangeRef = useRef(onLinkedRowStatusesChange);
+  onLinkedRowStatusesChangeRef.current = onLinkedRowStatusesChange;
+  useEffect(() => {
+    const emit = onLinkedRowStatusesChangeRef.current;
+    if (!emit) return;
+    const statuses: Record<string, LinkedRowStatus> = {};
+    for (const r of rows) {
+      const job = jobsByRowId[r.id] ?? null;
+      statuses[r.id] = {
+        rowId: r.id,
+        job: job && (job.state === 'waiting' || job.state === 'running') ? job : null,
+        feedback: r.feedback,
+        busy: r.busy,
+      };
+    }
+    emit(statuses);
+  }, [rows, jobsByRowId]);
+
   const applyResolved = (id: string, option: FilterOption) => {
     updateRow(id, {
       address: option.address ?? '',
@@ -1478,6 +1570,9 @@ export function WriteToBusPanel({
       updateRow(row.id, { busy: false });
     }
   };
+  writeRef.current = write;
+  // cancelJob is a nested function declaration (hoisted) below the return.
+  cancelJobRef.current = cancelJob;
 
   return (
     <div

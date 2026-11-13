@@ -1,6 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Radio, AlertTriangle, Clock } from 'lucide-react';
+import { Send, Radio, AlertTriangle, Clock, Timer, X } from 'lucide-react';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -14,6 +14,12 @@ import { WriteControls } from './WriteControls';
 import { BusValueText } from './BusValueText';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { secondaryBtn } from '../utils/buttonStyles';
+import {
+  sanitizeSecondsInput,
+  correspondenceKeyFromDraft,
+  type SendCorrespondenceKey,
+} from '../utils/sendCorrespondence';
+import type { LinkedRowStatus } from './WriteToBusPanel';
 
 /** Stable list position: telegram identity + its viewport offset at open time. */
 export type ListScrollSnapshot = {
@@ -56,12 +62,34 @@ export function SendToGaHost({
   onGotoTelegram,
   captureListScroll,
   restoreListScroll,
+  linkedRowId = null,
+  linkedStatus = null,
+  onScheduleCommit,
+  onWriteWithSchedule,
+  onCancelLinked,
+  onAltSend,
+  onCtrlSend,
 }: {
   children: React.ReactNode;
   latestTelegram?: Telegram | null;
   onGotoTelegram?: (telegram: Telegram) => void;
   captureListScroll?: () => ListScrollSnapshot | null;
   restoreListScroll?: (snap: ListScrollSnapshot) => void;
+  linkedRowId?: string | null;
+  linkedStatus?: LinkedRowStatus | null;
+  onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
+  onWriteWithSchedule?: (
+    draft: SendCorrespondenceKey & { name?: string | null },
+    payload: BusPayload,
+  ) => void;
+  onCancelLinked?: () => void;
+  onAltSend?: () => void;
+  onCtrlSend?: (info: {
+    address: string;
+    name?: string | null;
+    dptMain?: number | null;
+    dptSub?: number | null;
+  }) => void;
 }) {
   const [session, setSession] = useState<HostSession | null>(null);
   const api = useMemo<HostApi>(() => ({
@@ -90,6 +118,13 @@ export function SendToGaHost({
           panelListSnapshot={session.listSnapshot}
           panelTriggerId={session.triggerId}
           onPanelClose={() => setSession(null)}
+          onAltSend={onAltSend}
+          onCtrlSend={onCtrlSend}
+          linkedRowId={linkedRowId}
+          linkedStatus={linkedStatus}
+          onScheduleCommit={onScheduleCommit}
+          onWriteWithSchedule={onWriteWithSchedule}
+          onCancelLinked={onCancelLinked}
         />
       )}
     </SendToGaHostContext.Provider>
@@ -144,6 +179,14 @@ interface Props {
    * Click still opens the popover; focus goes to the value field inside.
    */
   suppressTriggerFocus?: boolean;
+  linkedRowId?: string | null;
+  linkedStatus?: LinkedRowStatus | null;
+  onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
+  onWriteWithSchedule?: (
+    draft: SendCorrespondenceKey & { name?: string | null },
+    payload: BusPayload,
+  ) => void;
+  onCancelLinked?: () => void;
 }
 
 function isReadTelegram(tg: Telegram | null | undefined): boolean {
@@ -293,6 +336,11 @@ export function SendToGaPopover({
   onCtrlSend,
   panelMatched = false,
   suppressTriggerFocus = false,
+  linkedRowId = null,
+  linkedStatus = null,
+  onScheduleCommit,
+  onWriteWithSchedule,
+  onCancelLinked,
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [hovered, setHovered] = useState(false);
@@ -378,6 +426,11 @@ export function SendToGaPopover({
       onCtrlSend={onCtrlSend}
       panelMatched={panelMatched}
       suppressTriggerFocus={suppressTriggerFocus}
+      linkedRowId={linkedRowId}
+      linkedStatus={linkedStatus}
+      onScheduleCommit={onScheduleCommit}
+      onWriteWithSchedule={onWriteWithSchedule}
+      onCancelLinked={onCancelLinked}
     />
   );
 }
@@ -395,6 +448,11 @@ function SendToGaPopoverPanel({
   onCtrlSend,
   panelMatched = false,
   suppressTriggerFocus = false,
+  linkedRowId = null,
+  linkedStatus = null,
+  onScheduleCommit,
+  onWriteWithSchedule,
+  onCancelLinked,
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [open, setOpen] = useState(panelOnly);
@@ -409,6 +467,8 @@ function SendToGaPopoverPanel({
   const bumpFocus = () => setFocusToken(t => t + 1);
 
   const [value, setValue] = useState('');
+  const [delay, setDelay] = useState('');
+  const [every, setEvery] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [last, setLast] = useState<Telegram | null>(null);
@@ -440,10 +500,40 @@ function SendToGaPopoverPanel({
     return list;
   }, [dptCatalog, dptMain, dptSub]);
 
+  /** Enter/blur on any field: link when delay/every set, else clear link. */
+  const commitScheduleLink = (overrides?: Partial<{ dpt: string; value: string; delay: string; every: string }>) => {
+    const nextDelay = sanitizeSecondsInput(overrides?.delay ?? delay);
+    const nextEvery = sanitizeSecondsInput(overrides?.every ?? every);
+    if (nextDelay !== delay) setDelay(nextDelay);
+    if (nextEvery !== every) setEvery(nextEvery);
+    onScheduleCommit?.({
+      ...correspondenceKeyFromDraft({
+        address,
+        dpt: overrides?.dpt ?? dpt,
+        value: overrides?.value ?? value,
+        delay: nextDelay,
+        every: nextEvery,
+      }),
+      name,
+    });
+  };
+
   const onDptChange = (next: string) => {
     if (parseDptMain(dpt) !== parseDptMain(next)) setValue('');
     setDpt(next);
     setFeedback(null);
+    // DptField commits on blur/Enter via onChange — treat as schedule commit.
+    commitScheduleLink({ dpt: next });
+  };
+
+  const scheduleFieldProps = {
+    onBlur: commitScheduleLink,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitScheduleLink();
+      }
+    },
   };
 
   const tableEl = () => (
@@ -733,6 +823,21 @@ function SendToGaPopoverPanel({
   }
 
   const write = async (payload: BusPayload) => {
+    const nextDelay = sanitizeSecondsInput(delay);
+    const nextEvery = sanitizeSecondsInput(every);
+    if (nextDelay !== delay) setDelay(nextDelay);
+    if (nextEvery !== every) setEvery(nextEvery);
+    const scheduled = Boolean(nextDelay || nextEvery);
+    // Scheduled or already linked → panel row owns the job / append-on-miss.
+    if (onWriteWithSchedule && (scheduled || linkedRowId)) {
+      onWriteWithSchedule({
+        ...correspondenceKeyFromDraft({
+          address, dpt, value, delay: nextDelay, every: nextEvery,
+        }),
+        name,
+      }, payload);
+      return;
+    }
     setBusy(true);
     setFeedback(null);
     setAwaitingRead(false);
@@ -926,7 +1031,10 @@ function SendToGaPopoverPanel({
               unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
               sendFit="hug"
               focusToken={focusToken}
-              valueColProps={{ style: { gridArea: 'value', width: 'max-content' } }}
+              valueColProps={{
+                style: { gridArea: 'value', width: 'max-content' },
+                onBlur: commitScheduleLink,
+              }}
               sendColProps={{ style: { gridArea: 'write', width: '100%' } }}
               reserveValueSlot={false}
               sendEnd={(
@@ -943,6 +1051,61 @@ function SendToGaPopoverPanel({
               )}
             />
           </div>
+
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+              delay
+              <input
+                className="glass-input"
+                value={delay}
+                disabled={controlsDisabled || Boolean(linkedStatus?.job)}
+                placeholder="s"
+                title="Delay before first send (seconds)"
+                style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
+                onChange={e => setDelay(e.target.value)}
+                {...scheduleFieldProps}
+              />
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+              every
+              <input
+                className="glass-input"
+                value={every}
+                disabled={controlsDisabled || Boolean(linkedStatus?.job)}
+                placeholder="s"
+                title="Cyclic interval (seconds)"
+                style={{ width: '3.2rem', padding: '0.2rem 0.35rem', fontSize: '0.72rem' }}
+                onChange={e => setEvery(e.target.value)}
+                {...scheduleFieldProps}
+              />
+            </label>
+          </div>
+
+          {linkedStatus?.job && (
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap',
+                fontSize: '0.72rem', color: 'var(--accent-primary)',
+              }}
+            >
+              <Timer size={12} />
+              <span>
+                {linkedStatus.job.state}
+                {linkedStatus.job.sends_done != null ? ` · ${linkedStatus.job.sends_done} sent` : ''}
+              </span>
+              {onCancelLinked && (
+                <button
+                  type="button"
+                  className="wtb-read-btn"
+                  onClick={() => onCancelLinked()}
+                  style={secondaryBtn(false)}
+                  title="Cancel scheduled send"
+                >
+                  <X size={12} /> Cancel
+                </button>
+              )}
+            </div>
+          )}
 
           {showStatus && (statusIcon || statusText) && (
             <div

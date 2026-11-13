@@ -14,6 +14,8 @@ interface Props {
    * instead, so a following blur does not commit the pre-pick text.
    */
   onCommit?: (text: string) => void;
+  /** Called when the input gains focus (e.g. to snapshot pre-edit values). */
+  onFocus?: () => void;
   options: FilterOption[];
   /** Recently used addresses, newest first — the only suggestions while the input is empty (#187, #190). */
   recentAddresses?: string[];
@@ -34,7 +36,7 @@ interface Props {
  * The suggestion list is portaled to document.body so it cannot expand the
  * write-panel scroll area and shift the row grid.
  */
-export function GaCombobox({ value, onChange, onCommit, options, recentAddresses, placeholder, width = 220, display = 'address' }: Props) {
+export function GaCombobox({ value, onChange, onCommit, onFocus, options, recentAddresses, placeholder, width = 220, display = 'address' }: Props) {
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -197,7 +199,12 @@ export function GaCombobox({ value, onChange, onCommit, options, recentAddresses
         placeholder={placeholder}
         size={size}
         onChange={e => { pickedRef.current = false; onChange(e.target.value); setOpen(true); setHighlight(-1); }}
-        onFocus={() => { pickedRef.current = false; setOpen(true); setHighlight(0); }}
+        onFocus={() => {
+          pickedRef.current = false;
+          setOpen(true);
+          setHighlight(0);
+          onFocus?.();
+        }}
         onBlur={() => {
           if (pickedRef.current) { pickedRef.current = false; setOpen(false); return; }
           // Incomplete text adopts a highlighted suggestion only while one is

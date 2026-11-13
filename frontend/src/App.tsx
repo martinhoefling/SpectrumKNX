@@ -54,7 +54,14 @@ import {
   WriteToBusPanel,
   type CtrlSendRequest,
   type SendPanelTopRowHint,
+  type SendPanelCommand,
+  type LinkedRowStatus,
 } from './components/WriteToBusPanel';
+import {
+  correspondenceKeyFromDraft,
+  type SendCorrespondenceKey,
+} from './utils/sendCorrespondence';
+import type { BusPayload } from './utils/dptValues';
 import { DptCatalogProvider } from './components/DptCatalogContext';
 import { UpdateNotification } from './components/UpdateNotification';
 import { LegacyTimestampBanner } from './components/LegacyTimestampBanner';
@@ -289,6 +296,16 @@ function App() {
   /** Ctrl-click send-icon request consumed by WriteToBusPanel (clear or insert top row). */
   const [ctrlSendRequest, setCtrlSendRequest] = useState<CtrlSendRequest | null>(null);
   const ctrlSendNonceRef = useRef(0);
+  /** Popover ↔ panel schedule correspondence. */
+  const [sendPanelCommand, setSendPanelCommand] = useState<SendPanelCommand | null>(null);
+  const sendPanelCmdNonceRef = useRef(0);
+  const [popoverLinkedRowId, setPopoverLinkedRowId] = useState<string | null>(null);
+  const [linkedRowStatuses, setLinkedRowStatuses] = useState<Record<string, LinkedRowStatus>>({});
+  const pendingEnsureRef = useRef<{
+    nonce: number;
+    kind: 'link' | 'write';
+    payload?: BusPayload;
+  } | null>(null);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -811,6 +828,67 @@ function App() {
 
   const handleSendPanelTopHintChange = useCallback((hint: SendPanelTopRowHint | null) => {
     setSendPanelTopHint(hint);
+  }, []);
+
+  const handleLinkedRowStatusesChange = useCallback((statuses: Record<string, LinkedRowStatus>) => {
+    setLinkedRowStatuses(statuses);
+  }, []);
+
+  const handleScheduleCommit = useCallback((draft: SendCorrespondenceKey & { name?: string | null }) => {
+    const key = correspondenceKeyFromDraft(draft);
+    if (!key.delay && !key.every) {
+      setPopoverLinkedRowId(null);
+      return;
+    }
+    sendPanelCmdNonceRef.current += 1;
+    const nonce = sendPanelCmdNonceRef.current;
+    pendingEnsureRef.current = { nonce, kind: 'link' };
+    setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
+  }, []);
+
+  const handleWriteWithSchedule = useCallback((
+    draft: SendCorrespondenceKey & { name?: string | null },
+    payload: BusPayload,
+  ) => {
+    const key = correspondenceKeyFromDraft(draft);
+    sendPanelCmdNonceRef.current += 1;
+    const nonce = sendPanelCmdNonceRef.current;
+    pendingEnsureRef.current = { nonce, kind: 'write', payload };
+    setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
+  }, []);
+
+  const handleCancelLinked = useCallback(() => {
+    if (!popoverLinkedRowId) return;
+    sendPanelCmdNonceRef.current += 1;
+    setSendPanelCommand({
+      type: 'cancelRow',
+      nonce: sendPanelCmdNonceRef.current,
+      rowId: popoverLinkedRowId,
+    });
+  }, [popoverLinkedRowId]);
+
+  const handleSendPanelCommandHandled = useCallback((result: {
+    nonce: number;
+    rowId: string | null;
+    created: boolean;
+    matched: boolean;
+  }) => {
+    const pending = pendingEnsureRef.current;
+    if (pending && pending.nonce === result.nonce) {
+      pendingEnsureRef.current = null;
+      if (result.rowId) setPopoverLinkedRowId(result.rowId);
+      if (pending.kind === 'write' && result.rowId && pending.payload) {
+        sendPanelCmdNonceRef.current += 1;
+        setSendPanelCommand({
+          type: 'writeViaRow',
+          nonce: sendPanelCmdNonceRef.current,
+          rowId: result.rowId,
+          payload: pending.payload,
+        });
+        return;
+      }
+    }
+    setSendPanelCommand(null);
   }, []);
 
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
@@ -1352,16 +1430,24 @@ function App() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {/* Full width of main, above the filter column so the bar is not
                 inset beside the filter pane. */}
-            {isSendOpen && serverConfig?.status?.write_enabled && (
-              <WriteToBusPanel
-                targets={filterOptions.targets}
-                dptCatalog={filterOptions.dpts}
-                latestTelegram={latestTelegram}
-                onGotoTelegram={handleGotoTelegram}
-                onTopRowHintChange={handleSendPanelTopHintChange}
-                ctrlSendRequest={ctrlSendRequest}
-                onCtrlSendHandled={handleCtrlSendHandled}
-              />
+            {serverConfig?.status?.write_enabled && (
+              <div
+                style={{ display: isSendOpen ? undefined : 'none' }}
+                aria-hidden={!isSendOpen}
+              >
+                <WriteToBusPanel
+                  targets={filterOptions.targets}
+                  dptCatalog={filterOptions.dpts}
+                  latestTelegram={latestTelegram}
+                  onGotoTelegram={handleGotoTelegram}
+                  onTopRowHintChange={handleSendPanelTopHintChange}
+                  ctrlSendRequest={ctrlSendRequest}
+                  onCtrlSendHandled={handleCtrlSendHandled}
+                  sendPanelCommand={sendPanelCommand}
+                  onSendPanelCommandHandled={handleSendPanelCommandHandled}
+                  onLinkedRowStatusesChange={handleLinkedRowStatusesChange}
+                />
+              </div>
             )}
             {/* Content row: filter panel + table */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
@@ -1500,6 +1586,11 @@ function App() {
                     onAltSend={handleAltSend}
                     onCtrlSend={handleCtrlSend}
                     sendPanelTopHint={isSendOpen ? sendPanelTopHint : null}
+                    linkedRowId={popoverLinkedRowId}
+                    linkedStatus={popoverLinkedRowId ? linkedRowStatuses[popoverLinkedRowId] ?? null : null}
+                    onScheduleCommit={handleScheduleCommit}
+                    onWriteWithSchedule={handleWriteWithSchedule}
+                    onCancelLinked={handleCancelLinked}
                     latestTelegram={latestTelegram}
                     quickFilterOpen={quickFilterOpen}
                     onQuickFilterOpenChange={setQuickFilterOpen}

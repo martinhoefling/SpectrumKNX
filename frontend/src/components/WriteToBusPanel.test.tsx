@@ -146,6 +146,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try { localStorage.clear(); } catch { /* env may already be torn down */ }
 });
 
 test('the value column is hidden when every row is a button DPT', () => {
@@ -822,7 +823,7 @@ test('persists row edits so toggling the panel keeps them (#254)', async () => {
   await waitFor(() => {
     expect(JSON.parse(localStorage.getItem(ROWS_KEY)!)).toEqual([
       {
-        address: '7/0/1', dpt: '', value: '42', delay: '3', every: '',
+        address: '7/0/1', name: '', dpt: '', value: '42', delay: '3', every: '',
         feedback: null, readBaseline: null, statusWatch: null, statusTelegram: null,
         lastSentTelegram: null, scheduledJobId: null,
       },
@@ -2115,8 +2116,8 @@ test('header Reset/Add row stay visible with a single send row', () => {
   render(<WriteToBusPanel targets={[]} />);
   expect(screen.getByRole('button', { name: 'Reset panel' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Add row at top' })).toBeInTheDocument();
-  // Cancel stays mounted but hidden until multiple cancellable rows exist.
-  expect(screen.getByRole('button', { name: 'Cancel all', hidden: true })).toBeInTheDocument();
+  // Cancel stays mounted but aria-hidden until cancellable jobs exist.
+  expect(document.querySelector('button[aria-label="Cancel all"]')).toBeTruthy();
 });
 
 test('only the mid pane has a horizontal scrollbar host (GA and status stay pinned)', () => {

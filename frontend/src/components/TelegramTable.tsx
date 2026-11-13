@@ -5,7 +5,9 @@ import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot, Download } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
 import { SendToGaHost, SendToGaPopover, type ListScrollSnapshot } from './SendToGaPopover';
-import { topRowHintMatches, type SendPanelTopRowHint } from './WriteToBusPanel';
+import { topRowHintMatches, type SendPanelTopRowHint, type LinkedRowStatus } from './WriteToBusPanel';
+import type { SendCorrespondenceKey } from '../utils/sendCorrespondence';
+import type { BusPayload } from '../utils/dptValues';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
@@ -49,6 +51,15 @@ interface TelegramTableProps {
   }) => void;
   /** Top send-panel row hint while the panel is open (send-icon blue). */
   sendPanelTopHint?: SendPanelTopRowHint | null;
+  /** Linked send-panel row for popover schedule status. */
+  linkedRowId?: string | null;
+  linkedStatus?: LinkedRowStatus | null;
+  onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
+  onWriteWithSchedule?: (
+    draft: SendCorrespondenceKey & { name?: string | null },
+    payload: BusPayload,
+  ) => void;
+  onCancelLinked?: () => void;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -225,6 +236,7 @@ function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascendi
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
   latestTelegram, onAltSend, onCtrlSend, sendPanelTopHint = null,
+  linkedRowId = null, linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onCancelLinked,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -2241,6 +2253,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     t.dpt_main,
                     t.dpt_sub,
                   )}
+                  linkedRowId={linkedRowId}
+                  linkedStatus={linkedStatus}
+                  onScheduleCommit={onScheduleCommit}
+                  onWriteWithSchedule={onWriteWithSchedule}
+                  onCancelLinked={onCancelLinked}
                 />
               )}
             </div>
@@ -2385,6 +2402,13 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         onGotoTelegram={onGotoTelegram}
         captureListScroll={captureListScroll}
         restoreListScroll={restoreListScroll}
+        linkedRowId={linkedRowId}
+        linkedStatus={linkedStatus}
+        onScheduleCommit={onScheduleCommit}
+        onWriteWithSchedule={onWriteWithSchedule}
+        onCancelLinked={onCancelLinked}
+        onAltSend={onAltSend}
+        onCtrlSend={onCtrlSend}
       >
       {/* Quick info bar (#311): collapsible summary directly above the header. */}
       {infoOpen && infoMetrics && (
