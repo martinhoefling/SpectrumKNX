@@ -1199,7 +1199,7 @@ function SendToGaPopoverPanel({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(11rem, max-content) max-content',
+                  gridTemplateColumns: 'minmax(0, 1fr) max-content',
                   gridTemplateAreas: showValue
                     ? `
                       "dpt dpt"
@@ -1214,9 +1214,7 @@ function SendToGaPopoverPanel({
                   columnGap: '0.4rem',
                   rowGap: '0.65rem',
                   alignItems: 'center',
-                  justifyContent: 'start',
-                  width: 'max-content',
-                  maxWidth: '100%',
+                  width: '100%',
                 }}
               >
                 <div style={{ gridArea: 'dpt', minWidth: '11rem', width: 'max-content' }}>
@@ -1253,11 +1251,11 @@ function SendToGaPopoverPanel({
                         onBlur: commitScheduleLink,
                       }
                     : { style: { display: 'none' } }}
-                  sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
+                  sendColProps={{ style: { gridArea: 'write', width: 'max-content', justifySelf: 'end' } }}
                   reserveValueSlot={false}
                 />
                 {scheduleFields}
-                <div style={{ gridArea: 'read', width: 'max-content' }}>
+                <div style={{ gridArea: 'read', width: 'max-content', justifySelf: 'end' }}>
                   {readBtn}
                 </div>
               </div>
