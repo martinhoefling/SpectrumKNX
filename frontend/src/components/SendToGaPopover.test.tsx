@@ -53,20 +53,21 @@ test('opens on click, shows the last value and sends a DPT-1 boolean', async () 
   const active = screen.getByRole('button', { name: /^active$/i });
   const read = screen.getByRole('button', { name: /^Read$/i });
   expect(inactive.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(active.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // Hug send row sits in grid area "write" (right of every); Read shares the slot.
+  // No value field: send buttons sit between DPT and delay; Read is right of every.
   const send = inactive.parentElement as HTMLElement;
   expect(send.style.gridArea).toBe('write');
   expect(send.style.display).toBe('flex');
   expect(send.style.flexWrap).toBe('wrap');
   expect(send.style.width).toBe('max-content');
   expect(inactive.style.width).not.toBe('100%');
-  expect(read.parentElement).toBe(send);
-  // Schedule row: delay, every, then the send slot to the right of every.
+  expect((read.parentElement as HTMLElement).style.gridArea).toBe('read');
+  const dpt = screen.getByLabelText('Datapoint type');
   const scheduleInputs = screen.getAllByPlaceholderText('s');
   expect(scheduleInputs).toHaveLength(2);
+  expect(dpt.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(send.compareDocumentPosition(scheduleInputs[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(
-    scheduleInputs[1].compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING,
+    scheduleInputs[1].compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 
   fireEvent.click(active);

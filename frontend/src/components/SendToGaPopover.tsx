@@ -1059,7 +1059,8 @@ function SendToGaPopoverPanel({
                     `
                     : `
                       "dpt dpt"
-                      "sched write"
+                      "write write"
+                      "sched read"
                     `,
                   columnGap: '0.4rem',
                   rowGap: '0.65rem',
@@ -1085,51 +1086,31 @@ function SendToGaPopoverPanel({
                     resetTitle={`Reset to project DPT ${projectDpt}`}
                   />
                 </div>
-                {showValue && (
-                  <WriteControls
-                    dptMain={parseDptMain(dpt)}
-                    dptKey={dpt || null}
-                    address={address}
-                    value={value}
-                    onValueChange={v => { setValue(v); setFeedback(null); }}
-                    onWrite={payload => void write(payload)}
-                    onError={msg => setFeedback({ ok: false, msg })}
-                    disabled={controlsDisabled}
-                    unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
-                    sendFit="hug"
-                    focusToken={focusToken}
-                    valueColProps={{
-                      style: { gridArea: 'value', width: 'max-content' },
-                      onBlur: commitScheduleLink,
-                    }}
-                    sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
-                    reserveValueSlot={false}
-                  />
-                )}
+                <WriteControls
+                  dptMain={parseDptMain(dpt)}
+                  dptKey={dpt || null}
+                  address={address}
+                  value={value}
+                  onValueChange={v => { setValue(v); setFeedback(null); }}
+                  onWrite={payload => void write(payload)}
+                  onError={msg => setFeedback({ ok: false, msg })}
+                  disabled={controlsDisabled}
+                  unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
+                  sendFit="hug"
+                  focusToken={focusToken}
+                  valueColProps={showValue
+                    ? {
+                        style: { gridArea: 'value', width: 'max-content' },
+                        onBlur: commitScheduleLink,
+                      }
+                    : { style: { display: 'none' } }}
+                  sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
+                  reserveValueSlot={false}
+                />
                 {scheduleFields}
-                {showValue ? (
-                  <div style={{ gridArea: 'read', width: 'max-content' }}>
-                    {readBtn}
-                  </div>
-                ) : (
-                  <WriteControls
-                    dptMain={parseDptMain(dpt)}
-                    dptKey={dpt || null}
-                    address={address}
-                    value={value}
-                    onValueChange={v => { setValue(v); setFeedback(null); }}
-                    onWrite={payload => void write(payload)}
-                    onError={msg => setFeedback({ ok: false, msg })}
-                    disabled={controlsDisabled}
-                    unit={(dpt.trim() ? dptUnit(dpt.trim()) : '') || last?.unit || ''}
-                    sendFit="hug"
-                    focusToken={focusToken}
-                    valueColProps={{ style: { display: 'none' } }}
-                    sendColProps={{ style: { gridArea: 'write', width: 'max-content' } }}
-                    reserveValueSlot={false}
-                    sendEnd={readBtn}
-                  />
-                )}
+                <div style={{ gridArea: 'read', width: 'max-content' }}>
+                  {readBtn}
+                </div>
               </div>
             );
           })()}
