@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Radio, LocateFixed } from 'lucide-react';
+import { Send, Radio, ChevronLeft } from 'lucide-react';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -1120,7 +1120,7 @@ function SendToGaPopoverPanel({
                 onClick={restoreOpenScroll}
                 style={{ flexShrink: 0, margin: 0, cursor: 'pointer' }}
               >
-                <LocateFixed size={13} />
+                <ChevronLeft size={13} />
               </button>
             )}
           </div>

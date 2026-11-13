@@ -159,7 +159,7 @@ test('restore-list jump returns scrollTop from when the popover opened', async (
   scrollEl.scrollTop = 40;
   fireEvent.scroll(scrollEl);
   const restoreBtn = screen.getByRole('button', { name: 'Restore list position' });
-  expect(restoreBtn.querySelector('.lucide-locate-fixed')).not.toBeNull();
+  expect(restoreBtn.querySelector('.lucide-chevron-left')).not.toBeNull();
 
   fireEvent.click(restoreBtn);
   expect(scrollEl.scrollTop).toBe(120);
@@ -199,7 +199,7 @@ test('hosted restore-list jump uses capture/restore callbacks', async () => {
   scrollEl.scrollTop = 40;
   fireEvent.scroll(scrollEl);
   const restoreBtn = screen.getByRole('button', { name: 'Restore list position' });
-  expect(restoreBtn.querySelector('.lucide-locate-fixed')).not.toBeNull();
+  expect(restoreBtn.querySelector('.lucide-chevron-left')).not.toBeNull();
   fireEvent.click(restoreBtn);
   expect(restoreListScroll).toHaveBeenCalledWith(snap);
   expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
