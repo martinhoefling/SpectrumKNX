@@ -121,9 +121,9 @@ test('opens the quick-send popover from an active target row', async () => {
   );
   fireEvent.click(screen.getByRole('button', { name: 'Active filters' }));
   fireEvent.click(screen.getByTitle('Send to this GA'));
-  // The popover shows the last value and the write/read controls.
-  expect(await screen.findByText(/Last value/)).toBeInTheDocument();
-  expect(screen.getByTitle('Send a GroupValueRead')).toBeInTheDocument();
+  // No telegram yet, so the last-value line stays hidden. The read control shows the popover opened.
+  expect(await screen.findByTitle(/Send a GroupValueRead/)).toBeInTheDocument();
+  expect(screen.queryByText(/last value/)).not.toBeInTheDocument();
   vi.unstubAllGlobals();
 });
 

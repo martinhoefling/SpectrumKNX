@@ -1,3 +1,5 @@
+import { formatDpt } from './knxSend';
+
 /**
  * Data width / kind of each DPT main type, following the KNX System
  * Specification "Datapoint Types" main-type table (#273).
@@ -46,6 +48,76 @@ export const bareDptLabel = (main: number): string => {
   return `DPT ${main} · all${width ? ` ${width}` : ''} subtypes`;
 };
 
+// Common DPTs offered as hints when overriding a GA's type (#342).
+// The input stays free-text; these just guide the frequent cases and seed the
+// write UI when no ETS project catalog is loaded.
+export const COMMON_DPTS = [
+  '1.001', '1.002', '2.001', '3.007', '4.001', '4.002', '5.001', '5.004', '5.010',
+  '6.010', '7.001', '8.001', '9.001', '9.004', '10.001', '11.001', '12.001',
+  '13.001', '14.056', '16.000', '16.001', '17.001', '18.001', '19.001', '20.102',
+  '28.001', '232.600',
+];
+
+export interface DptCatalogEntry {
+  main?: number | null;
+  sub?: number | null;
+  label?: string | null;
+}
+
+export interface DptChoice {
+  key: string;
+  name: string;
+}
+
+/**
+ * Suggestion list for write DPT fields: common subtypes, every project-catalog
+ * / extras entry, and bare main types ("5" = all 5.x). Shared by the send
+ * panel and the send-to-GA popover so both offer the same choices.
+ */
+export function buildWriteDptOptions(
+  catalog: DptCatalogEntry[] = [],
+  extras: DptCatalogEntry[] = [],
+): DptChoice[] {
+  const byKey = new Map<string, string>();
+  for (const key of COMMON_DPTS) byKey.set(key, dptDesignation(key));
+  for (const t of extras) {
+    if (t.main == null) continue;
+    const key = formatDpt(t.main, t.sub);
+    if (!byKey.has(key)) byKey.set(key, '');
+  }
+  for (const d of catalog) {
+    if (d.main == null) continue;
+    const key = formatDpt(d.main, d.sub);
+    const name = dptDesignation(key, d.label);
+    if (name) byKey.set(key, name);
+    else if (!byKey.has(key)) byKey.set(key, '');
+  }
+  // Bare mains (Haupttypen) — from the spec table and every main already present.
+  const mains = new Set<number>(Object.keys(DPT_MAIN_WIDTHS).map(Number));
+  for (const key of byKey.keys()) {
+    const main = Number(key.split('.')[0]);
+    if (Number.isFinite(main)) mains.add(main);
+  }
+  for (const main of mains) {
+    const key = String(main);
+    if (!byKey.has(key)) {
+      const width = dptWidthLabel(main);
+      byKey.set(key, width ? `all ${width} subtypes` : 'all subtypes');
+    }
+  }
+  return [...byKey.entries()]
+    .map(([key, name]) => ({ key, name }))
+    .sort((a, b) => {
+      const [am, asub = -1] = a.key.includes('.')
+        ? a.key.split('.').map(Number)
+        : [Number(a.key), -1];
+      const [bm, bsub = -1] = b.key.includes('.')
+        ? b.key.split('.').map(Number)
+        : [Number(b.key), -1];
+      return am - bm || asub - bsub;
+    });
+}
+
 /**
  * Bezeichnung of the DPTs offered in the write panel. Matches the names xknx
  * reports (`format_dpt_name`), with the unit where one exists.
@@ -55,7 +127,8 @@ const DPT_DESIGNATIONS: Record<string, string> = {
   '1.002': 'Boolean',
   '2.001': 'Switch control',
   '3.007': 'Dimming control',
-  '4.001': 'Character',
+  '4.001': 'Character (ASCII)',
+  '4.002': 'Character (Latin-1)',
   '5.001': 'Percent (%)',
   '5.004': 'Percent U8 (%)',
   '5.010': 'Pulse counter',
@@ -69,11 +142,13 @@ const DPT_DESIGNATIONS: Record<string, string> = {
   '12.001': 'Pulse (4-byte unsigned)',
   '13.001': 'Pulse (4-byte)',
   '14.056': 'Power (W)',
-  '16.000': 'String',
+  '16.000': 'String (ASCII)',
+  '16.001': 'String (Latin-1)',
   '17.001': 'Scene number',
   '18.001': 'Scene control',
   '19.001': 'Date time',
   '20.102': 'HVAC mode',
+  '28.001': 'UTF-8 string',
   '232.600': 'RGB colour',
 };
 
@@ -84,4 +159,11 @@ export function dptDesignation(key: string, label?: string | null): string {
     if (stripped && stripped !== label) return stripped;
   }
   return DPT_DESIGNATIONS[key] ?? '';
+}
+
+/** Unit in parentheses at the end of a designation, e.g. "Temperature (°C)" → "°C". */
+export function dptUnit(key: string, label?: string | null): string {
+  const name = dptDesignation(key, label);
+  const match = name.match(/\(([^)]+)\)\s*$/);
+  return match ? match[1] : '';
 }

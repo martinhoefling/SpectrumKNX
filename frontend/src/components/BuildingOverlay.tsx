@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { format } from 'date-fns';
 import {
   X, RefreshCw, Building2, ChevronDown, ChevronRight, Cpu, Layers, Filter, ListFilter, Clock, Activity, Sparkles,
   LineChart,
@@ -12,6 +11,9 @@ import { GaNameWidthContext } from '../utils/gaNameWidth';
 import { useLastSeenValues } from '../hooks/useLastSeenValues';
 import { SendToGaPopover } from './SendToGaPopover';
 import { GaValuesTable } from './GaValuesTable';
+import { BusValueText } from './BusValueText';
+import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
+import { formatDpt as formatDptKey } from '../utils/knxSend';
 import type { Telegram } from '../hooks/useWebSocket';
 
 // GA name column width is clamped to keep a single very long name from blowing
@@ -98,6 +100,8 @@ interface BuildingOverlayProps {
   onVisualizeGAs: (addresses: string[]) => void;
   /** Open the live KO status view for a device (#153). */
   onDeviceStatus: (device: DeviceNode) => void;
+  /** Jump the telegram list to a last-seen telegram. */
+  onGotoTelegram?: (telegram: Telegram) => void;
   writeEnabled?: boolean;
   /** Newest telegram from the live websocket feed; keeps expanded GA tables current. */
   latestTelegram?: Telegram | null;
@@ -235,9 +239,10 @@ const KoRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onVisualizeGAs: (addresses: string[]) => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
   writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
-}> = ({ ko, koKey, depth, onFilterGAs, onLastSeen, onVisualizeGAs, writeEnabled, latestTelegram }) => {
+}> = ({ ko, koKey, depth, onFilterGAs, onLastSeen, onVisualizeGAs, onGotoTelegram, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`ko:${koKey}`, false);
   const dpt = formatDpt(ko.dpts);
   const gaAddresses = useMemo(() => ko.group_addresses.map(g => g.address), [ko.group_addresses]);
@@ -346,21 +351,28 @@ const KoRow: React.FC<{
           flexShrink: 0, minWidth: 0, maxWidth: '25%',
         }}>
           <span
-            style={{ fontSize: '0.65rem', color: 'var(--text-dim)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
             title={`by ${newest.source_address}${newest.source_name ? ` (${newest.source_name})` : ''}`}
           >
-            {format(new Date(newest.timestamp), 'yyyy-MM-dd HH:mm:ss.SS')}
+            <TelegramWhenJump
+              timestamp={newest.timestamp}
+              eventType={telegramEventType(newest)}
+              onJump={onGotoTelegram ? () => onGotoTelegram(newest) : undefined}
+              style={{ fontSize: '0.65rem' }}
+            />
           </span>
           <span
             style={{
-              fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap',
+              whiteSpace: 'nowrap',
               ...(framed
                 ? { border: '1px solid var(--accent-primary)', borderRadius: '4px', padding: '0.02rem 0.3rem' }
                 : {}),
             }}
           >
-            {newest.value_formatted ?? newest.value_numeric ?? '—'}
-            {newest.unit && <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}> {newest.unit}</span>}
+            <BusValueText
+              value={newest}
+              dpt={formatDptKey(ko.dpts[0]?.main, ko.dpts[0]?.sub)}
+              as="span"
+            />
           </span>
         </div>
       )}
@@ -374,6 +386,8 @@ const KoRow: React.FC<{
                 dptMain={ko.dpts[0]?.main}
                 dptSub={ko.dpts[0]?.sub}
                 buttonStyle={iconBtnStyle}
+                onGotoTelegram={onGotoTelegram}
+                latestTelegram={latestTelegram}
               />
             </div>
           )}
@@ -421,6 +435,7 @@ const KoRow: React.FC<{
           onFilterGAs={onFilterGAs}
           onLastSeen={onLastSeen}
           onVisualizeGAs={onVisualizeGAs}
+          onGotoTelegram={onGotoTelegram}
         />
       )}
     </div>
@@ -438,9 +453,10 @@ const DeviceRow: React.FC<{
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onVisualizeGAs: (addresses: string[]) => void;
   onDeviceStatus: (device: DeviceNode) => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
   writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
-}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, writeEnabled, latestTelegram }) => {
+}> = ({ device, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, onGotoTelegram, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`dev:${device.address}`, false);
   const koCount = device.channels.reduce((s, c) => s + c.kos.length, 0) + device.kos.length;
   const hasChildren = koCount > 0;
@@ -542,7 +558,7 @@ const DeviceRow: React.FC<{
               <ChannelRow
                 key={ch.id} channel={ch} deviceAddress={device.address} visibleKos={visibleKos} depth={depth + 1}
                 query={query} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-                writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+                onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
               />
             );
           })}
@@ -550,7 +566,7 @@ const DeviceRow: React.FC<{
             <KoRow
               key={`${ko.number}-${i}`} ko={ko} koKey={`${device.address}:${ko.number}-${i}`}
               depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-              writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+              onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
         </div>
@@ -568,9 +584,10 @@ const ChannelRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onVisualizeGAs: (addresses: string[]) => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
   writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
-}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen, onVisualizeGAs, writeEnabled, latestTelegram }) => {
+}> = ({ channel, deviceAddress, visibleKos, depth, query, onFilterGAs, onLastSeen, onVisualizeGAs, onGotoTelegram, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`ch:${deviceAddress}:${channel.id}`, false);
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => channelGAs(channel), [channel]);
@@ -606,7 +623,7 @@ const ChannelRow: React.FC<{
         <KoRow
           key={`${ko.number}-${i}`} ko={ko} koKey={`${deviceAddress}:${channel.id}:${ko.number}-${i}`}
           depth={depth + 1} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-          writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+          onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
         />
       ))}
     </div>
@@ -622,9 +639,10 @@ const FunctionRow: React.FC<{
   onFilterGAs: (addresses: string[]) => void;
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onVisualizeGAs: (addresses: string[]) => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
   writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
-}> = ({ func, depth, query, onFilterGAs, onLastSeen, onVisualizeGAs, writeEnabled, latestTelegram }) => {
+}> = ({ func, depth, query, onFilterGAs, onLastSeen, onVisualizeGAs, onGotoTelegram, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`func:${func.id}`, false);
   const effectiveOpen = open || !!query;
   const allGAs = useMemo(() => func.group_addresses.map(g => g.address), [func]);
@@ -710,6 +728,7 @@ const FunctionRow: React.FC<{
           onFilterGAs={onFilterGAs}
           onLastSeen={onLastSeen}
           onVisualizeGAs={onVisualizeGAs}
+          onGotoTelegram={onGotoTelegram}
         />
       )}
     </div>
@@ -728,9 +747,10 @@ const SpaceRow: React.FC<{
   onLastSeen: (address: string | string[], mode: 'ga' | 'pa') => void;
   onVisualizeGAs: (addresses: string[]) => void;
   onDeviceStatus: (device: DeviceNode) => void;
+  onGotoTelegram?: (telegram: Telegram) => void;
   writeEnabled?: boolean;
   latestTelegram?: Telegram | null;
-}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, writeEnabled, latestTelegram }) => {
+}> = ({ space, path, depth, query, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, onGotoTelegram, writeEnabled, latestTelegram }) => {
   const [open, toggle] = useExpanded(`space:${path}`, depth < 2);
   const { selected, hideOthers } = useBuildingSelection();
   if (query && !spaceMatches(space, query)) return null;
@@ -771,21 +791,21 @@ const SpaceRow: React.FC<{
             <SpaceRow
               key={`${sub.name}-${i}`} space={sub} path={`${path}/${sub.type}:${sub.name}#${i}`} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-              onDeviceStatus={onDeviceStatus} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+              onDeviceStatus={onDeviceStatus} onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
           {visibleFunctions.map((func, i) => (
             <FunctionRow
               key={`${func.id}-${i}`} func={func} depth={depth + 1} query={query}
               onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-              writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+              onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
           {visibleDevices.map(device => (
             <DeviceRow
               key={device.address} device={device} depth={depth + 1} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-              onDeviceStatus={onDeviceStatus} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+              onDeviceStatus={onDeviceStatus} onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
         </div>
@@ -797,7 +817,7 @@ const SpaceRow: React.FC<{
 // ── Main overlay ────────────────────────────────────────────────────────────────
 
 export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
-  onClose, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, writeEnabled, latestTelegram,
+  onClose, onFilterDevice, onFilterGAs, onLastSeen, onVisualizeGAs, onDeviceStatus, onGotoTelegram, writeEnabled, latestTelegram,
   searchQuery: searchQueryProp, onSearchQueryChange,
 }) => {
   const [data, setData] = useState<BuildingData | null>(null);
@@ -917,7 +937,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
             <SpaceRow
               key={`${space.name}-${i}`} space={space} path={`${space.type}:${space.name}#${i}`} depth={0} query={query}
               onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-              onDeviceStatus={onDeviceStatus} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+              onDeviceStatus={onDeviceStatus} onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
             />
           ))}
 
@@ -930,7 +950,7 @@ export const BuildingOverlay: React.FC<BuildingOverlayProps> = ({
                 <DeviceRow
                   key={device.address} device={device} depth={1} query={query}
                   onFilterDevice={onFilterDevice} onFilterGAs={onFilterGAs} onLastSeen={onLastSeen} onVisualizeGAs={onVisualizeGAs}
-                  onDeviceStatus={onDeviceStatus} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
+                  onDeviceStatus={onDeviceStatus} onGotoTelegram={onGotoTelegram} writeEnabled={writeEnabled} latestTelegram={latestTelegram}
                 />
               ))}
             </div>

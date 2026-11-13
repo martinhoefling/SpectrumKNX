@@ -70,7 +70,7 @@ test('loads latest values per GA and renders one row per KO group address', asyn
 
   render(<DeviceStatusOverlay device={DEVICE} latestTelegram={null} onClose={() => {}} />);
 
-  await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('on')).toBeInTheDocument());
   // KO 11's GA has no stored telegram yet
   expect(screen.getByText('never seen')).toBeInTheDocument();
   expect(screen.getByText('Channel A')).toBeInTheDocument();
@@ -85,12 +85,13 @@ test('updates a value live from the websocket feed', async () => {
   const { rerender } = render(
     <DeviceStatusOverlay device={DEVICE} latestTelegram={null} onClose={() => {}} />
   );
-  await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('on')).toBeInTheDocument());
 
   rerender(
     <DeviceStatusOverlay device={DEVICE} latestTelegram={telegram('1/2/4', 'Off')} onClose={() => {}} />
   );
-  await waitFor(() => expect(screen.getByText('Off')).toBeInTheDocument());
+  // Factory keeps value_numeric: 1; KO 11 is DPT 1.011 → active
+  await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
   expect(screen.queryByText('never seen')).not.toBeInTheDocument();
 
   // Telegrams for unrelated GAs are ignored
@@ -116,7 +117,7 @@ test('collapses channel when clicked, showing and hiding KOs', async () => {
   );
 
   // Initially Channel A and KOs are visible
-  await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('on')).toBeInTheDocument());
   expect(screen.getByText('Channel A')).toBeInTheDocument();
   expect(screen.getByText('Switch')).toBeInTheDocument();
 
@@ -146,7 +147,7 @@ test('calls onLastSeen when clock history button is clicked', async () => {
     />
   );
 
-  await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('on')).toBeInTheDocument());
 
   const gaRow = screen.getByText('1/2/3').closest('div')?.parentElement;
   expect(gaRow).toBeTruthy();

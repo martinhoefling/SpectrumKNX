@@ -144,7 +144,7 @@ export const HistoryLoader: React.FC<HistoryLoaderProps> = ({ onClose, onLoad, o
               <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(16,185,129,0.1)', color: 'var(--success)', border: '1px solid rgba(16,185,129,0.3)' }}>tgt: {t}</span>
             ))}
             {filters.types.map(t => (
-              <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: 'var(--warning-text)', border: '1px solid rgba(251,191,36,0.3)' }}>{t}</span>
+              <span key={t} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(251,191,36,0.1)', color: 'var(--warning-text)', border: '1px solid rgba(251,191,36,0.3)' }}>{t.toUpperCase()}</span>
             ))}
             {filters.dpts.map(d => (
               <span key={d} style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'var(--bg-tag)', color: 'var(--text-dim)', border: '1px solid var(--border-color)' }}>DPT {d}</span>

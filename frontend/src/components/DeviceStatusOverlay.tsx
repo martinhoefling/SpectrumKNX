@@ -3,6 +3,8 @@ import { X, RefreshCw, Activity, Layers, ChevronDown, ChevronRight, Clock } from
 import { apiUrl } from '../utils/basePath';
 import type { Telegram } from '../hooks/useWebSocket';
 import type { DeviceNode, Ko, Channel } from './BuildingOverlay';
+import { BusValueText } from './BusValueText';
+import { formatDpt } from '../utils/knxSend';
 
 interface DeviceStatusOverlayProps {
   device: DeviceNode;
@@ -69,8 +71,10 @@ const GaItem: React.FC<{
   ga: { address: string; name?: string | null };
   depth: number;
   valuesByGA: Record<string, Telegram>;
+  dptMain?: number | null;
+  dptSub?: number | null;
   onLastSeen?: (address: string | string[], mode: 'ga' | 'pa') => void;
-}> = ({ ga, depth, valuesByGA, onLastSeen }) => {
+}> = ({ ga, depth, valuesByGA, dptMain, dptSub, onLastSeen }) => {
   const t = valuesByGA[ga.address];
   const [hovered, setHovered] = useState(false);
 
@@ -108,12 +112,9 @@ const GaItem: React.FC<{
           cursor: 'help',
         }}
       >
-        <span style={{ fontWeight: 600, color: t ? 'var(--text-main)' : 'var(--text-dim)' }}>
+        <span style={{ color: t ? undefined : 'var(--text-dim)' }}>
           {t ? (
-            <>
-              {t.value_formatted ?? t.value_numeric ?? '—'}
-              {t.unit && <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}> {t.unit}</span>}
-            </>
+            <BusValueText value={t} dpt={formatDpt(dptMain, dptSub)} as="span" />
           ) : 'never seen'}
         </span>
         {t && (
@@ -183,7 +184,15 @@ const KoItem: React.FC<{
       {hasGAs && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
           {ko.group_addresses.map(ga => (
-            <GaItem key={ga.address} ga={ga} depth={depth + 1} valuesByGA={valuesByGA} onLastSeen={onLastSeen} />
+            <GaItem
+              key={ga.address}
+              ga={ga}
+              depth={depth + 1}
+              valuesByGA={valuesByGA}
+              dptMain={ko.dpts[0]?.main}
+              dptSub={ko.dpts[0]?.sub}
+              onLastSeen={onLastSeen}
+            />
           ))}
         </div>
       )}
