@@ -51,6 +51,8 @@ interface TelegramTableProps {
   }) => void;
   /** Top send-panel row hint while the panel is open (send-icon blue). */
   sendPanelTopHint?: SendPanelTopRowHint | null;
+  /** GAs with a live scheduled send-job (send-icon always visible, dim green). */
+  activeSendJobAddresses?: ReadonlySet<string>;
   /** Linked send-panel row for popover schedule status. */
   linkedRowId?: string | null;
   linkedStatus?: LinkedRowStatus | null;
@@ -236,6 +238,7 @@ function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascendi
 export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
   latestTelegram, onAltSend, onCtrlSend, sendPanelTopHint = null,
+  activeSendJobAddresses,
   linkedRowId = null, linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onCancelLinked,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
@@ -2255,6 +2258,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                     t.dpt_main,
                     t.dpt_sub,
                   )}
+                  jobActive={Boolean(
+                    t.target_address && activeSendJobAddresses?.has(t.target_address),
+                  )}
                   linkedRowId={linkedRowId}
                   linkedStatus={linkedStatus}
                   onScheduleCommit={onScheduleCommit}
@@ -2739,6 +2745,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         <button
           onClick={jumpToLive}
           className="jump-to-live-pill"
+          data-jump-to-live-pill=""
           style={{
             position: 'absolute', left: '50%', transform: 'translateX(-50%)',
             [liveEdge]: '1rem', zIndex: 20,
@@ -2790,6 +2797,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       {markedKeysList.length > 0 && (
         <div
           className="marks-pill"
+          data-marks-pill=""
           style={{ position: 'absolute', right: '1rem', top: '0.75rem', zIndex: 20 }}
         >
           <button onClick={() => jumpToMark(-1)} disabled={markedIndices.length === 0} title="Jump to previous mark">
@@ -3047,6 +3055,23 @@ style.textContent = `
   .quick-send-btn[data-send-panel-match] {
     opacity: 1;
     color: var(--accent-primary);
+  }
+
+  .log-row:hover .quick-send-btn[data-send-job-active],
+  .quick-send-btn[data-send-job-active] {
+    opacity: 1;
+  }
+
+  .log-row:hover .quick-send-btn[data-send-outgoing-flash],
+  .quick-send-btn[data-send-outgoing-flash] {
+    opacity: 1 !important;
+    animation: quick-send-outgoing-flash 0.42s ease-out;
+  }
+
+  @keyframes quick-send-outgoing-flash {
+    0% { filter: brightness(1); }
+    35% { filter: brightness(1.85); }
+    100% { filter: brightness(1); }
   }
 
   .quick-filter-btn:hover, .quick-visualize-btn:hover, .quick-last-seen-btn:hover, .quick-send-btn:hover {

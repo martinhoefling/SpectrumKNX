@@ -301,6 +301,9 @@ function App() {
   const sendPanelCmdNonceRef = useRef(0);
   const [popoverLinkedRowId, setPopoverLinkedRowId] = useState<string | null>(null);
   const [linkedRowStatuses, setLinkedRowStatuses] = useState<Record<string, LinkedRowStatus>>({});
+  const [activeSendJobAddresses, setActiveSendJobAddresses] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const pendingEnsureRef = useRef<{
     nonce: number;
     kind: 'link' | 'write';
@@ -832,6 +835,13 @@ function App() {
 
   const handleLinkedRowStatusesChange = useCallback((statuses: Record<string, LinkedRowStatus>) => {
     setLinkedRowStatuses(statuses);
+  }, []);
+
+  const handleActiveJobAddressesChange = useCallback((addresses: string[]) => {
+    setActiveSendJobAddresses(prev => {
+      if (prev.size === addresses.length && addresses.every(a => prev.has(a))) return prev;
+      return new Set(addresses);
+    });
   }, []);
 
   const handleScheduleCommit = useCallback((draft: SendCorrespondenceKey & { name?: string | null }) => {
@@ -1446,6 +1456,7 @@ function App() {
                   sendPanelCommand={sendPanelCommand}
                   onSendPanelCommandHandled={handleSendPanelCommandHandled}
                   onLinkedRowStatusesChange={handleLinkedRowStatusesChange}
+                  onActiveJobAddressesChange={handleActiveJobAddressesChange}
                 />
               </div>
             )}
@@ -1586,6 +1597,7 @@ function App() {
                     onAltSend={handleAltSend}
                     onCtrlSend={handleCtrlSend}
                     sendPanelTopHint={isSendOpen ? sendPanelTopHint : null}
+                    activeSendJobAddresses={activeSendJobAddresses}
                     linkedRowId={popoverLinkedRowId}
                     linkedStatus={popoverLinkedRowId ? linkedRowStatuses[popoverLinkedRowId] ?? null : null}
                     onScheduleCommit={handleScheduleCommit}

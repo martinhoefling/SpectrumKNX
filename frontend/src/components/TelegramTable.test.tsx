@@ -2712,7 +2712,31 @@ test('matched/open send icons stay fully opaque under row hover CSS', () => {
     .join('\n');
   expect(styleText).toMatch(/\.log-row:hover \.quick-send-btn\[data-send-popover-open\]/);
   expect(styleText).toMatch(/\.quick-send-btn\[data-send-panel-match\]/);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-send-job-active\]/);
+  expect(styleText).toMatch(/quick-send-outgoing-flash/);
   expect(styleText).toMatch(/\.quick-send-btn:focus[^}]*opacity:\s*1\s*!important/s);
+});
+
+test('activeSendJobAddresses marks matching send icons with data-send-job-active', () => {
+  const telegrams = [
+    makeTelegram({ target_address: '1/2/3', dpt_main: 9, dpt_sub: 1 }),
+    makeTelegram({ target_address: '4/5/6', dpt_main: 1, dpt_sub: 1 }),
+  ];
+  const { container } = render(
+    <TelegramTable
+      telegrams={telegrams}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      canSend
+      activeSendJobAddresses={new Set(['1/2/3'])}
+    />,
+  );
+  const matched = container.querySelectorAll('.quick-send-btn[data-send-job-active]');
+  expect(matched).toHaveLength(1);
 });
 
 test('alt-click on send icon forwards onAltSend', () => {

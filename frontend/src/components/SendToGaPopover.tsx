@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Send, Radio, AlertTriangle, LocateFixed, Timer, X } from 'lucide-react';
 
@@ -175,6 +175,8 @@ interface Props {
   }) => void;
   /** Send panel top-row matches this GA — keep the icon blue while the panel is open. */
   panelMatched?: boolean;
+  /** A live send-panel job targets this GA — keep the icon visible (dim green). */
+  jobActive?: boolean;
   /**
    * Keep the trigger out of Tab / field focus (telegram-table scroll body).
    * Click still opens the popover; focus goes to the value field inside.
@@ -260,11 +262,12 @@ function clearSendOverlaps(
 }
 
 /**
- * Shift the card so it does not cover the jump-to-live pill (centered at the
- * live edge). Prefer vertical clearance; fall back to horizontal.
+ * Shift the card so it does not cover one overlay pill. Prefer vertical
+ * clearance; fall back to horizontal.
  */
-function clearLivePillOverlap(
+function clearOnePillOverlap(
   table: Element,
+  pill: Element,
   left: number,
   top: number,
   width: number,
@@ -272,8 +275,6 @@ function clearLivePillOverlap(
   pad: number,
   gap: number,
 ): { left: number; top: number } {
-  const pill = table.querySelector('[data-jump-to-live-pill]');
-  if (!pill) return { left, top };
   const p = pill.getBoundingClientRect();
   const bounds = table.getBoundingClientRect();
   const minTop = bounds.top + pad;
@@ -311,6 +312,28 @@ function clearLivePillOverlap(
   return { left: nextLeft, top: nextTop };
 }
 
+/** Jump-to-live + marks pills — popover must not cover them (open or drag). */
+const TT_PILL_SELECTOR = '[data-jump-to-live-pill], [data-marks-pill]';
+
+function clearPillOverlaps(
+  table: Element,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  pad: number,
+  gap: number,
+): { left: number; top: number } {
+  let nextLeft = left;
+  let nextTop = top;
+  table.querySelectorAll(TT_PILL_SELECTOR).forEach(pill => {
+    const cleared = clearOnePillOverlap(table, pill, nextLeft, nextTop, width, height, pad, gap);
+    nextLeft = cleared.left;
+    nextTop = cleared.top;
+  });
+  return { left: nextLeft, top: nextTop };
+}
+
 function clearOverlaps(
   table: Element,
   left: number,
@@ -321,8 +344,11 @@ function clearOverlaps(
   gap: number,
 ): { left: number; top: number } {
   const afterSend = clearSendOverlaps(table, left, top, width, height, pad, gap);
-  return clearLivePillOverlap(table, afterSend, top, width, height, pad, gap);
+  return clearPillOverlaps(table, afterSend, top, width, height, pad, gap);
 }
+
+/** Dimmed green while a scheduled send-job owns this GA. */
+const JOB_ACTIVE_COLOR = 'color-mix(in srgb, var(--success) 62%, var(--text-dim))';
 export function SendToGaPopover({
   address, name, dptMain, dptSub, dptCatalog: dptCatalogProp,
   title = 'Send to this GA',
@@ -336,6 +362,7 @@ export function SendToGaPopover({
   onAltSend,
   onCtrlSend,
   panelMatched = false,
+  jobActive = false,
   suppressTriggerFocus = false,
   linkedRowId = null,
   linkedStatus = null,
@@ -345,24 +372,49 @@ export function SendToGaPopover({
 }: Props) {
   const host = useContext(SendToGaHostContext);
   const [hovered, setHovered] = useState(false);
+  const [outgoingFlash, setOutgoingFlash] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const flashGenRef = useRef(0);
+
+  // Brief green flash when an outgoing Write for this GA hits the live feed.
+  useEffect(() => {
+    if (!latestTelegram) return;
+    if (latestTelegram.target_address !== address) return;
+    if (latestTelegram.direction !== 'Outgoing') return;
+    if (!isWriteTelegram(latestTelegram)) return;
+    const gen = ++flashGenRef.current;
+    setOutgoingFlash(true);
+    const t = window.setTimeout(() => {
+      if (flashGenRef.current === gen) setOutgoingFlash(false);
+    }, 420);
+    return () => window.clearTimeout(t);
+  }, [latestTelegram, address]);
 
   // Inside a host: only the trigger lives in the (virtualized) row. The panel
   // is rendered by SendToGaHost so scrolling the list cannot unmount it.
   if (host && !panelOnly) {
     const active = host.activeAddress === address;
     const lit = active || panelMatched || hovered;
+    const color = outgoingFlash
+      ? 'var(--success)'
+      : lit
+        ? 'var(--accent-primary)'
+        : jobActive
+          ? JOB_ACTIVE_COLOR
+          : (buttonStyle?.color || 'var(--text-dim)');
     return (
       <button
         ref={btnRef}
         data-send-to-ga-trigger=""
         {...(active ? { 'data-send-popover-open': '' } : {})}
         {...(panelMatched ? { 'data-send-panel-match': '' } : {})}
+        {...(jobActive ? { 'data-send-job-active': '' } : {})}
+        {...(outgoingFlash ? { 'data-send-outgoing-flash': '' } : {})}
         className={buttonClassName}
         tabIndex={suppressTriggerFocus ? -1 : undefined}
         style={{
           ...buttonStyle,
-          color: lit ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
+          color,
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -426,12 +478,14 @@ export function SendToGaPopover({
       onAltSend={onAltSend}
       onCtrlSend={onCtrlSend}
       panelMatched={panelMatched}
+      jobActive={jobActive}
       suppressTriggerFocus={suppressTriggerFocus}
       linkedRowId={linkedRowId}
       linkedStatus={linkedStatus}
       onScheduleCommit={onScheduleCommit}
       onWriteWithSchedule={onWriteWithSchedule}
       onCancelLinked={onCancelLinked}
+      outgoingFlash={outgoingFlash}
     />
   );
 }
@@ -448,13 +502,15 @@ function SendToGaPopoverPanel({
   onAltSend,
   onCtrlSend,
   panelMatched = false,
+  jobActive = false,
   suppressTriggerFocus = false,
   linkedRowId = null,
   linkedStatus = null,
   onScheduleCommit,
   onWriteWithSchedule,
   onCancelLinked,
-}: Props) {
+  outgoingFlash = false,
+}: Props & { outgoingFlash?: boolean }) {
   const host = useContext(SendToGaHostContext);
   const [open, setOpen] = useState(panelOnly);
   const [hovered, setHovered] = useState(false);
@@ -469,6 +525,13 @@ function SendToGaPopoverPanel({
   const [listScrollAway, setListScrollAway] = useState(false);
   const listSnapshotRef = useRef(listSnapshot);
   listSnapshotRef.current = listSnapshot;
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origLeft: number;
+    origTop: number;
+  } | null>(null);
   const bumpFocus = () => setFocusToken(t => t + 1);
 
   const adoptListSnapshot = (snap: ListScrollSnapshot | null) => {
@@ -613,12 +676,11 @@ function SendToGaPopoverPanel({
   };
 
   /**
-   * `full`: place from the trigger (open / window resize) — prefer right of the
-   * send button so the trigger stays visible; fall back to the left side; then
-   * clear any (partial) overlap with other send triggers by shifting right.
-   * `bounds`: refresh max dims and nudge `top` up when card growth would paint
-   * past the table bottom; may also shift `left` right to clear send overlaps.
-   * List scroll does not re-anchor to the trigger (top stays frozen).
+   * `full`: place from the trigger (open / window resize) — prefer right-below
+   * the send button when that fits; otherwise keep the previous right/left +
+   * top-align fallback, then clear overlaps with send triggers / TT pills.
+   * `bounds`: refresh max dims and nudge when card growth would leave the
+   * table; may also shift to clear overlaps. List scroll does not re-anchor.
    * Never auto-closes — the popover stays until outside click / Escape / toggle.
    */
   const place = (mode: 'full' | 'bounds' = 'full'): boolean => {
@@ -665,26 +727,41 @@ function SendToGaPopoverPanel({
 
     const minLeft = bounds.left + pad;
     const maxLeft = Math.max(minLeft, bounds.right - width - pad);
-    // Prefer right of the trigger so the send button stays visible; flip left
-    // when that would leave the boundary; clamp only as a last resort.
-    const rightOf = b.right + gap;
-    const leftOf = b.left - width - gap;
-    let left = rightOf;
-    if (rightOf + width <= bounds.right - pad) {
-      left = rightOf;
-    } else if (leftOf >= bounds.left + pad) {
-      left = leftOf;
-    } else {
-      left = Math.min(Math.max(minLeft, rightOf), maxLeft);
-    }
-
-    // Top-align with the trigger; clamp vertically inside the boundary.
     const minTop = bounds.top + pad;
-    let top = b.top;
-    if (top + height > bounds.bottom - pad) {
-      top = Math.max(minTop, bounds.bottom - pad - height);
-    } else if (top < minTop) {
-      top = minTop;
+    const maxTop = Math.max(minTop, bounds.bottom - height - pad);
+
+    // Prefer right-below the trigger when the card fits in the TT boundary.
+    const belowRightLeft = b.right + gap;
+    const belowRightTop = b.bottom + gap;
+    const fitsBelowRight =
+      belowRightLeft >= minLeft
+      && belowRightTop >= minTop
+      && belowRightLeft + width <= bounds.right - pad
+      && belowRightTop + height <= bounds.bottom - pad;
+
+    let left: number;
+    let top: number;
+    if (fitsBelowRight) {
+      left = belowRightLeft;
+      top = belowRightTop;
+    } else {
+      // Legacy fallback: right of trigger (top-aligned), else left, else clamp.
+      const rightOf = b.right + gap;
+      const leftOf = b.left - width - gap;
+      if (rightOf + width <= bounds.right - pad) {
+        left = rightOf;
+      } else if (leftOf >= bounds.left + pad) {
+        left = leftOf;
+      } else {
+        left = Math.min(Math.max(minLeft, rightOf), maxLeft);
+      }
+      top = b.top;
+      if (top + height > bounds.bottom - pad) {
+        top = Math.max(minTop, bounds.bottom - pad - height);
+      } else if (top < minTop) {
+        top = minTop;
+      }
+      top = Math.min(maxTop, Math.max(minTop, top));
     }
 
     if (table) {
@@ -704,6 +781,60 @@ function SendToGaPopoverPanel({
         : next
     ));
     return true;
+  };
+
+  const clampDragPos = (left: number, top: number) => {
+    const pad = 8;
+    const gap = 6;
+    const bounds = boundaryRect();
+    const maxWidth = pos?.maxWidth ?? Math.max(160, bounds.width - pad * 2);
+    const maxHeight = pos?.maxHeight ?? Math.max(120, bounds.height - pad * 2);
+    const width = Math.min(cardRef.current?.offsetWidth || 360, maxWidth);
+    const height = Math.min(cardRef.current?.offsetHeight || 200, maxHeight);
+    const minLeft = bounds.left + pad;
+    const maxLeft = Math.max(minLeft, bounds.right - width - pad);
+    const minTop = bounds.top + pad;
+    const maxTop = Math.max(minTop, bounds.bottom - height - pad);
+    let nextLeft = Math.min(maxLeft, Math.max(minLeft, left));
+    let nextTop = Math.min(maxTop, Math.max(minTop, top));
+    const table = tableEl();
+    if (table) {
+      const cleared = clearOverlaps(table, nextLeft, nextTop, width, height, pad, gap);
+      nextLeft = cleared.left;
+      nextTop = cleared.top;
+    }
+    return { left: nextLeft, top: nextTop };
+  };
+
+  const onDragHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !pos) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('button, input, select, textarea, a, [role="listbox"], [role="option"]')) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origLeft: pos.left,
+      origTop: pos.top,
+    };
+  };
+
+  const onDragHandlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const next = clampDragPos(
+      d.origLeft + (e.clientX - d.startX),
+      d.origTop + (e.clientY - d.startY),
+    );
+    setPos(prev => (prev ? { ...prev, left: next.left, top: next.top } : prev));
+  };
+
+  const onDragHandlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch { /* already released */ }
   };
 
   const toggle = () => {
@@ -806,14 +937,14 @@ function SendToGaPopoverPanel({
         syncListScrollAway(e.target.scrollTop);
       }
     };
-    // Live pill can appear after open (follow paused + newer telegrams) — re-clear.
+    // TT pills can appear/disappear after open — re-clear so we never cover them.
     const tableForMo = tableEl();
-    let hadPill = Boolean(tableForMo?.querySelector('[data-jump-to-live-pill]'));
+    let pillSig = tableForMo?.querySelectorAll(TT_PILL_SELECTOR).length ?? 0;
     const mo = typeof MutationObserver !== 'undefined' && tableForMo
       ? new MutationObserver(() => {
-          const hasPill = Boolean(tableForMo.querySelector('[data-jump-to-live-pill]'));
-          if (hasPill === hadPill) return;
-          hadPill = hasPill;
+          const next = tableForMo.querySelectorAll(TT_PILL_SELECTOR).length;
+          if (next === pillSig) return;
+          pillSig = next;
           nudgeForOverlaps();
         })
       : null;
@@ -949,11 +1080,19 @@ function SendToGaPopoverPanel({
           data-send-to-ga-trigger=""
           {...(open ? { 'data-send-popover-open': '' } : {})}
           {...(panelMatched ? { 'data-send-panel-match': '' } : {})}
+          {...(jobActive ? { 'data-send-job-active': '' } : {})}
+          {...(outgoingFlash ? { 'data-send-outgoing-flash': '' } : {})}
           className={buttonClassName}
           tabIndex={suppressTriggerFocus ? -1 : undefined}
           style={{
             ...buttonStyle,
-            color: (open || panelMatched || hovered) ? 'var(--accent-primary)' : (buttonStyle?.color || 'var(--text-dim)')
+            color: outgoingFlash
+              ? 'var(--success)'
+              : (open || panelMatched || hovered)
+                ? 'var(--accent-primary)'
+                : jobActive
+                  ? JOB_ACTIVE_COLOR
+                  : (buttonStyle?.color || 'var(--text-dim)'),
           }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
@@ -991,7 +1130,18 @@ function SendToGaPopoverPanel({
             boxSizing: 'border-box',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+          <div
+            data-send-popover-drag-handle=""
+            onPointerDown={onDragHandlePointerDown}
+            onPointerMove={onDragHandlePointerMove}
+            onPointerUp={onDragHandlePointerUp}
+            onPointerCancel={onDragHandlePointerUp}
+            style={{
+              display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap',
+              cursor: 'grab', touchAction: 'none', userSelect: 'none',
+            }}
+            title="Drag to move"
+          >
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-primary)' }}>{address}</span>
             {name && <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{name}</span>}
             {listSnapshot != null && listScrollAway && (
@@ -1001,7 +1151,7 @@ function SendToGaPopoverPanel({
                 title="Restore list position"
                 aria-label="Restore list position"
                 onClick={restoreOpenScroll}
-                style={{ flexShrink: 0, margin: 0 }}
+                style={{ flexShrink: 0, margin: 0, cursor: 'pointer' }}
               >
                 <LocateFixed size={13} />
               </button>

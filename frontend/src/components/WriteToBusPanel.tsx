@@ -106,6 +106,8 @@ interface Props {
   onSendPanelCommandHandled?: (result: SendPanelCommandResult) => void;
   /** Emits live status for rows (popover mirrors linked row). */
   onLinkedRowStatusesChange?: (statuses: Record<string, LinkedRowStatus>) => void;
+  /** GAs that currently own a waiting/running scheduled send-job (TT send-icon). */
+  onActiveJobAddressesChange?: (addresses: string[]) => void;
   /** Fill the workspace tabpanel (no docked height chrome). */
   embedded?: boolean;
 }
@@ -702,6 +704,7 @@ export function WriteToBusPanel({
   sendPanelCommand = null,
   onSendPanelCommandHandled,
   onLinkedRowStatusesChange,
+  onActiveJobAddressesChange,
   embedded = false,
 }: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
@@ -1309,20 +1312,27 @@ export function WriteToBusPanel({
 
   const onLinkedRowStatusesChangeRef = useRef(onLinkedRowStatusesChange);
   onLinkedRowStatusesChangeRef.current = onLinkedRowStatusesChange;
+  const onActiveJobAddressesChangeRef = useRef(onActiveJobAddressesChange);
+  onActiveJobAddressesChangeRef.current = onActiveJobAddressesChange;
   useEffect(() => {
     const emit = onLinkedRowStatusesChangeRef.current;
-    if (!emit) return;
+    const emitJobs = onActiveJobAddressesChangeRef.current;
+    if (!emit && !emitJobs) return;
     const statuses: Record<string, LinkedRowStatus> = {};
+    const jobAddresses = new Set<string>();
     for (const r of rows) {
       const job = jobsByRowId[r.id] ?? null;
+      const live = job && (job.state === 'waiting' || job.state === 'running') ? job : null;
       statuses[r.id] = {
         rowId: r.id,
-        job: job && (job.state === 'waiting' || job.state === 'running') ? job : null,
+        job: live,
         feedback: r.feedback,
         busy: r.busy,
       };
+      if (live && r.address.trim()) jobAddresses.add(r.address.trim());
     }
-    emit(statuses);
+    emit?.(statuses);
+    emitJobs?.([...jobAddresses]);
   }, [rows, jobsByRowId]);
 
   const applyResolved = (id: string, option: FilterOption) => {

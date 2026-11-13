@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { format } from 'date-fns';
 import { SendToGaHost, SendToGaPopover } from './SendToGaPopover';
@@ -498,7 +498,7 @@ test('nudges the card away from the jump-to-live pill', async () => {
   });
 });
 
-test('opens to the right of the send button when space allows', async () => {
+test('opens right-below the send button when space allows', async () => {
   vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
 
   const { container } = render(
@@ -531,7 +531,7 @@ test('opens to the right of the send button when space allows', async () => {
     const left = Number.parseFloat(card.style.left);
     const top = Number.parseFloat(card.style.top);
     expect(left).toBe(170); // trigger.right + gap
-    expect(top).toBe(180); // top-aligned with trigger
+    expect(top).toBe(210); // trigger.bottom + gap
   });
 });
 
@@ -942,4 +942,110 @@ test('late loadLast does not overwrite a newer live last value', async () => {
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   expect(screen.getByText('18.0')).toBeInTheDocument();
   expect(screen.queryByText('21.5')).not.toBeInTheDocument();
+});
+
+test('jobActive marks the send icon dim-green and always-visible attr', () => {
+  render(
+    <SendToGaHost>
+      <SendToGaPopover address="2/3/4" triggerId="t1" jobActive />
+    </SendToGaHost>,
+  );
+  const btn = screen.getByRole('button', { name: /Send to this GA/ });
+  expect(btn).toHaveAttribute('data-send-job-active');
+  expect(btn.style.color).toMatch(/success/);
+});
+
+test('outgoing Write flashes the send icon briefly', async () => {
+  vi.useFakeTimers();
+  try {
+    const { rerender } = render(
+      <SendToGaHost latestTelegram={null}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={null} />
+      </SendToGaHost>,
+    );
+    const btn = screen.getByRole('button', { name: /Send to this GA/ });
+    expect(btn).not.toHaveAttribute('data-send-outgoing-flash');
+
+    const tg = {
+      timestamp: '2026-07-17T09:10:00Z',
+      telegram_type: 'GroupValueWrite',
+      simplified_type: 'Write',
+      direction: 'Outgoing',
+      target_address: '2/3/4',
+      value_formatted: 'On',
+    };
+    rerender(
+      <SendToGaHost latestTelegram={tg as never}>
+        <SendToGaPopover address="2/3/4" triggerId="t1" latestTelegram={tg as never} />
+      </SendToGaHost>,
+    );
+    expect(btn).toHaveAttribute('data-send-outgoing-flash');
+    expect(btn.style.color).toBe('var(--success)');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(450);
+    });
+    expect(btn).not.toHaveAttribute('data-send-outgoing-flash');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('header drag moves the popover inside the TT and clears the marks pill', async () => {
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+
+  const { container } = render(
+    <div data-telegram-table style={{ position: 'fixed', top: 100, left: 100, width: 520, height: 300 }}>
+      <div
+        data-marks-pill=""
+        style={{ position: 'fixed', top: 120, left: 480, width: 100, height: 36 }}
+      />
+      <SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />
+    </div>,
+  );
+  const table = container.querySelector('[data-telegram-table]') as HTMLElement;
+  const marks = container.querySelector('[data-marks-pill]') as HTMLElement;
+  const trigger = screen.getByRole('button', { name: /Send to this GA/ });
+  table.getBoundingClientRect = () => ({
+    x: 100, y: 100, top: 100, left: 100, right: 620, bottom: 400, width: 520, height: 300,
+    toJSON() { return this; },
+  });
+  marks.getBoundingClientRect = () => ({
+    x: 480, y: 120, top: 120, left: 480, right: 580, bottom: 156, width: 100, height: 36,
+    toJSON() { return this; },
+  });
+  trigger.getBoundingClientRect = () => ({
+    x: 140, y: 180, top: 180, left: 140, right: 164, bottom: 204, width: 24, height: 24,
+    toJSON() { return this; },
+  });
+
+  fireEvent.click(trigger);
+  const card = await waitFor(() => {
+    const el = screen.getByText('1/1/1').parentElement?.parentElement as HTMLElement | null;
+    expect(el?.style.position).toBe('fixed');
+    return el!;
+  });
+  Object.defineProperty(card, 'offsetWidth', { configurable: true, get: () => 200 });
+  Object.defineProperty(card, 'offsetHeight', { configurable: true, get: () => 120 });
+  fireEvent.resize(window);
+
+  const handle = card.querySelector('[data-send-popover-drag-handle]') as HTMLElement;
+  expect(handle).toBeTruthy();
+
+  // Drag toward the marks pill (top-right); clamp + clear must keep us clear of it.
+  fireEvent.pointerDown(handle, { button: 0, clientX: 200, clientY: 220, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 500, clientY: 130, pointerId: 1 });
+  fireEvent.pointerUp(handle, { pointerId: 1 });
+
+  await waitFor(() => {
+    const top = Number.parseFloat(card.style.top);
+    const left = Number.parseFloat(card.style.left);
+    const overlaps =
+      !(left + 200 <= 480 || left >= 580 || top + 120 <= 120 || top >= 156);
+    expect(overlaps).toBe(false);
+    expect(left).toBeGreaterThanOrEqual(108);
+    expect(left + 200).toBeLessThanOrEqual(612);
+    expect(top).toBeGreaterThanOrEqual(108);
+    expect(top + 120).toBeLessThanOrEqual(392);
+  });
 });
