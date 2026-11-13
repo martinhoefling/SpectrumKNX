@@ -36,7 +36,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('write row renders the DPT 1 subtype values and sends a boolean, like the send bar (#213)', async () => {
+test('write row renders inactive/active for a DPT 1.011 GA and sends a boolean, like the send bar (#213)', async () => {
   const fetchMock = mockFetch({
     '/api/telegrams': { telegrams: [] },
     '/api/knx/send': { status: 'sent' },
@@ -56,7 +56,7 @@ test('write row renders the DPT 1 subtype values and sends a boolean, like the s
   // DPT-aware controls instead of a free value field that would cause a ConversionError.
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
   // DPT 1.011 (state) offers inactive/active, not On/Off.
-  fireEvent.click(screen.getByText('Active'));
+  fireEvent.click(screen.getByText('active'));
 
   await waitFor(() => {
     const sendCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/knx/send'));
@@ -79,7 +79,7 @@ test('write row keeps the value field and Write button for non-boolean DPTs', as
 
   expect(await screen.findByPlaceholderText(/Value/)).toBeInTheDocument();
   expect(screen.getByText('Write', { selector: 'button' })).toBeInTheDocument();
-  expect(screen.queryByText('On')).not.toBeInTheDocument();
+  expect(screen.queryByText('on')).not.toBeInTheDocument();
 });
 
 test('renders instruction when no addresses are selected, and clicking a sidebar address selects it', async () => {
@@ -126,7 +126,8 @@ test('renders instruction when no addresses are selected, and clicking a sidebar
   // It should select and fetch
   await waitFor(() => {
     expect(screen.getByText('SRV_Alive')).toBeInTheDocument();
-    expect(screen.getByText('On')).toBeInTheDocument();
+    // 1.011 maps formatted "On" → active
+    expect(screen.getByText('active')).toBeInTheDocument();
   });
 });
 

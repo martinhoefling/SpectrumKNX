@@ -99,8 +99,8 @@ test('the write widget follows the overridden DPT (main 5 → 1 renders On/Off)'
 
   fireEvent.change(dptInput(container), { target: { value: '1.001' } });
   // main 1 → On/Off buttons, free-value input gone
-  expect(screen.getByRole('button', { name: /^On$/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^Off$/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^on$/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^off$/ })).toBeInTheDocument();
   expect(screen.queryByPlaceholderText(/Value/)).not.toBeInTheDocument();
 });
 
