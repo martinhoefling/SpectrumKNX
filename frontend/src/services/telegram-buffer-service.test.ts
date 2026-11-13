@@ -67,6 +67,13 @@ describe('TelegramBufferService', () => {
       service.add(e3);
 
       expect(service.snapshot).toEqual([e1, e2, e3]);
+      expect(service.oldestTs).toBe(e1.ts);
+      expect(service.newestTs).toBe(e3.ts);
+    });
+
+    it('reports null edge timestamps when empty', () => {
+      expect(service.oldestTs).toBeNull();
+      expect(service.newestTs).toBeNull();
     });
 
     it('sorts when entries are added out of order', () => {
