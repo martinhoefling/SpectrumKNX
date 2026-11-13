@@ -1,6 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Radio, AlertTriangle, Clock, Timer, X } from 'lucide-react';
+import { Send, Radio, AlertTriangle, LocateFixed, Timer, X } from 'lucide-react';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -465,7 +465,34 @@ function SendToGaPopoverPanel({
   const [pos, setPos] = useState<{ top: number; left: number; maxWidth: number; maxHeight: number } | null>(null);
   /** List position captured when this popover opened (restore jump). */
   const [listSnapshot, setListSnapshot] = useState<ListScrollSnapshot | null>(panelListSnapshot);
+  /** True once the list scrollTop differs from the open snapshot. */
+  const [listScrollAway, setListScrollAway] = useState(false);
+  const listSnapshotRef = useRef(listSnapshot);
+  listSnapshotRef.current = listSnapshot;
   const bumpFocus = () => setFocusToken(t => t + 1);
+
+  const adoptListSnapshot = (snap: ListScrollSnapshot | null) => {
+    setListSnapshot(snap);
+    setListScrollAway(false);
+  };
+
+  const listScrollEl = () => (
+    tableEl()?.querySelector('[data-telegram-scroll]') as HTMLElement | null
+  );
+
+  const syncListScrollAway = (scrollTop?: number) => {
+    const snap = listSnapshotRef.current;
+    if (snap == null) {
+      setListScrollAway(false);
+      return;
+    }
+    const top = scrollTop ?? listScrollEl()?.scrollTop;
+    if (top == null) {
+      setListScrollAway(false);
+      return;
+    }
+    setListScrollAway(top !== snap.scrollTop);
+  };
 
   const [value, setValue] = useState('');
   const [delay, setDelay] = useState('');
@@ -556,31 +583,33 @@ function SendToGaPopoverPanel({
     setOpen(false);
     setAwaitingRead(false);
     setStatusTelegram(null);
-    setListSnapshot(null);
+    adoptListSnapshot(null);
     onPanelClose?.();
   };
 
   const captureOpenScroll = () => {
     if (host?.captureListScroll) {
-      setListSnapshot(host.captureListScroll());
+      adoptListSnapshot(host.captureListScroll());
       return;
     }
-    const scrollEl = tableEl()?.querySelector('[data-telegram-scroll]') as HTMLElement | null;
+    const scrollEl = listScrollEl();
     if (!scrollEl) {
-      setListSnapshot(null);
+      adoptListSnapshot(null);
       return;
     }
-    setListSnapshot({ scrollTop: scrollEl.scrollTop, key: null, offset: 0 });
+    adoptListSnapshot({ scrollTop: scrollEl.scrollTop, key: null, offset: 0 });
   };
 
   const restoreOpenScroll = () => {
     if (!listSnapshot) return;
     if (host?.restoreListScroll) {
       host.restoreListScroll(listSnapshot);
+      setListScrollAway(false);
       return;
     }
-    const scrollEl = tableEl()?.querySelector('[data-telegram-scroll]') as HTMLElement | null;
+    const scrollEl = listScrollEl();
     if (scrollEl) scrollEl.scrollTop = listSnapshot.scrollTop;
+    setListScrollAway(false);
   };
 
   /**
@@ -715,7 +744,7 @@ function SendToGaPopoverPanel({
   useLayoutEffect(() => {
     if (!panelOnly) return;
     anchorRef.current = panelAnchor ?? null;
-    setListSnapshot(panelListSnapshot ?? null);
+    adoptListSnapshot(panelListSnapshot ?? null);
     seenHostTriggerId.current = panelTriggerId;
     place('full');
     bumpFocus();
@@ -730,7 +759,7 @@ function SendToGaPopoverPanel({
     if (seenHostTriggerId.current === panelTriggerId) return;
     seenHostTriggerId.current = panelTriggerId;
     anchorRef.current = panelAnchor;
-    setListSnapshot(panelListSnapshot ?? null);
+    adoptListSnapshot(panelListSnapshot ?? null);
     place('full');
     bumpFocus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -773,6 +802,9 @@ function SendToGaPopoverPanel({
       const table = tableEl();
       if (!table || !(e.target instanceof Node) || !table.contains(e.target)) return;
       nudgeForOverlaps();
+      if (e.target instanceof HTMLElement && e.target.hasAttribute('data-telegram-scroll')) {
+        syncListScrollAway(e.target.scrollTop);
+      }
     };
     // Live pill can appear after open (follow paused + newer telegrams) — re-clear.
     const tableForMo = tableEl();
@@ -962,7 +994,7 @@ function SendToGaPopoverPanel({
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-primary)' }}>{address}</span>
             {name && <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{name}</span>}
-            {listSnapshot != null && (
+            {listSnapshot != null && listScrollAway && (
               <button
                 type="button"
                 className="quick-filter-bar-toggle"
@@ -971,7 +1003,7 @@ function SendToGaPopoverPanel({
                 onClick={restoreOpenScroll}
                 style={{ flexShrink: 0, margin: 0 }}
               >
-                <Clock size={13} />
+                <LocateFixed size={13} />
               </button>
             )}
           </div>

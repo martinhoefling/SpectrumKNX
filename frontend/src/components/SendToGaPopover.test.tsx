@@ -150,11 +150,17 @@ test('restore-list jump returns scrollTop from when the popover opened', async (
 
   fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
   await waitFor(() => expect(screen.getByText('1/1/1')).toBeInTheDocument());
-  expect(screen.getByRole('button', { name: 'Restore list position' })).toBeInTheDocument();
+  // Hidden while still at the open snapshot.
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
 
   scrollEl.scrollTop = 40;
-  fireEvent.click(screen.getByRole('button', { name: 'Restore list position' }));
+  fireEvent.scroll(scrollEl);
+  const restoreBtn = screen.getByRole('button', { name: 'Restore list position' });
+  expect(restoreBtn.querySelector('.lucide-locate-fixed')).not.toBeNull();
+
+  fireEvent.click(restoreBtn);
   expect(scrollEl.scrollTop).toBe(120);
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
   expect(screen.getByText('1/1/1')).toBeInTheDocument();
 });
 
@@ -164,13 +170,18 @@ test('hosted restore-list jump uses capture/restore callbacks', async () => {
   const captureListScroll = vi.fn(() => snap);
   const restoreListScroll = vi.fn();
 
-  render(
+  const { container } = render(
     <div data-telegram-table style={{ position: 'fixed', top: 0, left: 0, width: 600, height: 400 }}>
+      <div data-telegram-scroll style={{ height: 80, overflow: 'auto' }}>
+        <div style={{ height: 400 }} />
+      </div>
       <SendToGaHost captureListScroll={captureListScroll} restoreListScroll={restoreListScroll}>
         <SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />
       </SendToGaHost>
     </div>,
   );
+  const scrollEl = container.querySelector('[data-telegram-scroll]') as HTMLElement;
+  scrollEl.scrollTop = snap.scrollTop;
   const trigger = screen.getByRole('button', { name: /Send to this GA/ });
   trigger.getBoundingClientRect = () => ({
     x: 120, y: 140, top: 140, left: 120, right: 144, bottom: 164, width: 24, height: 24,
@@ -180,9 +191,44 @@ test('hosted restore-list jump uses capture/restore callbacks', async () => {
   fireEvent.click(trigger);
   await waitFor(() => expect(screen.getByText('1/1/1')).toBeInTheDocument());
   expect(captureListScroll).toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Restore list position' }));
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
+
+  scrollEl.scrollTop = 40;
+  fireEvent.scroll(scrollEl);
+  const restoreBtn = screen.getByRole('button', { name: 'Restore list position' });
+  expect(restoreBtn.querySelector('.lucide-locate-fixed')).not.toBeNull();
+  fireEvent.click(restoreBtn);
   expect(restoreListScroll).toHaveBeenCalledWith(snap);
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
   expect(screen.getByText('1/1/1')).toBeInTheDocument();
+});
+
+test('restore-list button stays hidden while list scroll matches the open snapshot', async () => {
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+
+  const { container } = render(
+    <div data-telegram-table>
+      <div data-telegram-scroll style={{ height: 80, overflow: 'auto' }}>
+        <div style={{ height: 400 }} />
+        <SendToGaPopover address="1/1/1" dptMain={1} dptSub={1} />
+      </div>
+    </div>,
+  );
+  const scrollEl = container.querySelector('[data-telegram-scroll]') as HTMLElement;
+  scrollEl.scrollTop = 80;
+
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  await waitFor(() => expect(screen.getByText('1/1/1')).toBeInTheDocument());
+  fireEvent.scroll(scrollEl);
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
+
+  scrollEl.scrollTop = 81;
+  fireEvent.scroll(scrollEl);
+  expect(screen.getByRole('button', { name: 'Restore list position' })).toBeInTheDocument();
+
+  scrollEl.scrollTop = 80;
+  fireEvent.scroll(scrollEl);
+  expect(screen.queryByRole('button', { name: 'Restore list position' })).not.toBeInTheDocument();
 });
 
 test('hosted popover stays open after the row trigger unmounts', async () => {
