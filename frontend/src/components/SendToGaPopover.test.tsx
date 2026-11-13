@@ -955,6 +955,48 @@ test('jobActive marks the send icon dim-green and always-visible attr', () => {
   expect(btn.style.color).toMatch(/success/);
 });
 
+test('active GA job shows panel-like status below the controls with Cancel', async () => {
+  vi.stubGlobal('fetch', mockFetch({ '/api/telegrams': { telegrams: [] } }));
+  const onCancelLinked = vi.fn();
+  const jobStatus = {
+    rowId: 'row-job-1',
+    job: {
+      id: 'job-1',
+      state: 'waiting' as const,
+      address: '2/3/4',
+      next_send_at: new Date(Date.now() + 15_000).toISOString(),
+      delay_seconds: 15,
+    },
+    feedback: null,
+    busy: false,
+    address: '2/3/4',
+    name: 'Lamp',
+    value: '1',
+    dpt: '1.001',
+  };
+
+  render(
+    <SendToGaHost
+      gaJobStatuses={{ '2/3/4': jobStatus }}
+      onCancelLinked={onCancelLinked}
+    >
+      <SendToGaPopover address="2/3/4" triggerId="t1" dptMain={1} dptSub={1} />
+    </SendToGaHost>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /Send to this GA/ }));
+  const status = await waitFor(() => {
+    const el = document.querySelector('[data-status-field]') as HTMLElement | null;
+    expect(el).toBeTruthy();
+    return el!;
+  });
+  expect(status.querySelector('.lucide-timer')).not.toBeNull();
+  expect(status.querySelector('[data-status-metric="countdown"]')).not.toBeNull();
+  const cancel = screen.getByRole('button', { name: /^Cancel$/ });
+  fireEvent.click(cancel);
+  expect(onCancelLinked).toHaveBeenCalledWith('row-job-1');
+});
+
 test('outgoing Write flashes the send icon briefly', async () => {
   vi.useFakeTimers();
   try {

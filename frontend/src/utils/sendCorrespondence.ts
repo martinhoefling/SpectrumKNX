@@ -1,3 +1,4 @@
+import type { Telegram } from '../hooks/useWebSocket';
 import type { BusPayload } from './dptValues';
 import type { ScheduledSendStatus } from './knxSend';
 
@@ -59,10 +60,16 @@ export type SendPanelCommandResult = {
   matched: boolean;
 };
 
-/** Status projection for a linked send-panel row (shown in the popover). */
+/** Status projection for a send-panel row (popover mirrors panel RowStatus). */
 export type LinkedRowStatus = {
   rowId: string;
   job: ScheduledSendStatus | null;
   feedback: { ok: boolean; msg: string } | null;
   busy: boolean;
+  statusWatch?: 'write' | 'read' | null;
+  statusTelegram?: Telegram | null;
+  address?: string;
+  name?: string;
+  value?: string;
+  dpt?: string;
 };

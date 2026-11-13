@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Radio, AlertTriangle, LocateFixed, Timer, X } from 'lucide-react';
+import { Send, Radio, AlertTriangle, LocateFixed } from 'lucide-react';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
@@ -19,7 +19,11 @@ import {
   correspondenceKeyFromDraft,
   type SendCorrespondenceKey,
 } from '../utils/sendCorrespondence';
-import type { LinkedRowStatus } from './WriteToBusPanel';
+import {
+  SendJobStatusField,
+  STATUS_ACTION_WIDTH,
+  type LinkedRowStatus,
+} from './WriteToBusPanel';
 import { useRetainFocusThroughDisabled } from '../hooks/useRetainFocusThroughDisabled';
 
 /** Stable list position: telegram identity + its viewport offset at open time. */
@@ -65,6 +69,7 @@ export function SendToGaHost({
   restoreListScroll,
   linkedRowId = null,
   linkedStatus = null,
+  gaJobStatuses,
   onScheduleCommit,
   onWriteWithSchedule,
   onCancelLinked,
@@ -78,12 +83,13 @@ export function SendToGaHost({
   restoreListScroll?: (snap: ListScrollSnapshot) => void;
   linkedRowId?: string | null;
   linkedStatus?: LinkedRowStatus | null;
+  gaJobStatuses?: Record<string, LinkedRowStatus>;
   onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
   onWriteWithSchedule?: (
     draft: SendCorrespondenceKey & { name?: string | null },
     payload: BusPayload,
   ) => void;
-  onCancelLinked?: () => void;
+  onCancelLinked?: (rowId?: string) => void;
   onAltSend?: () => void;
   onCtrlSend?: (info: {
     address: string;
@@ -101,6 +107,14 @@ export function SendToGaHost({
     captureListScroll: captureListScroll ?? null,
     restoreListScroll: restoreListScroll ?? null,
   }), [session?.address, session?.triggerId, captureListScroll, restoreListScroll]);
+
+  const sessionGaStatus = session?.address
+    ? gaJobStatuses?.[session.address] ?? null
+    : null;
+  // Prefer the correspondence-linked row when it owns the job; else the GA's live job.
+  const statusForPanel = linkedStatus?.job
+    ? linkedStatus
+    : (sessionGaStatus?.job ? sessionGaStatus : linkedStatus);
 
   return (
     <SendToGaHostContext.Provider value={api}>
@@ -121,8 +135,9 @@ export function SendToGaHost({
           onPanelClose={() => setSession(null)}
           onAltSend={onAltSend}
           onCtrlSend={onCtrlSend}
-          linkedRowId={linkedRowId}
-          linkedStatus={linkedStatus}
+          jobActive={Boolean(sessionGaStatus?.job || linkedStatus?.job)}
+          linkedRowId={linkedRowId ?? statusForPanel?.rowId ?? null}
+          linkedStatus={statusForPanel}
           onScheduleCommit={onScheduleCommit}
           onWriteWithSchedule={onWriteWithSchedule}
           onCancelLinked={onCancelLinked}
@@ -189,7 +204,7 @@ interface Props {
     draft: SendCorrespondenceKey & { name?: string | null },
     payload: BusPayload,
   ) => void;
-  onCancelLinked?: () => void;
+  onCancelLinked?: (rowId?: string) => void;
 }
 
 function isReadTelegram(tg: Telegram | null | undefined): boolean {
@@ -1297,33 +1312,42 @@ function SendToGaPopoverPanel({
             );
           })()}
 
-          {linkedStatus?.job && (
-            <div
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap',
-                fontSize: '0.72rem', color: 'var(--accent-primary)',
-              }}
-            >
-              <Timer size={12} />
-              <span>
-                {linkedStatus.job.state}
-                {linkedStatus.job.sends_done != null ? ` · ${linkedStatus.job.sends_done} sent` : ''}
-              </span>
-              {onCancelLinked && (
-                <button
-                  type="button"
-                  className="wtb-read-btn"
-                  onClick={() => onCancelLinked()}
-                  style={secondaryBtn(false)}
-                  title="Cancel scheduled send"
-                >
-                  <X size={12} /> Cancel
-                </button>
+          {linkedStatus?.job ? (
+            <SendJobStatusField
+              feedback={linkedStatus.feedback ?? feedback}
+              awaiting={awaitingRead || linkedStatus.statusWatch === 'read'}
+              job={linkedStatus.job}
+              showCountdownCol={Boolean(
+                linkedStatus.job.next_send_at || linkedStatus.job.state === 'waiting',
               )}
-            </div>
-          )}
-
-          {showStatus && (statusIcon || statusText) && (
+              showSendCountCol={Boolean(
+                linkedStatus.job.interval_seconds
+                && linkedStatus.job.state === 'running'
+                && (linkedStatus.job.sends_done ?? 0) > 0,
+              )}
+              showActionCol
+              actionWidth={STATUS_ACTION_WIDTH}
+              statusTelegram={linkedStatus.statusTelegram ?? statusTelegram}
+              address={linkedStatus.address ?? address}
+              groupName={linkedStatus.name ?? name ?? ''}
+              value={linkedStatus.value ?? value}
+              dpt={linkedStatus.dpt ?? dpt}
+              onCancel={() => onCancelLinked?.(linkedStatus.rowId)}
+              onStopAwait={() => {
+                setAwaitingRead(false);
+                setFeedback(prev => (isReadRequestFeedback(prev) ? prev : null));
+              }}
+              onClear={() => {
+                setFeedback(null);
+                setStatusTelegram(null);
+                setAwaitingRead(false);
+              }}
+              onJump={() => {
+                const tg = linkedStatus.statusTelegram ?? statusTelegram;
+                if (tg && onGotoTelegram) onGotoTelegram(tg);
+              }}
+            />
+          ) : showStatus && (statusIcon || statusText) ? (
             <div
               data-status-field
               aria-label={unansweredRead ? pendingReadTip : responseOk ? responseTip : undefined}
@@ -1337,7 +1361,7 @@ function SendToGaPopoverPanel({
               {statusIcon}
               {statusText ? <span>{statusText}</span> : null}
             </div>
-          )}
+          ) : null}
         </div>,
         document.body
       )}

@@ -106,8 +106,11 @@ interface Props {
   onSendPanelCommandHandled?: (result: SendPanelCommandResult) => void;
   /** Emits live status for rows (popover mirrors linked row). */
   onLinkedRowStatusesChange?: (statuses: Record<string, LinkedRowStatus>) => void;
-  /** GAs that currently own a waiting/running scheduled send-job (TT send-icon). */
-  onActiveJobAddressesChange?: (addresses: string[]) => void;
+  /**
+   * Live send-job status keyed by GA address (TT send-icon + popover status).
+   * One entry per address that currently owns a waiting/running job.
+   */
+  onGaJobStatusesChange?: (byAddress: Record<string, LinkedRowStatus>) => void;
   /** Fill the workspace tabpanel (no docked height chrome). */
   embedded?: boolean;
 }
@@ -179,7 +182,7 @@ const STATUS_SHELL_MIN_WIDTH_CLEAR = '6.75rem';
 /** Floor without the Cancel/Clear track — keeps empty/idle shells compact. */
 const STATUS_SHELL_MIN_WIDTH_COMPACT = '5.75rem';
 /** Fits the Cancel label + divider; used when any row shows Cancel. */
-const STATUS_ACTION_WIDTH = '4.25rem';
+export const STATUS_ACTION_WIDTH = '4.25rem';
 /** Fits the Clear X / empty spacer when no Cancel is on the panel. */
 const STATUS_CLEAR_WIDTH = '11px';
 
@@ -704,7 +707,7 @@ export function WriteToBusPanel({
   sendPanelCommand = null,
   onSendPanelCommandHandled,
   onLinkedRowStatusesChange,
-  onActiveJobAddressesChange,
+  onGaJobStatusesChange,
   embedded = false,
 }: Props) {
   const [rows, setRows] = useState<Row[]>(() => loadStoredRows() ?? [newRow()]);
@@ -1312,27 +1315,35 @@ export function WriteToBusPanel({
 
   const onLinkedRowStatusesChangeRef = useRef(onLinkedRowStatusesChange);
   onLinkedRowStatusesChangeRef.current = onLinkedRowStatusesChange;
-  const onActiveJobAddressesChangeRef = useRef(onActiveJobAddressesChange);
-  onActiveJobAddressesChangeRef.current = onActiveJobAddressesChange;
+  const onGaJobStatusesChangeRef = useRef(onGaJobStatusesChange);
+  onGaJobStatusesChangeRef.current = onGaJobStatusesChange;
   useEffect(() => {
     const emit = onLinkedRowStatusesChangeRef.current;
-    const emitJobs = onActiveJobAddressesChangeRef.current;
-    if (!emit && !emitJobs) return;
+    const emitGaJobs = onGaJobStatusesChangeRef.current;
+    if (!emit && !emitGaJobs) return;
     const statuses: Record<string, LinkedRowStatus> = {};
-    const jobAddresses = new Set<string>();
+    const byAddress: Record<string, LinkedRowStatus> = {};
     for (const r of rows) {
       const job = jobsByRowId[r.id] ?? null;
       const live = job && (job.state === 'waiting' || job.state === 'running') ? job : null;
-      statuses[r.id] = {
+      const projection: LinkedRowStatus = {
         rowId: r.id,
         job: live,
         feedback: r.feedback,
         busy: r.busy,
+        statusWatch: r.statusWatch,
+        statusTelegram: r.statusTelegram,
+        address: r.address,
+        name: r.name,
+        value: r.value,
+        dpt: r.dpt,
       };
-      if (live && r.address.trim()) jobAddresses.add(r.address.trim());
+      statuses[r.id] = projection;
+      const addr = r.address.trim();
+      if (live && addr && !byAddress[addr]) byAddress[addr] = projection;
     }
     emit?.(statuses);
-    emitJobs?.([...jobAddresses]);
+    emitGaJobs?.(byAddress);
   }, [rows, jobsByRowId]);
 
   const applyResolved = (id: string, option: FilterOption) => {
@@ -1987,7 +1998,7 @@ export function WriteToBusPanel({
                 }}
               >
                 <div data-wtb-col="10" style={{ minWidth: 0 }}>
-                  <RowStatus
+                  <SendJobStatusField
                     feedback={row.feedback}
                     awaiting={awaiting}
                     job={showJob ? rowJob : null}
@@ -2535,7 +2546,8 @@ function formatGaLabel(address: string | undefined, name: string | undefined): s
  * Countdown/count/action columns are panel-wide so rows stay aligned; values
  * remain per-row. Tooltips stay static (no tip flicker).
  */
-function RowStatus({
+/** Panel / popover shared status shell (countdown, send count, event, Cancel). */
+export function SendJobStatusField({
   feedback,
   awaiting,
   job,
@@ -2553,7 +2565,7 @@ function RowStatus({
   onClear,
   onJump,
 }: {
-  feedback: Row['feedback'];
+  feedback: { ok: boolean; msg: string } | null;
   awaiting: boolean;
   job: ScheduledSendStatus | null;
   showCountdownCol: boolean;

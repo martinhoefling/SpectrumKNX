@@ -301,8 +301,10 @@ function App() {
   const sendPanelCmdNonceRef = useRef(0);
   const [popoverLinkedRowId, setPopoverLinkedRowId] = useState<string | null>(null);
   const [linkedRowStatuses, setLinkedRowStatuses] = useState<Record<string, LinkedRowStatus>>({});
-  const [activeSendJobAddresses, setActiveSendJobAddresses] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const [gaJobStatuses, setGaJobStatuses] = useState<Record<string, LinkedRowStatus>>({});
+  const activeSendJobAddresses = useMemo(
+    () => new Set(Object.keys(gaJobStatuses)),
+    [gaJobStatuses],
   );
   const pendingEnsureRef = useRef<{
     nonce: number;
@@ -837,11 +839,8 @@ function App() {
     setLinkedRowStatuses(statuses);
   }, []);
 
-  const handleActiveJobAddressesChange = useCallback((addresses: string[]) => {
-    setActiveSendJobAddresses(prev => {
-      if (prev.size === addresses.length && addresses.every(a => prev.has(a))) return prev;
-      return new Set(addresses);
-    });
+  const handleGaJobStatusesChange = useCallback((byAddress: Record<string, LinkedRowStatus>) => {
+    setGaJobStatuses(byAddress);
   }, []);
 
   const handleScheduleCommit = useCallback((draft: SendCorrespondenceKey & { name?: string | null }) => {
@@ -867,13 +866,14 @@ function App() {
     setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
   }, []);
 
-  const handleCancelLinked = useCallback(() => {
-    if (!popoverLinkedRowId) return;
+  const handleCancelLinked = useCallback((rowId?: string) => {
+    const id = rowId ?? popoverLinkedRowId;
+    if (!id) return;
     sendPanelCmdNonceRef.current += 1;
     setSendPanelCommand({
       type: 'cancelRow',
       nonce: sendPanelCmdNonceRef.current,
-      rowId: popoverLinkedRowId,
+      rowId: id,
     });
   }, [popoverLinkedRowId]);
 
@@ -1456,7 +1456,7 @@ function App() {
                   sendPanelCommand={sendPanelCommand}
                   onSendPanelCommandHandled={handleSendPanelCommandHandled}
                   onLinkedRowStatusesChange={handleLinkedRowStatusesChange}
-                  onActiveJobAddressesChange={handleActiveJobAddressesChange}
+                  onGaJobStatusesChange={handleGaJobStatusesChange}
                 />
               </div>
             )}
@@ -1598,6 +1598,7 @@ function App() {
                     onCtrlSend={handleCtrlSend}
                     sendPanelTopHint={isSendOpen ? sendPanelTopHint : null}
                     activeSendJobAddresses={activeSendJobAddresses}
+                    gaJobStatuses={gaJobStatuses}
                     linkedRowId={popoverLinkedRowId}
                     linkedStatus={popoverLinkedRowId ? linkedRowStatuses[popoverLinkedRowId] ?? null : null}
                     onScheduleCommit={handleScheduleCommit}

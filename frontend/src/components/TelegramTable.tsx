@@ -53,6 +53,8 @@ interface TelegramTableProps {
   sendPanelTopHint?: SendPanelTopRowHint | null;
   /** GAs with a live scheduled send-job (send-icon always visible, dim green). */
   activeSendJobAddresses?: ReadonlySet<string>;
+  /** Live job status by GA — popover shows panel-like status when a job is active. */
+  gaJobStatuses?: Record<string, LinkedRowStatus>;
   /** Linked send-panel row for popover schedule status. */
   linkedRowId?: string | null;
   linkedStatus?: LinkedRowStatus | null;
@@ -61,7 +63,7 @@ interface TelegramTableProps {
     draft: SendCorrespondenceKey & { name?: string | null },
     payload: BusPayload,
   ) => void;
-  onCancelLinked?: () => void;
+  onCancelLinked?: (rowId?: string) => void;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -239,6 +241,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
   latestTelegram, onAltSend, onCtrlSend, sendPanelTopHint = null,
   activeSendJobAddresses,
+  gaJobStatuses,
   linkedRowId = null, linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onCancelLinked,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
@@ -2412,6 +2415,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         restoreListScroll={restoreListScroll}
         linkedRowId={linkedRowId}
         linkedStatus={linkedStatus}
+        gaJobStatuses={gaJobStatuses}
         onScheduleCommit={onScheduleCommit}
         onWriteWithSchedule={onWriteWithSchedule}
         onCancelLinked={onCancelLinked}
