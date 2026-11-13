@@ -25,24 +25,24 @@ test('a 1-bit subtype renders its own values, not On/Off', () => {
     <WriteControls dptMain={1} dptKey="1.008" value="" onValueChange={() => {}} onWrite={onWrite} />,
   );
 
-  expect(screen.queryByRole('button', { name: /^On$/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /^Up$/ }));
-  fireEvent.click(screen.getByRole('button', { name: /^Down$/ }));
+  expect(screen.queryByRole('button', { name: /^on$/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /^up$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^down$/ }));
   expect(onWrite).toHaveBeenNthCalledWith(1, false);
   expect(onWrite).toHaveBeenNthCalledWith(2, true);
 
   rerender(<WriteControls dptMain={1} dptKey="1.002" value="" onValueChange={() => {}} onWrite={onWrite} />);
-  expect(screen.getByRole('button', { name: /^False$/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^True$/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^false$/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^true$/ })).toBeInTheDocument();
 });
 
 test('a 2-bit subtype offers the value with and without the control bit', () => {
   const onWrite = vi.fn();
   render(<WriteControls dptMain={2} dptKey="2.002" value="" onValueChange={() => {}} onWrite={onWrite} />);
 
-  fireEvent.click(screen.getByRole('button', { name: /^True \(control\)$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^true \(control\)$/ }));
   expect(onWrite).toHaveBeenCalledWith({ control: true, value: 'true' });
-  expect(screen.queryByRole('button', { name: /^On$/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^on$/ })).not.toBeInTheDocument();
 });
 
 test('a 4-bit control subtype lists only its legal direction and step codes', () => {
@@ -51,8 +51,8 @@ test('a 4-bit control subtype lists only its legal direction and step codes', ()
 
   const select = screen.getByRole('combobox', { name: 'Value' });
   const labels = [...select.querySelectorAll('option')].map(option => option.textContent);
-  expect(labels).toContain('Up 0');
-  expect(labels).toContain('Down 7');
+  expect(labels).toContain('up 0');
+  expect(labels).toContain('down 7');
   expect(labels).toHaveLength(16);
   expect(labels.some(label => /On|Off/.test(label ?? ''))).toBe(false);
 
@@ -80,7 +80,7 @@ test('non-DPT-1 renders a value field and a Write button', () => {
   expect(screen.getByPlaceholderText(/Value/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Write/ }));
   expect(onWrite).toHaveBeenCalledWith(50);
-  expect(screen.queryByRole('button', { name: /^On$/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^on$/ })).not.toBeInTheDocument();
 });
 
 test('Write is disabled while the value is empty', () => {
