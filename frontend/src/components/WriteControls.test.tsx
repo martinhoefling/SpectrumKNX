@@ -2,11 +2,25 @@ import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { resetDiscreteLabelModes } from '../utils/dptValues';
-import { WriteControls, needsValueColumn } from './WriteControls';
+import { WriteControls, needsValueColumn, readModeButtonMuted, valueSendMuted } from './WriteControls';
 
 beforeEach(() => {
   localStorage.clear();
   resetDiscreteLabelModes();
+});
+
+test('Response follows the write button that sends the job value', () => {
+  const writeOn = { read: false, payload: true };
+  expect(valueSendMuted(true, writeOn, true)).toBe(false);
+  expect(valueSendMuted(true, writeOn, false)).toBe(true);
+  expect(valueSendMuted(true, writeOn)).toBe(false);
+  expect(readModeButtonMuted(true, true, writeOn)).toBe(false);
+  expect(readModeButtonMuted(false, true, writeOn)).toBe(true);
+  const reading = { read: true, payload: undefined };
+  expect(valueSendMuted(true, reading, true)).toBe(true);
+  expect(readModeButtonMuted(true, true, reading)).toBe(true);
+  expect(readModeButtonMuted(false, true, reading)).toBe(false);
+  expect(readModeButtonMuted(true, false, writeOn)).toBe(false);
 });
 
 test('needsValueColumn is false only for button DPTs', () => {

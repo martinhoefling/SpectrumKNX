@@ -10,7 +10,7 @@ import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
 import { useDptCatalog } from './DptCatalogContext';
 import { DptField } from './DptField';
-import { WriteControls, needsValueColumn } from './WriteControls';
+import { WriteControls, needsValueColumn, readModeButtonMuted } from './WriteControls';
 import { BusValueText } from './BusValueText';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { EventTypeLabel } from './EventTypeLabel';
@@ -1279,6 +1279,7 @@ function SendToGaPopoverPanel({
 
           {(() => {
             const showValue = showValueField;
+            const modeMuted = readModeButtonMuted(respond, Boolean(statusJob), statusJob);
             const readBtn = (
               <button
                 type="button"
@@ -1293,7 +1294,7 @@ function SendToGaPopoverPanel({
                   void read();
                 }}
                 disabled={controlsDisabled || jobLocked}
-                style={secondaryBtn(controlsDisabled || jobLocked, Boolean(statusJob && !statusJob.read))}
+                style={secondaryBtn(controlsDisabled || jobLocked, modeMuted)}
                 title={
                   jobLocked
                     ? `${respond ? 'Response' : 'Read'} (locked while this job is running)`
@@ -1308,7 +1309,7 @@ function SendToGaPopoverPanel({
                   phase={readPhase}
                   iconDim={
                     controlsDisabled || jobLocked
-                      ? (statusJob && !statusJob.read ? 'muted' : 'disabled')
+                      ? (modeMuted ? 'muted' : 'disabled')
                       : undefined
                   }
                   iconSize={13}

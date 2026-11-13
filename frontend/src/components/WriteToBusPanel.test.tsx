@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { BTN_DISABLED_MIX, BTN_MUTED_MIX } from '../utils/buttonStyles';
 import { GaReadPhaseProvider } from './GaReadPhase';
 import {
   WriteToBusPanel,
@@ -338,6 +339,60 @@ test('ctrl-click Read switches to Response mode so Write sends a response', asyn
   expect(screen.getByRole('button', { name: /^Read$/ })).toBeInTheDocument();
 });
 
+test('Response dims like the write button for the value being sent', async () => {
+  const job = {
+    ...RUNNING_JOB,
+    id: 'resp-on',
+    payload: true,
+    response: true,
+  };
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': statusOf(job),
+  }));
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    {
+      address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '5',
+      respond: true, scheduledJobId: job.id,
+    },
+  ]));
+
+  render(<WriteToBusPanel targets={[]} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /^on$/i })).toBeDisabled());
+
+  const on = screen.getByRole('button', { name: /^on$/i }) as HTMLButtonElement;
+  const off = screen.getByRole('button', { name: /^off$/i }) as HTMLButtonElement;
+  const response = screen.getByRole('button', { name: /^Response$/ }) as HTMLButtonElement;
+  // "on" is the value this job sends: normal disabled tone. "off" fades further.
+  expect(on.style.background).toContain(`${BTN_DISABLED_MIX}%`);
+  expect(off.style.background).toContain(`${BTN_MUTED_MIX}%`);
+  expect(response.style.color).toContain(`${BTN_DISABLED_MIX}%`);
+  expect(response.style.border).toContain(`${BTN_DISABLED_MIX}%`);
+  expect(response.style.color).not.toContain(`${BTN_MUTED_MIX}%`);
+});
+
+test('Read stays extra-dimmed during a write job', async () => {
+  const job = { ...RUNNING_JOB, id: 'write-on', payload: true };
+  vi.stubGlobal('fetch', mockFetch({
+    '/api/knx/send/scheduled/status': statusOf(job),
+  }));
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    {
+      address: '1/2/3', dpt: '1.001', value: '', delay: '', every: '5',
+      respond: false, scheduledJobId: job.id,
+    },
+  ]));
+
+  render(<WriteToBusPanel targets={[]} />);
+  const read = await waitFor(() => {
+    const btn = screen.getByRole('button', { name: /^Read$/ }) as HTMLButtonElement;
+    expect(btn).toBeDisabled();
+    return btn;
+  });
+  const on = screen.getByRole('button', { name: /^on$/i }) as HTMLButtonElement;
+  expect(on.style.background).toContain(`${BTN_DISABLED_MIX}%`);
+  expect(read.style.color).toContain(`${BTN_MUTED_MIX}%`);
+});
+
 test('adds and removes rows, sending to multiple GAs independently (#215)', async () => {
   const fetchMock = mockFetch({
     '/api/knx/send/scheduled/status': IDLE,
@@ -402,36 +457,45 @@ test('plus inserts a row below the clicked one and minus removes that row', asyn
   });
 });
 
-test('minus removes only the clicked row, including with ctrl held', async () => {
+test('ctrl-click minus initializes only the clicked row', () => {
   render(<WriteToBusPanel targets={[]} />);
   fireEvent.change(screen.getByPlaceholderText('GA'), { target: { value: '1/2/3' } });
   fireEvent.change(screen.getByPlaceholderText(/Value/), { target: { value: '50' } });
   fireEvent.change(screen.getByPlaceholderText('every'), { target: { value: '5' } });
   fireEvent.click(screen.getByRole('button', { name: /Add a row below/ }));
   fireEvent.change(screen.getAllByPlaceholderText('GA')[1], { target: { value: '4/5/6' } });
+  fireEvent.change(screen.getAllByPlaceholderText(/Value/)[1], { target: { value: '1' } });
+  fireEvent.change(screen.getAllByPlaceholderText('every')[1], { target: { value: '9' } });
   fireEvent.click(screen.getAllByRole('button', { name: /Add a row below/ })[1]);
   fireEvent.change(screen.getAllByPlaceholderText('GA')[2], { target: { value: '7/8/9' } });
 
   fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[1], { ctrlKey: true });
 
-  await waitFor(() => {
-    expect(screen.getAllByPlaceholderText('GA').map(el => (el as HTMLInputElement).value))
-      .toEqual(['1/2/3', '7/8/9']);
-  });
-  expect((screen.getAllByPlaceholderText(/Value/)[0] as HTMLInputElement).value).toBe('50');
+  expect(screen.getAllByPlaceholderText('GA').map(el => (el as HTMLInputElement).value))
+    .toEqual(['1/2/3', '', '7/8/9']);
+  const values = screen.getAllByPlaceholderText(/Value/) as HTMLInputElement[];
+  expect(values.map(el => el.value)).toEqual(['50', '', '']);
+  const everys = screen.getAllByPlaceholderText('every') as HTMLInputElement[];
+  expect(everys.map(el => el.value)).toEqual(['5', '', '']);
 });
 
-test('minus on the only row does not clear it', () => {
+test('minus on the only row does not clear it; ctrl-click initializes it', () => {
   localStorage.setItem(ROWS_KEY, JSON.stringify([
     { address: '1/2/3', dpt: '1.001', value: '1', delay: '2', every: '5' },
   ]));
   render(<WriteToBusPanel targets={[]} />);
   const minus = screen.getByRole('button', { name: /At least one row is required/ });
   expect(minus).toHaveAttribute('aria-disabled', 'true');
-  fireEvent.click(minus, { ctrlKey: true });
+  fireEvent.click(minus);
   expect(screen.getByPlaceholderText('GA')).toHaveValue('1/2/3');
   expect(screen.getByPlaceholderText('delay')).toHaveValue('2');
   expect(screen.getByPlaceholderText('every')).toHaveValue('5');
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
+
+  fireEvent.click(minus, { ctrlKey: true });
+  expect(screen.getByPlaceholderText('GA')).toHaveValue('');
+  expect(screen.getByPlaceholderText('delay')).toHaveValue('');
+  expect(screen.getByPlaceholderText('every')).toHaveValue('');
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
 });
 
@@ -533,11 +597,57 @@ test('minus deletes a row with an active job and cancels that job', async () => 
   expect(gas[1]).toBeEnabled();
   expect(deletes[1]).toBeEnabled();
 
-  fireEvent.click(deletes[0], { ctrlKey: true });
+  fireEvent.click(deletes[0]);
   await waitFor(() => expect(cancelBodies).toEqual([{ id: RUNNING_JOB.id }]));
   expect(screen.getAllByPlaceholderText('GA')).toHaveLength(1);
   expect(screen.getByPlaceholderText('GA')).toHaveValue('4/5/6');
   expect(screen.queryByRole('button', { name: /^Cancel$/ })).not.toBeInTheDocument();
+});
+
+test('ctrl-click minus cancels and initializes only the clicked row', async () => {
+  const jobA = { ...RUNNING_JOB, id: 'job-a', address: '1/2/3' };
+  const jobB = { ...RUNNING_JOB, id: 'job-b', address: '4/5/6' };
+  const activeJobs: Record<string, unknown> = { 'job-a': jobA, 'job-b': jobB };
+  const cancelBodies: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/knx/send/scheduled/status')) {
+      return { ok: true, json: async () => ({ jobs: Object.values(activeJobs) }) } as Response;
+    }
+    if (url.includes('/api/knx/send/scheduled/cancel')) {
+      const body = init?.body ? JSON.parse(String(init.body)) as { id?: string } : {};
+      cancelBodies.push(body);
+      if (body.id) delete activeJobs[body.id];
+      return { ok: true, json: async () => ({ status: 'ok' }) } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }));
+  localStorage.setItem(ROWS_KEY, JSON.stringify([
+    { address: '1/2/3', name: 'Light', dpt: '5.001', value: '50', delay: '2', every: '5', scheduledJobId: 'job-a' },
+    { address: '4/5/6', name: 'Other', dpt: '5.001', value: '1', delay: '3', every: '9', scheduledJobId: 'job-b' },
+  ]));
+
+  render(<WriteToBusPanel targets={[]} />);
+  await waitFor(() => expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(2));
+
+  fireEvent.click(screen.getAllByRole('button', { name: /Delete this row/ })[0], { ctrlKey: true });
+
+  await waitFor(() => expect(cancelBodies).toEqual([{ id: 'job-a' }]));
+  expect(screen.getAllByPlaceholderText('GA')).toHaveLength(2);
+  const gas = screen.getAllByPlaceholderText('GA') as HTMLInputElement[];
+  const names = screen.getAllByPlaceholderText('Group name') as HTMLInputElement[];
+  const values = screen.getAllByRole('textbox', { name: 'Value' }) as HTMLInputElement[];
+  const delays = screen.getAllByPlaceholderText('delay') as HTMLInputElement[];
+  const everys = screen.getAllByPlaceholderText('every') as HTMLInputElement[];
+  expect(gas.map(el => el.value)).toEqual(['', '4/5/6']);
+  expect(names.map(el => el.value)).toEqual(['', 'Other']);
+  expect(values.map(el => el.value)).toEqual(['', '1']);
+  expect(delays.map(el => el.value)).toEqual(['', '3']);
+  expect(everys.map(el => el.value)).toEqual(['', '9']);
+  expect(screen.getAllByRole('button', { name: /^Cancel$/ })).toHaveLength(1);
+  expect(screen.getByLabelText(/cyclic send to 4\/5\/6/)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/cyclic send to 1\/2\/3/)).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Cancel all jobs')).not.toBeInTheDocument();
 });
 
 test('minus deletes a row while start is pending and cancels the job', async () => {

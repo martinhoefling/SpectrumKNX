@@ -17,7 +17,7 @@ import {
 } from '../utils/knxSend';
 import { GaCombobox } from './GaCombobox';
 import { DptField } from './DptField';
-import { WriteControls, needsValueColumn } from './WriteControls';
+import { WriteControls, needsValueColumn, readModeButtonMuted } from './WriteControls';
 import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { EventTypeLabel } from './EventTypeLabel';
 import { useGaReadPhase, useReadAnswered } from './GaReadPhase';
@@ -57,7 +57,8 @@ function RetainFocusReadButton({
   'data-wtb-col': dataWtbCol,
 }: {
   disabled: boolean;
-  /** Stronger fade when a write job owns the row. A read job keeps the normal disabled tone. */
+  /** Stronger fade. Response matches the write button for the value being sent.
+   * Read keeps the normal disabled tone during its own job and fades during a write. */
   muted?: boolean;
   /** Mode flag: Write buttons send a GroupValueResponse instead of a Write. */
   respond?: boolean;
@@ -720,6 +721,7 @@ function isPendingJobId(id: string | undefined): boolean {
  *
  * Each row can run its own scheduled (delayed/cyclic) job concurrently.
  * Removing a row that owns an active job cancels that job first.
+ * Ctrl/cmd-click on minus initializes only that row and cancels only its job.
  *
  * Rows persist to localStorage so toggling the panel keeps its state (#254).
  */
@@ -1161,6 +1163,11 @@ export function WriteToBusPanel({
    */
   const detachRowJob = (id: string): ScheduledSendStatus | undefined => {
     const owned = jobsByRowIdRef.current[id];
+    if (id in jobsByRowIdRef.current) {
+      const nextJobs = { ...jobsByRowIdRef.current };
+      delete nextJobs[id];
+      jobsByRowIdRef.current = nextJobs;
+    }
     setJobsByRowId(prev => {
       if (!(id in prev)) return prev;
       const next = { ...prev };
@@ -1233,11 +1240,19 @@ export function WriteToBusPanel({
     setRows(rs => [newRow(), ...rs]);
   };
 
-  const resetRow = (id: string) => {
-    // A live job owns the row fields. Reset stays blocked; delete cancels the job.
-    if (isLiveJob(jobsByRowIdRef.current[id])) return;
+  const resetRow = (id: string, opts?: { force?: boolean }) => {
+    // A live job owns the row fields. Empty-GA reset stays blocked.
+    // Ctrl/cmd-click minus forces it: cancel only this row's job, clear only this row.
+    if (!opts?.force && isLiveJob(jobsByRowIdRef.current[id])) return;
     const owned = detachRowJob(id);
-    setRows(rs => rs.map(r => (r.id === id ? { ...newRow(), id: r.id } : r)));
+    const clear = (r: Row) => (r.id === id ? { ...newRow(), id: r.id } : r);
+    // Publish before the cancel request so a status poll cannot reattach this job.
+    rowsRef.current = rowsRef.current.map(clear);
+    setRows(rs => {
+      const next = rs.map(clear);
+      rowsRef.current = next;
+      return next;
+    });
     void cancelDetachedJob(id, owned);
   };
 
@@ -2103,7 +2118,7 @@ export function WriteToBusPanel({
                 <RetainFocusReadButton
                   data-wtb-col="9"
                   address={row.address}
-                  muted={showJob && !rowJob?.read}
+                  muted={readModeButtonMuted(row.respond, showJob, rowJob)}
                   respond={row.respond}
                   disabled={row.busy || !addressValid || showJob}
                   onToggle={() => updateRow(row.id, { respond: !row.respond })}
@@ -2145,17 +2160,25 @@ export function WriteToBusPanel({
                 <button
                   data-wtb-col="11"
                   className="icon-button"
-                  onClick={() => {
+                  onClick={(e: ReactMouseEvent<HTMLButtonElement>) => {
+                    // Ctrl/cmd-click initializes this row only (and cancels only its job).
+                    // Plain click deletes the row; the last row cannot be deleted.
+                    if (e.ctrlKey || e.metaKey) {
+                      resetRow(row.id, { force: true });
+                      return;
+                    }
                     if (rows.length === 1) return;
                     removeRow(row.id);
                   }}
                   aria-disabled={rows.length === 1 ? true : undefined}
                   title={
                     rows.length === 1
-                      ? 'At least one row is required'
+                      ? showJob
+                        ? 'At least one row is required · ctrl/cmd-click to initialize this row and cancel only its job'
+                        : 'At least one row is required · ctrl/cmd-click to initialize this row'
                       : showJob
-                        ? 'Delete this row and cancel its job'
-                        : 'Delete this row'
+                        ? 'Delete this row and cancel its job · ctrl/cmd-click to initialize this row and cancel only its job'
+                        : 'Delete this row · ctrl/cmd-click to initialize this row'
                   }
                   style={{
                     color: rows.length === 1

@@ -231,6 +231,36 @@ function payloadsEqual(a: unknown, b: unknown): boolean {
   return ak.every(key => payloadsEqual(left[key], right[key]));
 }
 
+/**
+ * Stronger fade when this control is not the value the live job sends.
+ * Omit `represented` for the single Write button and for Response: both stand
+ * for that value, so a write/response job keeps the normal disabled tone and
+ * a read fades them. A discrete button passes its payload and fades when it
+ * is not the job's value.
+ */
+export function valueSendMuted(
+  locked: boolean,
+  job: Pick<ScheduledSendStatus, 'read' | 'payload'> | null | undefined,
+  represented?: BusPayload,
+): boolean {
+  if (!locked || !job) return false;
+  if (job.read) return true;
+  if (represented === undefined) return false;
+  return !payloadsEqual(represented, job.payload);
+}
+
+/** Read fades during a write (it is not the value). Response fades with the
+ * write button that sends the value. */
+export function readModeButtonMuted(
+  respond: boolean,
+  locked: boolean,
+  job: Pick<ScheduledSendStatus, 'read' | 'payload'> | null | undefined,
+): boolean {
+  if (!locked || !job) return false;
+  if (respond) return valueSendMuted(true, job);
+  return !job.read;
+}
+
 /** Above the send popover (z-index 1000) so a portaled value list stays visible. */
 const PORTAL_MENU_Z = 1100;
 
@@ -479,12 +509,8 @@ export function WriteControls({
    * Stronger fade for a send button that is not this job's action.
    * Omit `represented` for the single Write button: it is the value being sent.
    */
-  const irrelevantSend = (represented?: BusPayload): boolean => {
-    if (!sendLocked || !activeJob) return false;
-    if (activeJob.read) return true;
-    if (represented === undefined) return false;
-    return !payloadsEqual(represented, activeJob.payload);
-  };
+  const irrelevantSend = (represented?: BusPayload): boolean =>
+    valueSendMuted(sendLocked, activeJob, represented);
 
   /** Capture Write/Read clicks in sendEnd so busy→disabled can restore focus. */
   const onSendColClickCapture = (e: MouseEvent<HTMLDivElement>) => {
