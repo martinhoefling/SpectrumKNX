@@ -2694,3 +2694,66 @@ test('manual → auto pause away from the spacer requests nothing', () => {
     scrollBlockSize = 800;
   }
 });
+
+test('matched/open send icons stay fully opaque under row hover CSS', () => {
+  // Styles are injected once on mount; keep the assertion scoped to send-icon rules.
+  render(
+    <TelegramTable
+      telegrams={makeList(1, 1)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+    />,
+  );
+  const styleText = Array.from(document.head.querySelectorAll('style'))
+    .map(s => s.textContent ?? '')
+    .join('\n');
+  expect(styleText).toMatch(/\.log-row:hover \.quick-send-btn\[data-send-popover-open\]/);
+  expect(styleText).toMatch(/\.quick-send-btn\[data-send-panel-match\]/);
+  expect(styleText).toMatch(/\.quick-send-btn:focus[^}]*opacity:\s*1\s*!important/s);
+});
+
+test('alt-click on send icon forwards onAltSend', () => {
+  const onAltSend = vi.fn();
+  const { container } = render(
+    <TelegramTable
+      telegrams={makeList(3, 1)}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      canSend
+      onAltSend={onAltSend}
+    />,
+  );
+  const sendIcon = container.querySelector('.quick-send-btn') as HTMLElement;
+  expect(sendIcon).toBeTruthy();
+  fireEvent.click(sendIcon, { altKey: true });
+  expect(onAltSend).toHaveBeenCalledTimes(1);
+});
+
+test('sendPanelTopHint marks matching send icon with data-send-panel-match', () => {
+  const telegrams = [
+    makeTelegram({ target_address: '1/2/3', dpt_main: 9, dpt_sub: 1 }),
+    makeTelegram({ target_address: '4/5/6', dpt_main: 1, dpt_sub: 1 }),
+  ];
+  const { container } = render(
+    <TelegramTable
+      telegrams={telegrams}
+      visibleColumns={visibleColumns}
+      sortConfig={sortConfig}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      canSend
+      sendPanelTopHint={{ address: '1/2/3', dpt: '9.001' }}
+    />,
+  );
+  const matched = container.querySelectorAll('.quick-send-btn[data-send-panel-match]');
+  expect(matched).toHaveLength(1);
+});

@@ -2242,7 +2242,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   name={t.target_name}
                   dptMain={t.dpt_main}
                   dptSub={t.dpt_sub}
+                  triggerId={anchorKey(t)}
                   buttonClassName="quick-send-btn"
+                  suppressTriggerFocus
                   onGotoTelegram={onGotoTelegram}
                   latestTelegram={latestTelegram}
                   onAltSend={onAltSend}
@@ -2805,6 +2807,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       {/* Virtualized Body */}
       <div
         ref={parentRef}
+        data-telegram-scroll=""
         onScroll={handleScroll}
         onWheel={e => {
           noteUserScroll();
@@ -3005,6 +3008,14 @@ style.textContent = `
     position: relative;
   }
 
+  .quick-filter-btn:focus, .quick-filter-btn:focus-visible,
+  .quick-visualize-btn:focus, .quick-visualize-btn:focus-visible,
+  .quick-last-seen-btn:focus, .quick-last-seen-btn:focus-visible,
+  .quick-send-btn:focus, .quick-send-btn:focus-visible {
+    /* Beat .log-row:hover … opacity: 0.6 so the focus ring stays full strength. */
+    opacity: 1 !important;
+  }
+
   .quick-filter-btn.active {
     opacity: 1;
     color: var(--accent-primary);
@@ -3028,6 +3039,14 @@ style.textContent = `
   .log-row:hover .quick-last-seen-btn,
   .log-row:hover .quick-send-btn {
     opacity: 0.6;
+  }
+
+  .log-row:hover .quick-send-btn[data-send-popover-open],
+  .quick-send-btn[data-send-popover-open],
+  .log-row:hover .quick-send-btn[data-send-panel-match],
+  .quick-send-btn[data-send-panel-match] {
+    opacity: 1;
+    color: var(--accent-primary);
   }
 
   .quick-filter-btn:hover, .quick-visualize-btn:hover, .quick-last-seen-btn:hover, .quick-send-btn:hover {
