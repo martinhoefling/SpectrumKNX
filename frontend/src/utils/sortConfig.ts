@@ -84,6 +84,17 @@ export function toggleSortLevel(config: SortConfig, key: SortKey, additive: bool
 export const effectiveSortLevels = (config: SortConfig): SortLevel[] =>
   config.some(l => l.key === 'timestamp') ? config : [...config, { key: 'timestamp', direction: 'desc' }];
 
+/**
+ * Direction when TIME is the only comparator. The live buffer is already
+ * newest-first, so that sort does not need `sortTelegrams`. Any other level
+ * (or TIME as a tiebreaker under another column) returns null.
+ */
+export function soleTimestampDirection(config: SortConfig): 'asc' | 'desc' | null {
+  const levels = effectiveSortLevels(config);
+  if (levels.length === 1 && levels[0].key === 'timestamp') return levels[0].direction;
+  return null;
+}
+
 const compareValues = (key: SortKey, a: Telegram, b: Telegram): number => {
   const aVal = a[key];
   const bVal = b[key];

@@ -84,4 +84,15 @@ describe('expandWithDeltaContext', () => {
     expect(unflagged.items.map(keyOf)).toEqual(['m1', 'm2']);
     expect(unflagged.contextKeys).toEqual(new Set());
   });
+
+  it('covers rows inside an anchor window when the list is not time-sorted', () => {
+    const items = [
+      item('c', '2024-01-01T10:00:05.000Z'), // far
+      item('b', '2024-01-01T10:00:00.500Z'), // +500ms of a
+      item('a', '2024-01-01T10:00:00.000Z'), // match
+    ];
+    const out = expandWithDeltaContext(items, [false, false, true], keyOf, new Set(), 0, 1000);
+    expect(out.items.map(keyOf)).toEqual(['b', 'a']);
+    expect(out.contextKeys).toEqual(new Set(['b']));
+  });
 });

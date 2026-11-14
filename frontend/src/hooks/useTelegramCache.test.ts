@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { resolveFullBufferPaging, useTelegramCache } from './useTelegramCache';
+import { TelegramBufferService } from '../services/telegram-buffer-service';
 import { gaReadPhases } from '../utils/groupValueEvents';
 import { makeTelegram } from '../test/telegramFactory';
 import { toEntry } from '../utils/telegramId';
@@ -251,21 +252,30 @@ describe('useTelegramCache', () => {
       result.current.addLive(tg(3000, 'c'));
     });
 
-    // List snapshot stays frozen. The ingested buffer keeps the live tail.
+    // Snapshot frozen, but ingestion keeps counting. The backlog array is
+    // mutated in place — a new arrival must not allocate a fresh copy.
+    // The ingested view keeps the live tail for GA read phase.
     expect(result.current.telegrams).toHaveLength(1);
     expect(result.current.ingested).toHaveLength(3);
     expect(result.current.pausedCount).toBe(2);
+    const backlog = result.current.pausedTelegrams;
+    expect(backlog.map(t => t.source_address)).toEqual(['1.2.c', '1.2.b']);
+    act(() => {
+      result.current.addLive(tg(4000, 'd'));
+    });
+    expect(result.current.pausedTelegrams).toBe(backlog);
+    expect(backlog.map(t => t.source_address)).toEqual(['1.2.d', '1.2.c', '1.2.b']);
 
     act(() => {
       result.current.addLive(makeTelegram({
-        timestamp: new Date(4000).toISOString(),
+        timestamp: new Date(5000).toISOString(),
         source_address: '1.2.read',
         target_address: '9/9/9',
         simplified_type: 'Read',
         telegram_type: 'GroupValueRead',
       }));
       result.current.addLive(makeTelegram({
-        timestamp: new Date(5000).toISOString(),
+        timestamp: new Date(6000).toISOString(),
         source_address: '1.2.rsp',
         target_address: '9/9/9',
         simplified_type: 'Response',
@@ -280,8 +290,9 @@ describe('useTelegramCache', () => {
     act(() => {
       result.current.setPaused(false);
     });
-    expect(result.current.telegrams).toHaveLength(5);
+    expect(result.current.telegrams).toHaveLength(6);
     expect(result.current.pausedCount).toBe(0);
+    expect(result.current.pausedTelegrams).toEqual([]);
   });
 
   it('revealPaused publishes the oldest n of the backlog, stays paused and keeps counting', async () => {
@@ -339,6 +350,97 @@ describe('useTelegramCache', () => {
     });
     expect(remaining).toBe(0);
     expect(result.current.telegrams).toHaveLength(7);
+  });
+
+  it('revealPaused prepends the revealed rows and does not copy the buffer snapshot', async () => {
+    const desc = Object.getOwnPropertyDescriptor(TelegramBufferService.prototype, 'snapshot')!;
+    let reads = 0;
+    Object.defineProperty(TelegramBufferService.prototype, 'snapshot', {
+      configurable: true,
+      get() {
+        reads += 1;
+        return desc.get!.call(this);
+      },
+    });
+    try {
+      const { result } = renderHook(() => useTelegramCache(1000));
+      await settle(result);
+      act(() => {
+        result.current.addLive(tg(1000, 'a'));
+      });
+      const frozen = result.current.telegrams;
+      act(() => {
+        result.current.setPaused(true);
+      });
+      act(() => {
+        result.current.addLive(tg(2000, 'b'));
+        result.current.addLive(tg(3000, 'c'));
+      });
+      reads = 0;
+      act(() => {
+        result.current.revealPaused(1);
+      });
+      expect(reads).toBe(0);
+      expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.b', '1.2.a']);
+      expect(result.current.telegrams[1]).toBe(frozen[0]);
+
+      act(() => {
+        result.current.revealPaused(1);
+      });
+      const shown = result.current.telegrams;
+      expect(shown.map(t => t.source_address)).toEqual(['1.2.c', '1.2.b', '1.2.a']);
+      act(() => {
+        result.current.setPaused(false);
+      });
+      expect(result.current.telegrams).toBe(shown);
+      expect(reads).toBe(0);
+    } finally {
+      Object.defineProperty(TelegramBufferService.prototype, 'snapshot', desc);
+    }
+  });
+
+  it('drops evicted rows when the buffer is full and a portion is revealed', async () => {
+    const { result } = renderHook(() => useTelegramCache(3));
+    await settle(result);
+    act(() => {
+      result.current.addLive(tg(1000, 'a'));
+      result.current.addLive(tg(2000, 'b'));
+      result.current.addLive(tg(3000, 'c'));
+    });
+    act(() => {
+      result.current.setPaused(true);
+    });
+    act(() => {
+      result.current.addLive(tg(4000, 'd'));
+      result.current.addLive(tg(5000, 'e'));
+      result.current.addLive(tg(6000, 'f'));
+      result.current.addLive(tg(7000, 'g'));
+    });
+    act(() => {
+      result.current.revealPaused(1);
+    });
+    expect(result.current.telegrams).toEqual([]);
+    act(() => {
+      result.current.revealPaused(10);
+    });
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.g', '1.2.f', '1.2.e']);
+  });
+
+  it('a live telegram on a full buffer prepends and drops the oldest', async () => {
+    const { result } = renderHook(() => useTelegramCache(3));
+    await settle(result);
+    act(() => {
+      result.current.addLive(tg(1000, 'a'));
+      result.current.addLive(tg(2000, 'b'));
+      result.current.addLive(tg(3000, 'c'));
+    });
+    const before = result.current.telegrams;
+    act(() => {
+      result.current.addLive(tg(4000, 'd'));
+    });
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual(['1.2.d', '1.2.c', '1.2.b']);
+    expect(result.current.telegrams[1]).toBe(before[0]);
+    expect(result.current.telegrams[2]).toBe(before[1]);
   });
 
   it('loadRange serves cache hits and fetches only the gaps', async () => {
