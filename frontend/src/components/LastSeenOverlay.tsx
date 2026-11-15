@@ -6,6 +6,7 @@ import type { FilterOptions } from '../types/filters';
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
 import type { BusPayload } from '../utils/dptValues';
+import { BusValueText } from './BusValueText';
 import { compareKnxAddress } from '../utils/knxAddress';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
@@ -35,6 +36,8 @@ interface LastSeenOverlayProps {
   onFilterDevice?: (pa: string) => void;
   onFilterGAs?: (addresses: string[]) => void;
   onVisualizeGAs?: (addresses: string[]) => void;
+  /** Jump from the send popover's last-value timestamp to the telegram list. */
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 const getTypeColor = (type?: string | null) => {
@@ -79,6 +82,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
   onFilterDevice,
   onFilterGAs,
   onVisualizeGAs,
+  onGotoTelegram,
 }) => {
   const [mode, setMode] = useState<'ga' | 'pa'>(initialMode);
   const [selectedAddresses, setSelectedAddresses] = useState<string[]>(initialAddresses);
@@ -375,6 +379,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                         dptSub={addr.sub}
                         buttonClassName="quick-send-btn"
                         buttonStyle={rowIconBtnStyle}
+                        onGotoTelegram={onGotoTelegram}
                       />
                     )}
                     {mode === 'ga' && onVisualizeGAs && (
@@ -649,6 +654,7 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                                 dptMain={t.dpt_main}
                                 dptSub={t.dpt_sub}
                                 buttonStyle={rowIconBtnStyle}
+                                onGotoTelegram={onGotoTelegram}
                               />
                             )}
                             {onVisualizeGAs && (
@@ -695,14 +701,14 @@ export const LastSeenOverlay: React.FC<LastSeenOverlayProps> = ({
                       </span>
                     </td>
                     <td style={tdStyle}>
-                      <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                        {t.value_formatted || (t.value_numeric !== null ? String(t.value_numeric) : '—')}
-                      </span>
-                      {t.unit && (
-                        <span style={{ marginLeft: '0.3rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                          {t.unit}
-                        </span>
-                      )}
+                      <BusValueText
+                        value={t}
+                        dpt={
+                          formatDpt(selectedInfo?.main, selectedInfo?.sub)
+                          || formatDpt(t.dpt_main, t.dpt_sub)
+                        }
+                        as="span"
+                      />
                     </td>
                     <td style={{ ...tdStyle, color: 'var(--text-dim)', fontSize: '0.75rem' }}>
                       {t.dpt_name || (t.dpt_main != null ? `DPT ${t.dpt_main}` : '—')}

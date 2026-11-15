@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { Telegram } from '../hooks/useWebSocket';
 import { decodeRawDpt, rawDptUnit } from '../utils/rawDpt';
+import { formatBusValueForDpt } from '../utils/dptValues';
+import { formatDpt } from '../utils/knxSend';
 
 export interface ChartSeries {
   address: string;
@@ -218,7 +220,12 @@ export function useChartData(
           const match = rows.find(r => r.ts === ts);
           real.push(!!match);
           data.push(match ? 1 : null);
-          labels.push(match ? (match.value_formatted ?? (match.value_json != null ? String(match.value_json) : null)) : null);
+          labels.push(match ? (() => {
+            const key = dptOverrides[addr] || formatDpt(match.dpt_main, match.dpt_sub);
+            const shown = formatBusValueForDpt(match, key);
+            if (!shown.text || shown.text === '—') return null;
+            return shown.unit ? `${shown.text} ${shown.unit}` : shown.text;
+          })() : null);
         }
         return { address: addr, name, data, real, labels };
       });

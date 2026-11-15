@@ -18,6 +18,7 @@ import { DptTypeTree } from './DptTypeTree';
 import { dptWidthLabel, bareDptLabel } from '../utils/dpt';
 import { SendToGaPopover } from './SendToGaPopover';
 import { nextTargetColor, setTargetColor, useTargetColors } from '../utils/targetColors';
+import type { Telegram } from '../hooks/useWebSocket';
 
 const rowActionBtnStyle: React.CSSProperties = {
   background: 'transparent', border: 'none', cursor: 'pointer',
@@ -56,6 +57,8 @@ interface FilterPanelProps {
   /** Opens the project upload flow (Settings). Enables the notice's CTA button. */
   onUploadProject?: () => void;
   writeEnabled?: boolean;
+  /** Jump from the send popover's last-value timestamp to the telegram list. */
+  onGotoTelegram?: (telegram: Telegram) => void;
   /**
    * Master enable/disable of the whole filter set (#370, #436). When `false` the
    * list shows all telegrams while `activeFilters` is preserved. Absent behaves as
@@ -230,6 +233,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   projectLoaded,
   onUploadProject,
   writeEnabled,
+  onGotoTelegram,
   filtersEnabled = true,
   onFiltersEnabledChange,
 }) => {
@@ -440,6 +444,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                         dptMain={opt?.main}
                         dptSub={opt?.sub}
                         buttonStyle={rowActionBtnStyle}
+                        onGotoTelegram={onGotoTelegram}
                       />
                     )}
                     {onQuickLastSeen && <LastSeenButton onClick={() => onQuickLastSeen(t, 'ga')} />}
@@ -573,6 +578,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               searchQuery={q}
               onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'pa') : undefined}
               writeEnabled={writeEnabled}
+              onGotoTelegram={onGotoTelegram}
             />
           </Section>
         )}
@@ -590,6 +596,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               searchQuery={q}
               onLastSeen={onQuickLastSeen ? addr => onQuickLastSeen(addr, 'ga') : undefined}
               writeEnabled={writeEnabled}
+              onGotoTelegram={onGotoTelegram}
             />
           </Section>
         )}

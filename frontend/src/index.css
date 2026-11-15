@@ -37,6 +37,43 @@
   --dpt-5: #a855f7;  /* Scaling/Percent */
   --dpt-9: #22c55e;  /* Temperature/Floats */
   --dpt-unknown: #64748b;
+
+  /* Telegram table cell tokens (--tt-*). Override later for user prefs. */
+  --tt-cell-padding: 0.75rem 1rem;
+  --tt-mono-size: 0.8125rem;
+  --tt-time-color: var(--text-main);
+  --tt-time-weight: 500;
+  --tt-time-date-size: 0.65rem;
+  --tt-time-date-color: var(--text-dim);
+  --tt-delta-size: 0.75rem;
+  --tt-delta-color: var(--text-dim);
+  --tt-addr-source-color: var(--text-dim);
+  --tt-addr-source-weight: 400;
+  --tt-addr-target-color: var(--accent-primary);
+  --tt-addr-target-weight: 500;
+  --tt-subtitle-size: 0.7rem;
+  --tt-subtitle-color: var(--text-dim);
+  --tt-subtitle-target-name-color: var(--text-main);
+  --tt-subtitle-target-name-weight: 500;
+  --tt-type-size: 0.75rem;
+  --tt-type-weight: 600;
+  --tt-direction-size: 0.65rem;
+  --tt-dpt-size: 0.75rem;
+  --tt-dpt-color: var(--text-dim);
+  --tt-dpt-dot-size: 6px;
+  --tt-value-color: var(--accent-primary);
+  --tt-value-weight: 700;
+  --tt-value-size: 0.9375rem;
+  --tt-value-line-height: 1.2;
+  --tt-value-unit-color: var(--text-dim);
+  --tt-value-unit-size: 0.7rem;
+  --tt-value-unit-weight: 500;
+  --tt-raw-bg: var(--bg-tag);
+  --tt-raw-padding: 0.1rem 0.3rem;
+  --tt-raw-radius: 3px;
+  --tt-raw-size: 0.65rem;
+  --tt-raw-color: var(--text-dim);
+  --tt-raw-border: 1px solid var(--border-subtle);
 }
 
 /* === System preference: light === */
@@ -175,8 +212,12 @@ code, pre {
   transition: border-color 0.15s ease;
 }
 
-.glass-input::placeholder {
+.glass-input::placeholder,
+.glass-input input::placeholder {
   color: var(--text-dim);
+  opacity: 0.55;
+  font-style: italic;
+  font-weight: 400;
 }
 
 .glass-input:focus {
@@ -242,6 +283,153 @@ code, pre {
   background: rgba(99, 102, 241, 0.18);
   border: 1px solid var(--accent-primary);
   box-sizing: border-box;
+}
+
+/* === Telegram table / reusable bus-value cell styles === */
+.tt-cell {
+  padding: var(--tt-cell-padding);
+  box-sizing: border-box;
+}
+
+.tt-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--tt-mono-size);
+  color: var(--tt-time-color);
+  font-weight: var(--tt-time-weight);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-time-date {
+  font-size: var(--tt-time-date-size);
+  color: var(--tt-time-date-color);
+  margin-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-delta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tt-delta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--tt-delta-size);
+  color: var(--tt-delta-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-addr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--tt-mono-size);
+}
+
+.tt-addr-source {
+  color: var(--tt-addr-source-color);
+  font-weight: var(--tt-addr-source-weight);
+}
+
+.tt-addr-target {
+  color: var(--tt-addr-target-color);
+  font-weight: var(--tt-addr-target-weight);
+}
+
+.tt-subtitle {
+  font-size: var(--tt-subtitle-size);
+  color: var(--tt-subtitle-color);
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-subtitle-target-name {
+  color: var(--tt-subtitle-target-name-color);
+  font-weight: var(--tt-subtitle-target-name-weight);
+}
+
+.tt-type {
+  font-weight: var(--tt-type-weight);
+  font-size: var(--tt-type-size);
+  text-transform: uppercase;
+}
+
+.tt-type-write { color: var(--accent-primary); }
+.tt-type-read { color: var(--warning-text); }
+.tt-type-response { color: var(--success); }
+.tt-type-other { color: var(--text-dim); }
+
+.tt-direction-in,
+.tt-direction-out {
+  font-size: var(--tt-direction-size);
+  margin-top: 0.1rem;
+}
+.tt-direction-in { color: var(--success); }
+.tt-direction-out { color: var(--warning-text); }
+
+.tt-dpt {
+  font-size: var(--tt-dpt-size);
+  color: var(--tt-dpt-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tt-dpt-dot {
+  width: var(--tt-dpt-dot-size);
+  height: var(--tt-dpt-dot-size);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tt-dpt-dot-1 { background-color: var(--dpt-1, #818cf8); }
+.tt-dpt-dot-5 { background-color: var(--dpt-5, #34d399); }
+.tt-dpt-dot-9 { background-color: var(--dpt-9, #fb923c); }
+.tt-dpt-dot-unknown { background-color: var(--dpt-unknown, #6b7280); }
+
+.tt-value-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+/* Stack decoded + hex so toggle keeps the reserved box (no surrounding shift). */
+.tt-value-toggle {
+  display: inline-grid;
+  justify-items: start;
+  align-items: center;
+  vertical-align: baseline;
+}
+.tt-value-toggle > * {
+  grid-area: 1 / 1;
+}
+
+.tt-value {
+  font-weight: var(--tt-value-weight);
+  color: var(--tt-value-color);
+  font-size: var(--tt-value-size);
+  word-break: break-all;
+  white-space: normal;
+  line-height: var(--tt-value-line-height);
+}
+
+.tt-value-unit {
+  font-size: var(--tt-value-unit-size);
+  color: var(--tt-value-unit-color);
+  font-weight: var(--tt-value-unit-weight);
+}
+
+.raw-badge {
+  background: var(--tt-raw-bg);
+  padding: var(--tt-raw-padding);
+  border-radius: var(--tt-raw-radius);
+  font-size: var(--tt-raw-size);
+  color: var(--tt-raw-color);
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace, var(--font-mono, monospace);
+  border: var(--tt-raw-border);
 }
 
 /* Scrollbar styling */
