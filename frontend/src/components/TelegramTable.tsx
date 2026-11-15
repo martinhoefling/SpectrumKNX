@@ -22,7 +22,7 @@ import { formatDpt } from '../utils/knxSend';
 import { TT, ttTypeClass, ttDirectionClass, ttDptDotClass } from '../utils/telegramCellStyles';
 import {
   isGroupRead,
-  responseIsVisible,
+  readAnsweredByNewestVisible,
   responsesFollowingReads,
   rowsIntersectingViewport,
 } from '../utils/groupValueEvents';
@@ -2171,9 +2171,9 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
 
   // ── Per-cell body content (keyed switch keeps body aligned with header order) ──
-  // Primarily time-sorted: a Read is green only when its earliest later
-  // Response intersects the scrollport. A later Response on screen does not
-  // count. Any other primary sort trusts the buffer.
+  // Primarily time-sorted: a Read is green when its earliest later Response
+  // is at or before the newest telegram in the scrollport. That Response may
+  // sit off screen. No visible row means not green. Other sorts trust the buffer.
   const viewportTelegrams = isTimeSort
     ? rowsIntersectingViewport(
       telegramRows,
@@ -2326,7 +2326,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           ? responseByRead.get(`${t.timestamp}|${t.target_address}`)
           : undefined;
         const answered = Boolean(
-          followed && (!isTimeSort || responseIsVisible(followed, viewportTelegrams)),
+          followed && (!isTimeSort || readAnsweredByNewestVisible(followed, viewportTelegrams)),
         );
         return (
           <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>

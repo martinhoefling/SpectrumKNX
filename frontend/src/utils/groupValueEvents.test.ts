@@ -8,7 +8,8 @@ import {
   isReadKind,
   matchingResponse,
   mergeGaReadPhase,
-  responseIsVisible,
+  newestVisibleTimestamp,
+  readAnsweredByNewestVisible,
   readEventAnswered,
   responsesFollowingReads,
   rowsIntersectingViewport,
@@ -130,30 +131,38 @@ test('a later Read reopens an answered GA until the next Response', () => {
   expect(mergeGaReadPhase('none', 'request')).toBe('request');
 });
 
-test('a time-sorted Read is answered only when the earliest Response is in the viewport', () => {
-  const earliest = row('2026-01-01T10:00:02Z', 'Response');
-  const later = row('2026-01-01T10:00:05Z', 'Response');
+test('a time-sorted Read is answered from the newest visible timestamp', () => {
   const read = row('2026-01-01T10:00:00Z', 'Read');
-  const rows = [later, earliest, read];
+  const earliest = row('2026-01-01T10:00:02Z', 'Response');
+  const newer = row('2026-01-01T10:00:05Z', 'Write');
+  const rows = [newer, earliest, read];
   const spans = [
     { index: 0, start: 0, end: 85 },
     { index: 1, start: 85, end: 170 },
     { index: 2, start: 170, end: 255 },
   ];
-  const jumpTarget = matchingResponse(read, rows);
-  expect(jumpTarget).toBe(earliest);
+  expect(matchingResponse(read, rows)).toBe(earliest);
 
-  const onlyLater = rowsIntersectingViewport(rows, spans, 0, 80);
-  expect(onlyLater).toEqual([later]);
-  expect(responseIsVisible(earliest, onlyLater)).toBe(false);
-  expect(responseIsVisible(later, onlyLater)).toBe(true);
+  // Response scrolled out above the scrollport: newest visible is older than it.
+  const onlyRead = rowsIntersectingViewport(rows, spans, 180, 70);
+  expect(onlyRead).toEqual([read]);
+  expect(newestVisibleTimestamp(onlyRead)).toBe(Date.parse(read.timestamp));
+  expect(readAnsweredByNewestVisible(earliest, onlyRead)).toBe(false);
 
-  const withEarliest = rowsIntersectingViewport(rows, spans, 90, 80);
-  expect(withEarliest).toEqual([earliest]);
-  expect(responseIsVisible(earliest, withEarliest)).toBe(true);
+  // Response is older than the newest visible telegram and is not itself on screen.
+  const onlyNewer = rowsIntersectingViewport(rows, spans, 0, 80);
+  expect(onlyNewer).toEqual([newer]);
+  expect(readAnsweredByNewestVisible(earliest, onlyNewer)).toBe(true);
 
-  // Unmeasured spans and overscan outside the scrollport do not count.
+  // Response is the newest visible telegram.
+  const responseOnScreen = rowsIntersectingViewport(rows, spans, 90, 80);
+  expect(responseOnScreen).toEqual([earliest]);
+  expect(readAnsweredByNewestVisible(earliest, responseOnScreen)).toBe(true);
+
+  // Empty or unmeasured viewport: not answered.
+  expect(newestVisibleTimestamp([])).toBeNull();
+  expect(readAnsweredByNewestVisible(earliest, [])).toBe(false);
   expect(rowsIntersectingViewport(rows, [{ index: 0, start: 0, end: 0 }], 0, 80)).toEqual([]);
-  expect(rowsIntersectingViewport(rows, spans, 400, 80)).toEqual([]);
-  expect(rowsIntersectingViewport(rows, spans, 0, 0)).toEqual([]);
+  expect(readAnsweredByNewestVisible(earliest, rowsIntersectingViewport(rows, spans, 0, 0))).toBe(false);
+  expect(readAnsweredByNewestVisible({ timestamp: 'not-a-time' }, onlyNewer)).toBe(false);
 });

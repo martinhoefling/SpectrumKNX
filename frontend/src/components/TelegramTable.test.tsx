@@ -220,40 +220,41 @@ test('a visible READ follows a response that is only in the read-phase source', 
   expect(screen.queryByRole('button', { name: 'Go to response' })).not.toBeInTheDocument();
 });
 
-test('a later Response on screen does not turn the Read green while the earliest is off screen', () => {
+test('a time-sorted Read turns green from the newest visible timestamp', () => {
   const read = makeTelegram({
     timestamp: '2026-01-01T10:00:00.000Z',
     simplified_type: 'Read',
     telegram_type: 'GroupValueRead',
     target_address: '1/2/3',
+    source_address: '1.1.1',
     raw_hex: '0x00',
   });
-  const earliest = makeTelegram({
+  const response = makeTelegram({
     timestamp: '2026-01-01T10:00:01.000Z',
     simplified_type: 'Response',
     telegram_type: 'GroupValueResponse',
     target_address: '1/2/3',
+    source_address: '1.1.2',
     raw_hex: '0x01',
     value_formatted: 'On',
   });
-  const later = makeTelegram({
+  const newer = makeTelegram({
     timestamp: '2026-01-01T10:00:02.000Z',
-    simplified_type: 'Response',
-    telegram_type: 'GroupValueResponse',
-    target_address: '1/2/3',
+    simplified_type: 'Write',
+    telegram_type: 'GroupValueWrite',
+    target_address: '9/9/9',
+    source_address: '1.1.3',
     raw_hex: '0x02',
     value_formatted: 'Off',
   });
   const previous = scrollBlockSize;
-  // Live edge sits in the fill rubber (scrollTop ~43). A short scrollport
-  // shows the newest Response and leaves the earlier one below it. Overscan
-  // still draws the Read.
+  // Live edge sits in the fill rubber (scrollTop ~43). Height 80 shows one row.
   scrollBlockSize = 80;
-  try {
+  const show = (telegrams: Telegram[]) => {
     const onGotoTelegram = vi.fn();
-    const { container } = render(
+    const view = render(
       <TelegramTable
-        telegrams={[later, earliest, read]}
+        telegrams={telegrams}
         visibleColumns={visibleColumns}
         sortConfig={sortConfig}
         onSort={vi.fn()}
@@ -263,10 +264,38 @@ test('a later Response on screen does not turn the Read green while the earliest
         onGotoTelegram={onGotoTelegram}
       />,
     );
-    expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
-    expect(container.querySelector('.tt-type-read')).toBeInTheDocument();
+    return { ...view, onGotoTelegram };
+  };
+  try {
+    // Response is the newest visible telegram. The Read is below the fold.
+    const equal = show([response, read]);
+    expect(equal.container.querySelector('.tt-type-read-answered')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Go to response' }));
-    expect(onGotoTelegram).toHaveBeenCalledWith(earliest);
+    expect(equal.onGotoTelegram).toHaveBeenCalledWith(response);
+    equal.unmount();
+
+    // Response is older than the newest visible row and is not itself on screen.
+    const below = show([newer, response, read]);
+    expect(below.container.querySelector('.tt-type-read-answered')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Go to response' }));
+    expect(below.onGotoTelegram).toHaveBeenCalledWith(response);
+    below.unmount();
+
+    // Response is scrolled out above: newest visible is an older Write.
+    const aboveResponse = makeTelegram({
+      ...response,
+      timestamp: '2026-01-01T10:00:05.000Z',
+      raw_hex: '0x05',
+    });
+    const above = show([aboveResponse, newer, read]);
+    const port = above.container.querySelector('.custom-scrollbar') as HTMLElement;
+    port.scrollTop = 128;
+    fireEvent.scroll(port);
+    expect(above.container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
+    expect(above.container.querySelector('.tt-type-read')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Go to response' }));
+    expect(above.onGotoTelegram).toHaveBeenCalledWith(aboveResponse);
+    above.unmount();
   } finally {
     scrollBlockSize = previous;
   }

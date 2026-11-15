@@ -5,12 +5,16 @@
  * - Send panel and popover: each incoming telegram is classified as it arrives.
  *   The GA phase is recomputed from every telegram seen so far (the live buffer,
  *   including the pause backlog).
- * - Telegram table: a Read was followed by a Response when one exists in that
- *   buffer. The jump always targets the earliest such Response. Whether the
- *   Read is *painted* answered depends on the sort: not primarily time-sorted
- *   → the buffer is enough; primarily time-sorted → that earliest Response
- *   must itself sit in the current viewport. A later Response on screen does
- *   not paint the Read answered.
+ * - Telegram table: the jump always targets the earliest later Response on the
+ *   same GA. Whether the Read is *painted* answered depends on the sort.
+ *   Not primarily time-sorted → that Response being in the buffer is enough.
+ *   Primarily time-sorted → compare its timestamp to the newest telegram
+ *   whose row intersects the scrollport. The Read is answered when the
+ *   earliest Response is that newest visible telegram, or is earlier than it
+ *   (`responseMs <= newestVisibleMs`). The Response does not have to be
+ *   visible itself. A newer Response sitting above the scrollport does not
+ *   answer the Read. No intersecting row (empty list, unmeasured spans, or a
+ *   non-positive viewport height) means not answered.
  */
 
 export type BusEventKind = 'read' | 'response' | 'write' | 'other';
@@ -163,29 +167,37 @@ export function answeredReadIds(rows: readonly GroupValueTelegram[]): Set<string
   return new Set(responsesFollowingReads(rows).keys());
 }
 
-type TelegramIdentity = GroupValueTelegram & {
-  source_address?: string;
-  raw_hex?: string | null;
-};
-
-/** Same bus telegram across a buffer row and a viewport copy of it. */
-export function sameBusTelegram(a: TelegramIdentity, b: TelegramIdentity): boolean {
-  return a.timestamp === b.timestamp
-    && a.target_address === b.target_address
-    && (a.source_address ?? '') === (b.source_address ?? '')
-    && (a.raw_hex ?? '') === (b.raw_hex ?? '');
+/**
+ * Latest instant among rows that intersect the scrollport.
+ * Null when none do, or none of them have a parseable timestamp: an empty or
+ * unmeasured viewport. A time-sorted Read is not answered in that case.
+ * Instants are `Date.parse` milliseconds, not raw timestamp strings.
+ */
+export function newestVisibleTimestamp(rows: readonly { timestamp: string }[]): number | null {
+  let newest = -Infinity;
+  for (const row of rows) {
+    const ms = Date.parse(row.timestamp);
+    if (!Number.isFinite(ms)) continue;
+    if (ms > newest) newest = ms;
+  }
+  return newest === -Infinity ? null : newest;
 }
 
 /**
- * True when this Response is one of `visibleRows`.
- * Time-sorted tables pass the earliest matching Response: a later Response
- * that happens to be on screen does not count.
+ * Time-sorted answer test. True when `earliestResponse` is at or before the
+ * newest telegram in `visibleRows`. The Response may be off screen. False
+ * when it is newer than everything visible, when it is missing, or when the
+ * viewport has no usable rows.
  */
-export function responseIsVisible<T extends TelegramIdentity>(
-  response: T,
-  visibleRows: readonly T[],
+export function readAnsweredByNewestVisible(
+  earliestResponse: { timestamp: string } | null | undefined,
+  visibleRows: readonly { timestamp: string }[],
 ): boolean {
-  return visibleRows.some(row => sameBusTelegram(response, row));
+  if (!earliestResponse) return false;
+  const newest = newestVisibleTimestamp(visibleRows);
+  if (newest == null) return false;
+  const responseMs = Date.parse(earliestResponse.timestamp);
+  return Number.isFinite(responseMs) && responseMs <= newest;
 }
 
 export interface ViewportSpan {
