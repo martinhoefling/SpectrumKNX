@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { GaValuesTable, type GaTableEntry } from './GaValuesTable';
 import { GaNameWidthContext } from '../utils/gaNameWidth';
 import type { Telegram } from '../hooks/useWebSocket';
+import { cssValue } from '../test/cssValue';
 
 const ENTRIES: GaTableEntry[] = [
   { address: '1/2/3', name: 'Kitchen Light', sending: true },
@@ -131,7 +132,7 @@ test('highlights the hovered row and restores the sending tint on leave', async 
   fireEvent.mouseEnter(otherRow);
   expect(otherRow.style.background).toBe('var(--bg-hover)');
   fireEvent.mouseLeave(otherRow);
-  expect(otherRow.style.background).toBe('transparent');
+  expect(otherRow.style.background).toBe(cssValue('background', 'transparent'));
 });
 
 test('visualizes a single GA row (#307)', async () => {
