@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { GaValuesTable, type GaTableEntry } from './GaValuesTable';
 import { GaNameWidthContext } from '../utils/gaNameWidth';
 import type { Telegram } from '../hooks/useWebSocket';
+import { cssValue } from '../test/cssValue';
 
 const ENTRIES: GaTableEntry[] = [
   { address: '1/2/3', name: 'Kitchen Light', sending: true },
@@ -11,11 +12,12 @@ const ENTRIES: GaTableEntry[] = [
 
 function telegram(target: string, value: string): Telegram {
   return {
-    timestamp: new Date().toISOString(),
+    timestamp: '2026-07-17T09:00:00.123Z',
     source_address: '1.1.9',
     source_name: 'Push Button',
     target_address: target,
     telegram_type: 'GroupValueWrite',
+    simplified_type: 'Write',
     dpt: '1.001',
     dpt_main: 1,
     dpt_sub: 1,
@@ -43,6 +45,13 @@ test('fetches last values for its addresses and leaves never-seen GAs blank', as
   render(<GaValuesTable entries={ENTRIES} depth={0} latestTelegram={null} onFilterGAs={() => {}} onLastSeen={() => {}} onVisualizeGAs={() => {}} />);
 
   await waitFor(() => expect(screen.getByText('On')).toBeInTheDocument());
+  const seenRow = screen.getByText('Kitchen Light').closest('tr')!;
+  const seenCells = within(seenRow).getAllByRole('cell');
+  // Shared TelegramWhenJump format (seconds, no fractional) + event type.
+  expect(seenCells[3].textContent).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+  expect(seenCells[3]).toHaveTextContent('Write');
+  expect(screen.queryByRole('button', { name: 'Go to telegram' })).not.toBeInTheDocument();
+
   const neverSeenRow = screen.getByText('Kitchen Status').closest('tr')!;
   const cells = within(neverSeenRow).getAllByRole('cell');
   expect(cells[3]).toHaveTextContent(''); // TIME
@@ -123,7 +132,7 @@ test('highlights the hovered row and restores the sending tint on leave', async 
   fireEvent.mouseEnter(otherRow);
   expect(otherRow.style.background).toBe('var(--bg-hover)');
   fireEvent.mouseLeave(otherRow);
-  expect(otherRow.style.background).toBe('transparent');
+  expect(otherRow.style.background).toBe(cssValue('background', 'transparent'));
 });
 
 test('visualizes a single GA row (#307)', async () => {

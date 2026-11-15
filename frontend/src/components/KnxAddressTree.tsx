@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { SendToGaPopover } from './SendToGaPopover';
 import type { FilterOption } from '../types/filters';
+import type { Telegram } from '../hooks/useWebSocket';
 
 interface KnxAddressTreeProps {
   entries: FilterOption[];
@@ -15,6 +16,7 @@ interface KnxAddressTreeProps {
   searchQuery: string;
   onLastSeen?: (address: string) => void;
   writeEnabled?: boolean;
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 type CheckState = 'checked' | 'partial' | 'unchecked';
@@ -64,10 +66,11 @@ interface LeafRowProps {
   onLastSeen?: () => void;
   isGA?: boolean;
   writeEnabled?: boolean;
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 const LeafRow: React.FC<LeafRowProps> = ({
-  address, name, dptMain, dptSub, checked, count, onToggle, onLastSeen, isGA, writeEnabled,
+  address, name, dptMain, dptSub, checked, count, onToggle, onLastSeen, isGA, writeEnabled, onGotoTelegram,
 }) => {
   const [hovered, setHovered] = useState(false);
   return (
@@ -117,6 +120,7 @@ const LeafRow: React.FC<LeafRowProps> = ({
               color: 'var(--text-dim)', padding: '0.15rem', borderRadius: '3px',
               display: 'flex', alignItems: 'center',
             }}
+            onGotoTelegram={onGotoTelegram}
           />
         </div>
       )}
@@ -200,7 +204,7 @@ const GroupNode: React.FC<GroupNodeProps> = ({ label, sublabel, leafAddresses, s
 };
 
 export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
-  entries, selected, groupNames, separator, onToggle, counts, searchQuery, onLastSeen, writeEnabled,
+  entries, selected, groupNames, separator, onToggle, counts, searchQuery, onLastSeen, writeEnabled, onGotoTelegram,
 }) => {
   const q = searchQuery.toLowerCase();
 
@@ -262,7 +266,7 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
                   count={counts?.[e.address!]}
                   onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
                   onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
-                  isGA={separator === '/'} writeEnabled={writeEnabled}
+                  isGA={separator === '/'} writeEnabled={writeEnabled} onGotoTelegram={onGotoTelegram}
                 />
               ))}
             </GroupNode>
@@ -313,7 +317,7 @@ export const KnxAddressTree: React.FC<KnxAddressTreeProps> = ({
                       count={counts?.[e.address!]}
                       onToggle={() => onToggle(selected.includes(e.address!) ? selected.filter(a => a !== e.address) : [...selected, e.address!])}
                       onLastSeen={onLastSeen ? () => onLastSeen(e.address!) : undefined}
-                      isGA={separator === '/'} writeEnabled={writeEnabled}
+                      isGA={separator === '/'} writeEnabled={writeEnabled} onGotoTelegram={onGotoTelegram}
                     />
                   ))}
                 </GroupNode>

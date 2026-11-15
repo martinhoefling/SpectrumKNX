@@ -13,7 +13,7 @@ export type BusPayload =
   | { control: string; step_code: number };
 
 export interface DiscreteChoice {
-  /** Button / option text, title case. */
+  /** Button / option text, lowercase like the telegram list. */
   label: string;
   payload: BusPayload;
 }
@@ -70,8 +70,9 @@ const DPT3: Record<number, [string, string]> = {
   8: ['up', 'down'],
 };
 
-function titleValue(name: string): string {
-  return name.replace(/_/g, ' ').replace(/(^|\s)\w/g, letter => letter.toUpperCase());
+/** Underscores → spaces; keep lowercase for list/button parity with the backend. */
+function displayName(name: string): string {
+  return name.replace(/_/g, ' ').toLowerCase();
 }
 
 function parseDptKey(dptKey: string): { main: number; sub?: number } | null {
@@ -101,8 +102,8 @@ export function discreteDptValues(dptKey?: string | null): DiscreteChoice[] | nu
     const pair = DPT1[parsed.sub];
     if (!pair) return null;
     return [
-      { label: titleValue(pair[0]), payload: false },
-      { label: titleValue(pair[1]), payload: true },
+      { label: displayName(pair[0]), payload: false },
+      { label: displayName(pair[1]), payload: true },
     ];
   }
 
@@ -111,7 +112,7 @@ export function discreteDptValues(dptKey?: string | null): DiscreteChoice[] | nu
     if (!pair) return null;
     return [false, true].flatMap(control =>
       pair.map(name => ({
-        label: control ? `${titleValue(name)} (control)` : titleValue(name),
+        label: control ? `${displayName(name)} (control)` : displayName(name),
         payload: { control, value: name },
       })),
     );
@@ -122,7 +123,7 @@ export function discreteDptValues(dptKey?: string | null): DiscreteChoice[] | nu
     if (!pair) return null;
     return pair.flatMap(name =>
       Array.from({ length: 8 }, (_, step) => ({
-        label: `${titleValue(name)} ${step}`,
+        label: `${displayName(name)} ${step}`,
         payload: { control: name, step_code: step },
       })),
     );
@@ -135,8 +136,116 @@ export function discreteDptValues(dptKey?: string | null): DiscreteChoice[] | nu
 export function describeBusPayload(payload: BusPayload, dptKey?: string | null): string {
   const choices = discreteDptValues(dptKey);
   const hit = choices?.find(choice => samePayload(choice.payload, payload));
-  if (hit) return hit.label.toLowerCase();
+  if (hit) return hit.label;
   if (typeof payload === 'boolean') return payload ? 'on' : 'off';
   if (typeof payload === 'object') return JSON.stringify(payload);
   return String(payload);
+}
+
+export interface BusValueView {
+  value_formatted?: string | null;
+  value_numeric?: number | null;
+  value_json?: Record<string, unknown> | null;
+  raw_hex?: string | null;
+  unit?: string | null;
+}
+
+/** Map a bus/telegram value onto the same words the send buttons use for this DPT. */
+function coerceBit(value: BusValueView): boolean | null {
+  if (value.value_numeric === 0 || value.value_numeric === 1) return value.value_numeric === 1;
+  const raw = (value.value_formatted ?? '').trim().toLowerCase().replace(/_/g, ' ');
+  if (!raw) return null;
+  if (raw === '0' || raw === 'false' || raw === 'off') return false;
+  if (raw === '1' || raw === 'true' || raw === 'on') return true;
+  return null;
+}
+
+function rawNibble(value: BusValueView): number | null {
+  if (typeof value.value_numeric === 'number' && Number.isFinite(value.value_numeric)) {
+    return Math.trunc(value.value_numeric) & 0xff;
+  }
+  const hex = (value.raw_hex ?? '').trim().toLowerCase().replace(/^0x/, '');
+  if (/^[0-9a-f]+$/.test(hex)) {
+    const n = Number.parseInt(hex, 16);
+    return Number.isFinite(n) ? (n & 0xff) : null;
+  }
+  const formatted = (value.value_formatted ?? '').trim();
+  if (/^\d+$/.test(formatted)) return Number.parseInt(formatted, 10) & 0xff;
+  return null;
+}
+
+function payloadFromJson(json: Record<string, unknown> | null | undefined): BusPayload | null {
+  if (!json || typeof json !== 'object') return null;
+  if ('step_code' in json && 'control' in json) {
+    return { control: String(json.control), step_code: Number(json.step_code) };
+  }
+  if ('value' in json && 'control' in json && typeof json.control === 'boolean') {
+    return { control: json.control, value: String(json.value) };
+  }
+  return null;
+}
+
+/**
+ * Display text (+ optional unit) for a last-seen / bus value under an effective DPT.
+ * Discrete ≤4-bit DPTs use the same lowercase words as the send buttons; other
+ * DPTs keep value_formatted / numeric / hex and the telegram unit.
+ */
+export function formatBusValueForDpt(
+  value: BusValueView,
+  dptKey?: string | null,
+): { text: string; unit: string } {
+  const choices = discreteDptValues(dptKey);
+  const formatted = (value.value_formatted ?? '').trim();
+  const formattedKey = formatted.toLowerCase().replace(/_/g, ' ');
+  const parsed = dptKey ? parseDptKey(dptKey) : null;
+
+  if (choices && choices.length > 0) {
+    const fromJson = payloadFromJson(value.value_json ?? undefined);
+    if (fromJson) {
+      const hit = choices.find(c => samePayload(c.payload, fromJson));
+      if (hit) return { text: hit.label, unit: '' };
+    }
+
+    const byLabel = choices.find(c => c.label === formattedKey);
+    if (byLabel) return { text: byLabel.label, unit: '' };
+
+    if (parsed?.main === 1 && choices.length === 2) {
+      const bit = coerceBit(value);
+      if (bit != null) return { text: choices[bit ? 1 : 0].label, unit: '' };
+    }
+
+    if (parsed?.main === 2 && parsed.sub != null) {
+      const pair = DPT2[parsed.sub];
+      const n = rawNibble(value);
+      if (pair && n != null) {
+        const valueBit = (n & 1) !== 0;
+        const control = (n & 2) !== 0;
+        const name = pair[valueBit ? 1 : 0];
+        const label = control ? `${displayName(name)} (control)` : displayName(name);
+        return { text: label, unit: '' };
+      }
+    }
+
+    if (parsed?.main === 3 && parsed.sub != null) {
+      const pair = DPT3[parsed.sub];
+      const n = rawNibble(value);
+      if (pair && n != null) {
+        const step = n & 7;
+        const dir = pair[(n & 8) !== 0 ? 1 : 0];
+        return { text: `${displayName(dir)} ${step}`, unit: '' };
+      }
+    }
+  }
+
+  if (parsed?.main === 1 && parsed.sub == null) {
+    const bit = coerceBit(value);
+    if (bit != null) return { text: bit ? 'on' : 'off', unit: '' };
+  }
+
+  const text = formatted
+    || (value.value_numeric != null ? String(value.value_numeric) : '')
+    || value.raw_hex
+    || '—';
+  const unit = text === '—' ? '' : (value.unit ?? '').trim();
+  return { text, unit };
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useTelegramCache } from './useTelegramCache';
+import { resolveFullBufferPaging, useTelegramCache } from './useTelegramCache';
 import { makeTelegram } from '../test/telegramFactory';
 import { toEntry } from '../utils/telegramId';
 import { COVERAGE_STORAGE_KEY } from '../services/telegram-coverage-service';
@@ -80,6 +80,46 @@ afterEach(() => {
 const settle = async (result: { current: { isLoading: boolean } }) => {
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 };
+
+describe('resolveFullBufferPaging (#313)', () => {
+  it('continues when the buffer is not full', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: false, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+    expect(resolveFullBufferPaging({
+      forward: true, bufferFull: false, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+  });
+
+  it('continues when oldestTs is unknown', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: true, cursor: 100, oldestTs: null,
+    })).toEqual({ action: 'continue' });
+  });
+
+  it('continues once the cursor is inside or above the buffer window', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: true, cursor: 500, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+    expect(resolveFullBufferPaging({
+      forward: true, bufferFull: true, cursor: 900, oldestTs: 500,
+    })).toEqual({ action: 'continue' });
+  });
+
+  it('breaks backward when the cursor is below oldestTs', () => {
+    expect(resolveFullBufferPaging({
+      forward: false, bufferFull: true, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'break' });
+  });
+
+  it('skips forward ahead to oldestTs when the cursor is below it', () => {
+    // Mirror of #313 for forward: discardable [cursor, oldestTs) stays
+    // uncovered; paging resumes at the kept window. Do not break above newestTs.
+    expect(resolveFullBufferPaging({
+      forward: true, bufferFull: true, cursor: 100, oldestTs: 500,
+    })).toEqual({ action: 'skip', cursor: 500 });
+  });
+});
 
 describe('useTelegramCache', () => {
   it('starts empty and fetches nothing without prior coverage or cache', async () => {
@@ -328,6 +368,36 @@ describe('useTelegramCache', () => {
     const chunk2 = fetchCalls.filter(u => u.includes('/api/telegrams')).at(-1)!;
     const chunk2Params = new URLSearchParams(chunk2.split('?')[1]);
     expect(Date.parse(chunk2Params.get('end_time')!)).toBe(4000);
+    expect(chunk2Params.get('order')).toBe('desc');
+  });
+
+  it('loads a gap forward in oldest-first chunks with order=asc', async () => {
+    localStorage.setItem(COVERAGE_STORAGE_KEY, JSON.stringify([[6001, 6001]]));
+    telegramResponses.push({ telegrams: [] }); // startup gap
+    // Ascending chunks: oldest first within each page.
+    telegramResponses.push({ telegrams: [tg(2000, 'd'), tg(3000, 'c')], limitReached: true });
+    telegramResponses.push({ telegrams: [tg(4000, 'b'), tg(5000, 'a')] });
+
+    const { result } = renderHook(() => useTelegramCache(1000));
+    await settle(result);
+
+    const before = fetchCalls.filter(u => u.includes('/api/telegrams')).length;
+    await act(async () => {
+      await result.current.loadRange(0, 6000, 'forward');
+    });
+    const loadUrls = fetchCalls.filter(u => u.includes('/api/telegrams')).slice(before);
+
+    expect(loadUrls).toHaveLength(2);
+    expect(result.current.telegrams.map(t => t.source_address)).toEqual([
+      '1.2.a', '1.2.b', '1.2.c', '1.2.d',
+    ]);
+    const chunk1Params = new URLSearchParams(loadUrls[0].split('?')[1]);
+    expect(chunk1Params.get('order')).toBe('asc');
+    expect(Date.parse(chunk1Params.get('start_time')!)).toBe(0);
+    // Second chunk continues from the newest ts of chunk 1.
+    const chunk2Params = new URLSearchParams(loadUrls[1].split('?')[1]);
+    expect(chunk2Params.get('order')).toBe('asc');
+    expect(Date.parse(chunk2Params.get('start_time')!)).toBe(3000);
   });
 
   it('stops at the load budget and leaves the older remainder uncovered (#284)', async () => {
@@ -348,6 +418,24 @@ describe('useTelegramCache', () => {
     // [0, 8999] must remain a gap; coverage starts at the oldest returned row.
     expect(saved.some(([s]) => s === 9000)).toBe(true);
     expect(saved.some(([s]) => s === 0)).toBe(false);
+  });
+
+  it('forward budget leaves the newer remainder uncovered', async () => {
+    localStorage.setItem(COVERAGE_STORAGE_KEY, JSON.stringify([[10_000, 10_000]]));
+    telegramResponses.push({ telegrams: [] }); // startup gap fill
+
+    const { result } = renderHook(() => useTelegramCache(1));
+    await settle(result);
+
+    telegramResponses.push({ telegrams: [tg(1000, 'partial')], limitReached: true });
+    await act(async () => {
+      await result.current.loadRange(0, 10_000, 'forward');
+    });
+
+    const saved = JSON.parse(localStorage.getItem(COVERAGE_STORAGE_KEY)!) as [number, number][];
+    // Covered through the returned row; the newer side of the gap stays open.
+    expect(saved.some(([s, e]) => s <= 1000 && 1000 <= e)).toBe(true);
+    expect(saved.some(([s, e]) => s <= 0 && e >= 10_000)).toBe(false);
   });
 
   it('loadRange pages through the full range even when the buffer is full (#317)', async () => {

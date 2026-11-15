@@ -31,6 +31,34 @@ const INITIAL_LOAD_LIMIT = 5000;
  */
 const HISTORY_CHUNK_SIZE = 2000;
 
+/** Gap / loadRange paging direction. Default remains backward (newest-first). */
+export type FillDirection = 'backward' | 'forward';
+
+/**
+ * Full-buffer early-break decision for gap paging (#313).
+ * Overflow always evicts the oldest rows, so:
+ * - backward below `oldestTs` → stop (discardable)
+ * - forward below `oldestTs` → skip ahead to `oldestTs` (leave the older
+ *   remainder uncovered; rows above the window are kept)
+ * - forward above `newestTs` → keep paging (those rows stick)
+ */
+export type FullBufferPagingAction =
+  | { action: 'continue' }
+  | { action: 'break' }
+  | { action: 'skip'; cursor: number };
+
+export function resolveFullBufferPaging(opts: {
+  forward: boolean;
+  bufferFull: boolean;
+  cursor: number;
+  oldestTs: number | null;
+}): FullBufferPagingAction {
+  if (!opts.bufferFull || opts.oldestTs === null) return { action: 'continue' };
+  if (opts.cursor >= opts.oldestTs) return { action: 'continue' };
+  if (opts.forward) return { action: 'skip', cursor: opts.oldestTs };
+  return { action: 'break' };
+}
+
 export interface TelegramCache {
   /** Current buffer contents, newest first. Frozen while paused. */
   telegrams: Telegram[];
@@ -49,8 +77,11 @@ export interface TelegramCache {
    * paused or `n <= 0`.
    */
   revealPaused: (n: number) => number;
-  /** Load a time range: cache hits appear immediately, gaps fetch in background. */
-  loadRange: (startMs: number, endMs: number) => Promise<void>;
+  /**
+   * Load a time range: cache hits appear immediately, gaps fetch in background.
+   * `direction` selects paging order (default backward = newest-first).
+   */
+  loadRange: (startMs: number, endMs: number, direction?: FillDirection) => Promise<void>;
   /** True while any backend history fetch is in flight (#222). */
   isLoading: boolean;
   /** Last background load failure, cleared by the next successful load. */
@@ -64,12 +95,21 @@ interface FetchResult {
   limitReached: boolean;
 }
 
-/** Fetches a time range from the backend, newest first, unfiltered. */
-async function fetchRange(startMs: number, endMs: number, limit: number): Promise<FetchResult> {
+/**
+ * Fetches a time range from the backend, unfiltered.
+ * backward → newest first (`order=desc`); forward → oldest first (`order=asc`).
+ */
+async function fetchRange(
+  startMs: number,
+  endMs: number,
+  limit: number,
+  direction: FillDirection = 'backward',
+): Promise<FetchResult> {
   const params = new URLSearchParams({
     limit: String(limit),
     start_time: new Date(startMs).toISOString(),
     end_time: new Date(endMs).toISOString(),
+    order: direction === 'forward' ? 'asc' : 'desc',
   });
   const res = await fetch(apiUrl(`/api/telegrams?${params}`));
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -168,42 +208,61 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   }, []);
 
   /**
-   * Progressively fills one uncovered sub-range, newest-first, publishing after
-   * every chunk so the UI builds as data streams in (#284). Pages backward in
-   * `HISTORY_CHUNK_SIZE` requests until the gap is exhausted or `budget` rows
-   * have been fetched; a budget cut-off leaves the older remainder uncovered for
-   * a later load. Returns how many telegrams were fetched (for cross-gap budgeting).
+   * Progressively fills one uncovered sub-range, publishing after every chunk
+   * so the UI builds as data streams in (#284). Pages in `HISTORY_CHUNK_SIZE`
+   * requests until the gap is exhausted or `budget` rows have been fetched.
+   *
+   * - `backward` (default): newest-first; budget cut-off leaves the older remainder
+   * - `forward`: oldest-first; budget cut-off leaves the newer remainder
    *
    * When `skipBufferFullBreak` is true (user-initiated loads), the full-buffer
    * early break (#313) is disabled so the entire requested range is fetched and
-   * persisted to IDB, even if the in-memory buffer evicts older entries (#317).
+   * persisted to IDB, even if the in-memory buffer evicts entries (#317).
    */
   const fetchGapProgressive = useCallback(
-    async (gapStart: number, gapEnd: number, budget: number, skipBufferFullBreak = false): Promise<number> => {
+    async (
+      gapStart: number,
+      gapEnd: number,
+      budget: number,
+      skipBufferFullBreak = false,
+      direction: FillDirection = 'backward',
+    ): Promise<number> => {
       const gen = loadGenerationRef.current;
-      let cursor = gapEnd;
+      const forward = direction === 'forward';
+      let cursor = forward ? gapStart : gapEnd;
       let fetched = 0;
-      while (cursor >= gapStart && fetched < budget) {
-        // Once the buffer is full, anything older than its oldest entry is
-        // evicted the instant it arrives. Stop paging backward instead of
-        // fetching chunks only to discard them (#313). The skipped remainder
-        // stays uncovered so it loads on demand once there is room.
-        // User-initiated loads bypass this to fill the full range (#317).
+      while ((forward ? cursor <= gapEnd : cursor >= gapStart) && fetched < budget) {
+        // Once the buffer is full, overflow drops the oldest rows. Backward
+        // paging below oldestTs would only fetch discardable chunks — stop.
+        // Forward paging below oldestTs skips ahead (leave that remainder
+        // uncovered); paging above newestTs is kept, so it continues (#313).
+        // User-initiated loads bypass this (#317).
         if (!skipBufferFullBreak) {
           const buf = bufferRef.current!;
-          if (buf.length >= maxSize && buf.oldestTs !== null && cursor < buf.oldestTs) {
-            break;
+          const decision = resolveFullBufferPaging({
+            forward,
+            bufferFull: buf.length >= maxSize,
+            cursor,
+            oldestTs: buf.oldestTs,
+          });
+          if (decision.action === 'break') break;
+          if (decision.action === 'skip') {
+            cursor = decision.cursor;
+            continue;
           }
         }
         const limit = Math.min(HISTORY_CHUNK_SIZE, budget - fetched);
-        const { entries, limitReached } = await fetchRange(gapStart, cursor, limit);
+        const windowStart = forward ? cursor : gapStart;
+        const windowEnd = forward ? gapEnd : cursor;
+        const { entries, limitReached } = await fetchRange(windowStart, windowEnd, limit, direction);
         // A buffer clear during the fetch invalidates this load: drop the chunk
         // and stop paging, so a late arrival can't repopulate the cleared buffer
         // and leave a gap between it and newer telegrams (#339).
         if (loadGenerationRef.current !== gen) return fetched;
         if (entries.length === 0) {
           // Nothing left in this window — the rest is covered-but-empty.
-          coverageRef.current!.addCovered(gapStart, cursor);
+          if (forward) coverageRef.current!.addCovered(cursor, gapEnd);
+          else coverageRef.current!.addCovered(gapStart, cursor);
           break;
         }
         if (mergeIntoBuffer(entries)) publish();
@@ -216,17 +275,28 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
           () => { pendingStoreCountRef.current--; return false; },
         );
         fetched += entries.length;
-        const oldestTs = entries[entries.length - 1].ts;
-        if (stored) coverageRef.current!.addCovered(oldestTs, cursor);
+        // Desc: newest-first → last is oldest. Asc: oldest-first → last is newest.
+        const edgeTs = entries[entries.length - 1].ts;
+        if (stored) {
+          if (forward) coverageRef.current!.addCovered(cursor, edgeTs);
+          else coverageRef.current!.addCovered(edgeTs, cursor);
+        }
         if (!limitReached) {
           // The whole remaining window came back — the gap is fully covered.
-          if (stored) coverageRef.current!.addCovered(gapStart, cursor);
+          if (stored) {
+            if (forward) coverageRef.current!.addCovered(cursor, gapEnd);
+            else coverageRef.current!.addCovered(gapStart, cursor);
+          }
           break;
         }
-        // Page further back. Re-including `oldestTs` (dedup handles the repeat)
+        // Advance the cursor. Re-including `edgeTs` (dedup handles the repeat)
         // avoids dropping siblings that share that millisecond; step past it only
         // when a whole chunk sat on one timestamp, to guarantee progress.
-        cursor = oldestTs < cursor ? oldestTs : cursor - 1;
+        if (forward) {
+          cursor = edgeTs > cursor ? edgeTs : cursor + 1;
+        } else {
+          cursor = edgeTs < cursor ? edgeTs : cursor - 1;
+        }
       }
       return fetched;
     },
@@ -234,22 +304,38 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   );
 
   /**
-   * Fills the uncovered sub-ranges of [startMs, endMs] newest-first, chunk by
-   * chunk, up to `budget` telegrams total. Older gaps (and the remainder of the
-   * gap where the budget runs out) stay uncovered for on-demand loading, so a
-   * load never blocks on more history than asked for (#284).
+   * Fills the uncovered sub-ranges of [startMs, endMs] in `direction`, chunk by
+   * chunk, up to `budget` telegrams total. The far-side remainder of the gap
+   * where the budget runs out stays uncovered for on-demand loading (#284).
    *
    * `skipBufferFullBreak` is forwarded to `fetchGapProgressive` (#317).
    */
   const fillGapsBudgeted = useCallback(
-    async (startMs: number, endMs: number, budget: number, skipBufferFullBreak = false) => {
+    async (
+      startMs: number,
+      endMs: number,
+      budget: number,
+      skipBufferFullBreak = false,
+      direction: FillDirection = 'backward',
+    ) => {
       const gen = loadGenerationRef.current;
       const gaps = coverageRef.current!.gaps(startMs, endMs);
       let remaining = budget;
-      for (let i = gaps.length - 1; i >= 0 && remaining > 0; i--) {
-        remaining -= await fetchGapProgressive(gaps[i][0], gaps[i][1], remaining, skipBufferFullBreak);
-        // A buffer clear invalidated this load — don't start further gaps (#339).
-        if (loadGenerationRef.current !== gen) return;
+      if (direction === 'forward') {
+        for (let i = 0; i < gaps.length && remaining > 0; i++) {
+          remaining -= await fetchGapProgressive(
+            gaps[i][0], gaps[i][1], remaining, skipBufferFullBreak, direction,
+          );
+          if (loadGenerationRef.current !== gen) return;
+        }
+      } else {
+        for (let i = gaps.length - 1; i >= 0 && remaining > 0; i--) {
+          remaining -= await fetchGapProgressive(
+            gaps[i][0], gaps[i][1], remaining, skipBufferFullBreak, direction,
+          );
+          // A buffer clear invalidated this load — don't start further gaps (#339).
+          if (loadGenerationRef.current !== gen) return;
+        }
       }
       saveCoverage();
     },
@@ -259,8 +345,8 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   /** Fills every uncovered sub-range of [startMs, endMs], bounded by the buffer size.
    *  `skipBufferFullBreak` is forwarded to `fetchGapProgressive` (#317). */
   const fillGaps = useCallback(
-    (startMs: number, endMs: number, skipBufferFullBreak = false) =>
-      fillGapsBudgeted(startMs, endMs, maxSize, skipBufferFullBreak),
+    (startMs: number, endMs: number, skipBufferFullBreak = false, direction: FillDirection = 'backward') =>
+      fillGapsBudgeted(startMs, endMs, maxSize, skipBufferFullBreak, direction),
     [fillGapsBudgeted, maxSize],
   );
 
@@ -281,7 +367,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
   );
 
   const loadRange = useCallback(
-    (startMs: number, endMs: number) =>
+    (startMs: number, endMs: number, direction: FillDirection = 'backward') =>
       runLoad(async () => {
         const gen = loadGenerationRef.current;
         // Cache hits paint immediately; the backend only fills the gaps.
@@ -290,7 +376,7 @@ export function useTelegramCache(maxSize: number, restoreFromCache = true): Tele
         if (loadGenerationRef.current !== gen) return;
         if (cached.length > 0 && mergeIntoBuffer(cached)) publish();
         // User-initiated: bypass the full-buffer early break (#317).
-        await fillGaps(startMs, endMs, /* skipBufferFullBreak */ true);
+        await fillGaps(startMs, endMs, /* skipBufferFullBreak */ true, direction);
       }),
     [runLoad, mergeIntoBuffer, publish, fillGaps],
   );

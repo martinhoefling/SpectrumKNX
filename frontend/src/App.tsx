@@ -1328,6 +1328,7 @@ function App() {
                     projectLoaded={projectStatus?.project_loaded}
                     onUploadProject={() => setIsSettingsOpen(true)}
                     writeEnabled={serverConfig?.status?.write_enabled}
+                    onGotoTelegram={handleGotoTelegram}
                     filtersEnabled={filtersEnabled}
                     onFiltersEnabledChange={setFiltersEnabled}
                   />
@@ -1350,6 +1351,7 @@ function App() {
                     onFilterGAs={handleFilterGAs}
                     onShowGaTelegrams={handleShowGaTelegrams}
                     onLastSeen={handleQuickLastSeen}
+                    onGotoTelegram={handleGotoTelegram}
                   />
                 ) : isLastSeenOpen ? (
                   <LastSeenOverlay
@@ -1372,6 +1374,7 @@ function App() {
                     onFilterDevice={(pa) => handleQuickFilter('sources', pa)}
                     onFilterGAs={handleFilterGAs}
                     onVisualizeGAs={handleVisualizeGAs}
+                    onGotoTelegram={handleGotoTelegram}
                   />
                 ) : isStatisticsOpen ? (
                   <StatisticsOverlay
@@ -1395,6 +1398,7 @@ function App() {
                     onLastSeen={handleQuickLastSeen}
                     onVisualizeGAs={handleVisualizeGAs}
                     onDeviceStatus={setStatusDevice}
+                    onGotoTelegram={handleGotoTelegram}
                     writeEnabled={serverConfig?.status?.write_enabled}
                     latestTelegram={latestTelegram}
                     searchQuery={buildingSearch}
@@ -1442,6 +1446,7 @@ function App() {
                     onQuickVisualize={handleQuickVisualize}
                     onQuickLastSeen={handleQuickLastSeen}
                     canSend={serverConfig?.status?.write_enabled}
+                    onGotoTelegram={handleGotoTelegram}
                     quickFilterOpen={quickFilterOpen}
                     onQuickFilterOpenChange={setQuickFilterOpen}
                     quickFilterEnabled={quickFilterEnabled}
@@ -1567,7 +1572,6 @@ function App() {
         .highlight { color: var(--text-dim); }
         .highlight-target { color: var(--accent-primary); font-weight: 500; }
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .raw-badge { background: var(--bg-tag); padding: 0.15rem 0.4rem; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); display: inline-block; border: 1px solid var(--border-subtle); }
       `}</style>
     </div>
   );

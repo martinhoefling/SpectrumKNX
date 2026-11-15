@@ -7,6 +7,9 @@ import { TARGET_COLORS, resetTargetColors, setTargetColor } from '../utils/targe
 import type { Telegram } from '../hooks/useWebSocket';
 import { makeTelegram } from '../test/telegramFactory';
 import { installVirtualLayout } from '../test/virtualLayout';
+import { cssValue } from '../test/cssValue';
+
+const targetBar = (color: string) => cssValue('box-shadow', `inset 4px 0 0 0 ${color}`);
 
 // A colour for a group address in the target filter, and its telegrams marked
 // with it in the list (#509).
@@ -90,8 +93,7 @@ test('telegrams to a coloured target are marked in the list', () => {
   setTargetColor('1/2/3', TARGET_COLORS[3]);
   const { container } = renderTable();
 
-  expect(rowOf(container, '1/2/3').style.boxShadow).toContain('inset 4px 0 0 0');
-  expect(rowOf(container, '1/2/3').style.boxShadow).toContain(TARGET_COLORS[3]);
+  expect(rowOf(container, '1/2/3').style.boxShadow).toBe(targetBar(TARGET_COLORS[3]));
   expect(rowOf(container, '1/2/4').style.boxShadow).toBe('');
   expect(rowOf(container, '2/0/1').style.boxShadow).toBe('');
 });
@@ -100,7 +102,7 @@ test('the list follows a colour set while it is shown', () => {
   const { container } = renderTable();
   expect(rowOf(container, '1/2/4').style.boxShadow).toBe('');
   act(() => setTargetColor('1/2/4', TARGET_COLORS[0]));
-  expect(rowOf(container, '1/2/4').style.boxShadow).toContain('inset 4px 0 0 0');
+  expect(rowOf(container, '1/2/4').style.boxShadow).toBe(targetBar(TARGET_COLORS[0]));
 });
 
 test('a colour only marks rows while its address is in the target filter', () => {
@@ -112,5 +114,5 @@ test('a colour only marks rows while its address is in the target filter', () =>
 test('a switched-off filter keeps marking its rows', () => {
   setTargetColor('1/2/3', TARGET_COLORS[0]);
   const { container } = renderTable({ ...FILTERS, disabled: ['targets:1/2/3'] });
-  expect(rowOf(container, '1/2/3').style.boxShadow).toContain('inset 4px 0 0 0');
+  expect(rowOf(container, '1/2/3').style.boxShadow).toBe(targetBar(TARGET_COLORS[0]));
 });

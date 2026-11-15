@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Send, Radio, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { format } from 'date-fns';
 
 import { apiUrl } from '../utils/basePath';
 import { formatDpt, readTelegram, sendTelegram } from '../utils/knxSend';
 import { describeBusPayload, type BusPayload } from '../utils/dptValues';
+import type { Telegram } from '../hooks/useWebSocket';
 import { WriteControls } from './WriteControls';
+import { BusValueText } from './BusValueText';
+import { TelegramWhenJump, telegramEventType } from './TelegramWhenJump';
 import { secondaryBtn } from '../utils/buttonStyles';
 
 interface Props {
@@ -20,6 +22,8 @@ interface Props {
   buttonClassName?: string;
   /** Inline style for the trigger button. */
   buttonStyle?: React.CSSProperties;
+  /** Jump the telegram list to the last-seen telegram shown in the popover. */
+  onGotoTelegram?: (telegram: Telegram) => void;
 }
 
 /**
@@ -30,7 +34,10 @@ interface Props {
  * portalled to <body> and fixed-positioned so it is never clipped by scroll
  * containers (e.g. the virtualized telegram table).
  */
-export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send to this GA', buttonClassName, buttonStyle }: Props) {
+export function SendToGaPopover({
+  address, name, dptMain, dptSub, title = 'Send to this GA',
+  buttonClassName, buttonStyle, onGotoTelegram,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -40,7 +47,7 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [last, setLast] = useState<{ value: string; at: string } | null>(null);
+  const [last, setLast] = useState<Telegram | null>(null);
 
   const dpt = formatDpt(dptMain ?? undefined, dptSub ?? undefined);
 
@@ -65,13 +72,8 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
     try {
       const res = await fetch(apiUrl(`/api/telegrams?target_address=${encodeURIComponent(address)}&limit=1`));
       const json = await res.json();
-      const t = json.telegrams?.[0];
-      if (t) {
-        const shown = t.value_formatted ?? (t.value_numeric != null ? String(t.value_numeric) : '—');
-        setLast({ value: `${shown}${t.unit ? ' ' + t.unit : ''}`, at: t.timestamp });
-      } else {
-        setLast(null);
-      }
+      const t = json.telegrams?.[0] as Telegram | undefined;
+      setLast(t ?? null);
     } catch {
       setLast(null);
     }
@@ -163,13 +165,24 @@ export function SendToGaPopover({ address, name, dptMain, dptSub, title = 'Send 
             {dpt && <span style={{ marginLeft: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.68rem', color: 'var(--text-dim)' }}>DPT {dpt}</span>}
           </div>
 
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-            Last value:{' '}
-            <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{last ? last.value : '—'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+            <span>
+              Last value:{' '}
+              {last ? (
+                <BusValueText value={last} dpt={dpt} as="span" />
+              ) : (
+                <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>—</span>
+              )}
+            </span>
             {last && (
-              <span style={{ marginLeft: '0.4rem', color: 'var(--text-dim)', fontSize: '0.68rem' }}>
-                ({format(new Date(last.at), 'yyyy-MM-dd HH:mm:ss')})
-              </span>
+              <TelegramWhenJump
+                timestamp={last.timestamp}
+                eventType={telegramEventType(last)}
+                onJump={onGotoTelegram ? () => {
+                  onGotoTelegram(last);
+                  setOpen(false);
+                } : undefined}
+              />
             )}
           </div>
 

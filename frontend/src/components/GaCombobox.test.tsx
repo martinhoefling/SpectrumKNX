@@ -22,6 +22,29 @@ test('shows only recent addresses, newest first, while the input is empty', () =
   expect(screen.queryByText('1/2/3')).not.toBeInTheDocument();
 });
 
+test('input size follows placeholder or value, not the browser default of 20', () => {
+  const { rerender } = render(
+    <GaCombobox value="" onChange={() => {}} options={OPTIONS} placeholder="GA" />,
+  );
+  expect(screen.getByRole('combobox')).toHaveAttribute('size', '2');
+
+  rerender(
+    <GaCombobox value="31/7/255" onChange={() => {}} options={OPTIONS} placeholder="GA" />,
+  );
+  expect(screen.getByRole('combobox')).toHaveAttribute('size', '8');
+});
+
+test('suggestion list is portaled to document.body so it does not expand the field wrap', () => {
+  const { container } = render(
+    <GaCombobox value="" onChange={() => {}} options={OPTIONS} recentAddresses={['12/0/0']} />,
+  );
+  fireEvent.focus(screen.getByRole('combobox'));
+  const list = screen.getByRole('listbox');
+  expect(list.parentElement).toBe(document.body);
+  expect(container.querySelector('[role="listbox"]')).toBeNull();
+  expect(list).toHaveStyle({ position: 'fixed' });
+});
+
 test('shows no dropdown on focus when there are no recents', () => {
   render(<GaCombobox value="" onChange={() => {}} options={OPTIONS} recentAddresses={[]} />);
   fireEvent.focus(screen.getByRole('combobox'));

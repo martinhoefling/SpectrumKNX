@@ -171,8 +171,9 @@ test('comm object header shows the DPT-family mismatch and the newest value, fra
   // The KO's own DPT is main category 1; one connected GA (1/1/2) is main category 5.
   await waitFor(() => expect(screen.getByText('5.*')).toBeInTheDocument());
 
-  const valueEl = await screen.findByText('On');
-  expect(valueEl.style.border).toContain('var(--accent-primary)'); // framed: newest telegram targets the sending GA
+  const valueEl = await screen.findByText('on');
+  // Framed border lives on the wrapper around BusValueText (KO sending-GA highlight).
+  expect(valueEl.parentElement?.style.border).toContain('var(--accent-primary)');
 });
 
 test('visualizing a single GA row inside the expanded comm-object table propagates through (#307)', async () => {

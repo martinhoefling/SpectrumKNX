@@ -275,6 +275,20 @@ def test_get_telegrams(mock_query):
     assert len(data["telegrams"]) == 1
     assert data["telegrams"][0]["source_address"] == "1.1.1"
     assert data["telegrams"][0]["raw_data"] == "01"
+    assert mock_query.await_args.args[0].order_descending is True
+
+
+@patch("database.store.query", new_callable=AsyncMock)
+def test_get_telegrams_order_asc(mock_query):
+    mock_query.return_value = TelegramQueryResult(telegrams=[], total_count=0, limit_reached=False)
+
+    response = client.get("/api/telegrams?limit=10&order=asc")
+    assert response.status_code == 200
+    assert mock_query.await_args.args[0].order_descending is False
+
+    response = client.get("/api/telegrams?limit=10&order=desc")
+    assert response.status_code == 200
+    assert mock_query.await_args.args[0].order_descending is True
 
 
 @patch("database.store.query", new_callable=AsyncMock)
