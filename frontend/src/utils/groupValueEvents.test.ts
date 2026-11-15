@@ -8,7 +8,7 @@ import {
   isReadKind,
   matchingResponse,
   mergeGaReadPhase,
-  readAnsweredByVisible,
+  responseIsVisible,
   readEventAnswered,
   responsesFollowingReads,
   rowsIntersectingViewport,
@@ -130,24 +130,30 @@ test('a later Read reopens an answered GA until the next Response', () => {
   expect(mergeGaReadPhase('none', 'request')).toBe('request');
 });
 
-test('a time-sorted Read is answered only when a later Response intersects the viewport', () => {
-  const response = row('2026-01-01T10:00:02Z', 'Response');
+test('a time-sorted Read is answered only when the earliest Response is in the viewport', () => {
+  const earliest = row('2026-01-01T10:00:02Z', 'Response');
+  const later = row('2026-01-01T10:00:05Z', 'Response');
   const read = row('2026-01-01T10:00:00Z', 'Read');
-  const rows = [response, read];
+  const rows = [later, earliest, read];
   const spans = [
     { index: 0, start: 0, end: 85 },
     { index: 1, start: 85, end: 170 },
+    { index: 2, start: 170, end: 255 },
   ];
-  const top = rowsIntersectingViewport(rows, spans, 0, 80);
-  expect(top).toEqual([response]);
-  expect(readAnsweredByVisible(read, top)).toBe(true);
+  const jumpTarget = matchingResponse(read, rows);
+  expect(jumpTarget).toBe(earliest);
 
-  const bottom = rowsIntersectingViewport(rows, spans, 90, 80);
-  expect(bottom).toEqual([read]);
-  expect(readAnsweredByVisible(read, bottom)).toBe(false);
+  const onlyLater = rowsIntersectingViewport(rows, spans, 0, 80);
+  expect(onlyLater).toEqual([later]);
+  expect(responseIsVisible(earliest, onlyLater)).toBe(false);
+  expect(responseIsVisible(later, onlyLater)).toBe(true);
+
+  const withEarliest = rowsIntersectingViewport(rows, spans, 90, 80);
+  expect(withEarliest).toEqual([earliest]);
+  expect(responseIsVisible(earliest, withEarliest)).toBe(true);
 
   // Unmeasured spans and overscan outside the scrollport do not count.
   expect(rowsIntersectingViewport(rows, [{ index: 0, start: 0, end: 0 }], 0, 80)).toEqual([]);
-  expect(rowsIntersectingViewport(rows, spans, 200, 80)).toEqual([]);
+  expect(rowsIntersectingViewport(rows, spans, 400, 80)).toEqual([]);
   expect(rowsIntersectingViewport(rows, spans, 0, 0)).toEqual([]);
 });

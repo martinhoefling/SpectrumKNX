@@ -6,9 +6,11 @@
  *   The GA phase is recomputed from every telegram seen so far (the live buffer,
  *   including the pause backlog).
  * - Telegram table: a Read was followed by a Response when one exists in that
- *   buffer. Whether the Read is *painted* answered depends on the sort:
- *   not primarily time-sorted → the buffer is enough; primarily time-sorted →
- *   a later matching Response must also sit in the current viewport.
+ *   buffer. The jump always targets the earliest such Response. Whether the
+ *   Read is *painted* answered depends on the sort: not primarily time-sorted
+ *   → the buffer is enough; primarily time-sorted → that earliest Response
+ *   must itself sit in the current viewport. A later Response on screen does
+ *   not paint the Read answered.
  */
 
 export type BusEventKind = 'read' | 'response' | 'write' | 'other';
@@ -161,23 +163,29 @@ export function answeredReadIds(rows: readonly GroupValueTelegram[]): Set<string
   return new Set(responsesFollowingReads(rows).keys());
 }
 
+type TelegramIdentity = GroupValueTelegram & {
+  source_address?: string;
+  raw_hex?: string | null;
+};
+
+/** Same bus telegram across a buffer row and a viewport copy of it. */
+export function sameBusTelegram(a: TelegramIdentity, b: TelegramIdentity): boolean {
+  return a.timestamp === b.timestamp
+    && a.target_address === b.target_address
+    && (a.source_address ?? '') === (b.source_address ?? '')
+    && (a.raw_hex ?? '') === (b.raw_hex ?? '');
+}
+
 /**
- * True when any later Response on the Read's GA is among `visibleRows`.
- * Used when the table is primarily sorted by time: the Response has to be
- * on screen, not merely present in the buffer.
+ * True when this Response is one of `visibleRows`.
+ * Time-sorted tables pass the earliest matching Response: a later Response
+ * that happens to be on screen does not count.
  */
-export function readAnsweredByVisible<T extends GroupValueTelegram>(
-  read: T,
+export function responseIsVisible<T extends TelegramIdentity>(
+  response: T,
   visibleRows: readonly T[],
 ): boolean {
-  if (!read.target_address || !isGroupRead(read)) return false;
-  const readMs = Date.parse(read.timestamp);
-  if (!Number.isFinite(readMs)) return false;
-  return visibleRows.some(t =>
-    t.target_address === read.target_address
-    && isGroupResponse(t)
-    && responseAnswersRead(readMs, Date.parse(t.timestamp)),
-  );
+  return visibleRows.some(row => sameBusTelegram(response, row));
 }
 
 export interface ViewportSpan {

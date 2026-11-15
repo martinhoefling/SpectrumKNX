@@ -220,6 +220,58 @@ test('a visible READ follows a response that is only in the read-phase source', 
   expect(screen.queryByRole('button', { name: 'Go to response' })).not.toBeInTheDocument();
 });
 
+test('a later Response on screen does not turn the Read green while the earliest is off screen', () => {
+  const read = makeTelegram({
+    timestamp: '2026-01-01T10:00:00.000Z',
+    simplified_type: 'Read',
+    telegram_type: 'GroupValueRead',
+    target_address: '1/2/3',
+    raw_hex: '0x00',
+  });
+  const earliest = makeTelegram({
+    timestamp: '2026-01-01T10:00:01.000Z',
+    simplified_type: 'Response',
+    telegram_type: 'GroupValueResponse',
+    target_address: '1/2/3',
+    raw_hex: '0x01',
+    value_formatted: 'On',
+  });
+  const later = makeTelegram({
+    timestamp: '2026-01-01T10:00:02.000Z',
+    simplified_type: 'Response',
+    telegram_type: 'GroupValueResponse',
+    target_address: '1/2/3',
+    raw_hex: '0x02',
+    value_formatted: 'Off',
+  });
+  const previous = scrollBlockSize;
+  // Live edge sits in the fill rubber (scrollTop ~43). A short scrollport
+  // shows the newest Response and leaves the earlier one below it. Overscan
+  // still draws the Read.
+  scrollBlockSize = 80;
+  try {
+    const onGotoTelegram = vi.fn();
+    const { container } = render(
+      <TelegramTable
+        telegrams={[later, earliest, read]}
+        visibleColumns={visibleColumns}
+        sortConfig={sortConfig}
+        onSort={vi.fn()}
+        activeFilters={DEFAULT_FILTERS}
+        onQuickFilter={vi.fn()}
+        onQuickVisualize={vi.fn()}
+        onGotoTelegram={onGotoTelegram}
+      />,
+    );
+    expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
+    expect(container.querySelector('.tt-type-read')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Go to response' }));
+    expect(onGotoTelegram).toHaveBeenCalledWith(earliest);
+  } finally {
+    scrollBlockSize = previous;
+  }
+});
+
 test('zebra stripes stay with their telegram when new ones are prepended (#266)', () => {
   const { container, rerender } = renderTable(makeList(6, 5));
   const before = stripesByKey(container);
