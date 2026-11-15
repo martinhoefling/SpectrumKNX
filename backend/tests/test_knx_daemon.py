@@ -304,6 +304,12 @@ async def test_knx_startup_db_failure(mock_store_init, mock_check_conn):
         ("12:30:00", "10.001", "DPTArray", (12, 30, 0)),
         ("2026-07-18", "11.001", "DPTArray", (18, 7, 26)),
         ("2026-07-18T12:30:00", "19.001", "DPTArray", (126, 7, 18, 12, 30, 0, 36, 0)),
+        (3, "2", "DPTBinary", 3),
+        (0, "2", "DPTBinary", 0),
+        (15, "3", "DPTBinary", 15),
+        (255, "5", "DPTArray", (0xFF,)),
+        (-1, "6", "DPTArray", (0xFF,)),
+        (1000, "7", "DPTArray", (0x03, 0xE8)),
     ],
 )
 def test_encode_payload(payload, dpt, expected_type, expected_value):
@@ -319,6 +325,13 @@ def test_encode_payload_unknown_dpt_raises():
 
     with pytest.raises(ValueError, match="Unknown DPT"):
         _encode_payload(1, "999.999")
+
+
+def test_encode_bare_main_rejects_out_of_range():
+    from knx_daemon import _encode_payload
+
+    with pytest.raises(ValueError, match=r"Value 4 is out of range for DPT 2 \(0–3\)"):
+        _encode_payload(4, "2")
 
 
 @pytest.mark.parametrize(
