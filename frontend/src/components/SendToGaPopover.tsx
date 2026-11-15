@@ -6,6 +6,7 @@ import { apiUrl } from '../utils/basePath';
 import { formatDpt, parseDptMain, readTelegram, sendTelegram } from '../utils/knxSend';
 import { buildWriteDptOptions, dptUnit } from '../utils/dpt';
 import { describeBusPayload, type BusPayload } from '../utils/dptValues';
+import { isGroupRead, isGroupResponse, isGroupWrite } from '../utils/groupValueEvents';
 import type { FilterOption } from '../types/filters';
 import type { Telegram } from '../hooks/useWebSocket';
 import { useDptCatalog } from './DptCatalogContext';
@@ -234,26 +235,9 @@ function linkedStatusSignature(status: LinkedRowStatus | null | undefined): stri
   ].join('\u001f');
 }
 
-function isReadTelegram(tg: Telegram | null | undefined): boolean {
-  if (!tg) return false;
-  if (tg.simplified_type === 'Read') return true;
-  return Boolean(tg.telegram_type?.includes('Read')) && !tg.telegram_type?.includes('Response');
-}
-
-function isResponseTelegram(tg: Telegram | null | undefined): boolean {
-  if (!tg) return false;
-  return tg.simplified_type === 'Response' || Boolean(tg.telegram_type?.includes('Response'));
-}
-
-function isWriteTelegram(tg: Telegram | null | undefined): boolean {
-  if (!tg) return false;
-  if (tg.simplified_type === 'Write') return true;
-  return Boolean(tg.telegram_type?.includes('Write'));
-}
-
 /** Value-bearing bus event that should refresh the popover's last value/timestamp. */
 function isLastValueTelegram(tg: Telegram | null | undefined): boolean {
-  return isWriteTelegram(tg) || isResponseTelegram(tg);
+  return isGroupWrite(tg) || isGroupResponse(tg);
 }
 
 function rectsOverlap(
@@ -1086,9 +1070,9 @@ function SendToGaPopoverPanel({
       }
       // A linked job's status jump comes from the row, not this local wait.
       if (awaitingRead && !linkedStatus?.job) {
-        if (isReadTelegram(latestTelegram)) {
+        if (isGroupRead(latestTelegram)) {
           setStatusTelegram(latestTelegram);
-        } else if (isResponseTelegram(latestTelegram)) {
+        } else if (isGroupResponse(latestTelegram)) {
           setStatusTelegram(latestTelegram);
           setAwaitingRead(false);
           setFeedback(null);

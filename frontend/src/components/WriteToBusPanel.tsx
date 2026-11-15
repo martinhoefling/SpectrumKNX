@@ -25,6 +25,7 @@ import { secondaryBtn } from '../utils/buttonStyles';
 import { loadRecentGas, pushRecentGa } from '../utils/recentGas';
 import { buildWriteDptOptions, dptUnit } from '../utils/dpt';
 import { describeBusPayload, formatBusValueForDpt, type BusPayload } from '../utils/dptValues';
+import { isGroupRead, isGroupResponse, isGroupWrite } from '../utils/groupValueEvents';
 import { BusValueText } from './BusValueText';
 import { getPref, setPref } from '../utils/prefs';
 import {
@@ -295,29 +296,13 @@ function clearAllStatusPatch(): Pick<
   return { ...clearStatusPatch(), lastSentTelegram: null };
 }
 
-function isWriteTelegram(tg: Telegram | null | undefined): boolean {
-  if (!tg) return false;
-  return tg.simplified_type === 'Write' || Boolean(tg.telegram_type?.includes('Write'));
-}
-
-function isReadTelegram(tg: Telegram | null | undefined): boolean {
-  if (!tg) return false;
-  if (tg.simplified_type === 'Read') return true;
-  return Boolean(tg.telegram_type?.includes('Read')) && !tg.telegram_type?.includes('Response');
-}
-
-function isResponseTelegram(tg: Telegram | null | undefined): boolean {
-  if (!tg) return false;
-  return tg.simplified_type === 'Response' || Boolean(tg.telegram_type?.includes('Response'));
-}
-
 /** True when this telegram is one this row's job put on the bus, not another device's echo. */
 function telegramFromRowJob(job: ScheduledSendStatus, tg: Telegram): boolean {
   // A read job's own Read may arrive Incoming or Outgoing.
-  if (job.read) return isReadTelegram(tg);
+  if (job.read) return isGroupRead(tg);
   if (tg.direction === 'Incoming') return false;
-  if (job.response) return isResponseTelegram(tg);
-  if (!isWriteTelegram(tg) || isResponseTelegram(tg)) return false;
+  if (job.response) return isGroupResponse(tg);
+  if (!isGroupWrite(tg) || isGroupResponse(tg)) return false;
   return payloadMatchesJob(job.payload, tg);
 }
 
@@ -336,7 +321,7 @@ function visibleStatusTelegram(
   if (showJob) return jobTelegram;
   return row.statusTelegram
     ?? (!unansweredRead ? row.lastSentTelegram : null)
-    ?? (row.statusWatch === 'write' && lastTelegram && isWriteTelegram(lastTelegram) ? lastTelegram : null);
+    ?? (row.statusWatch === 'write' && lastTelegram && isGroupWrite(lastTelegram) ? lastTelegram : null);
 }
 
 function payloadMatchesJob(payload: unknown, tg: Telegram): boolean {
@@ -365,7 +350,7 @@ function hasUnansweredRead(
 ): boolean {
   return row.statusWatch === 'read'
     || isReadRequestFeedback(row.feedback)
-    || isReadTelegram(row.statusTelegram);
+    || isGroupRead(row.statusTelegram);
 }
 
 function telegramValue(tg: Telegram | null | undefined, fallback = '', dpt?: string): string {
@@ -1595,12 +1580,11 @@ export function WriteToBusPanel({
   if (latestTelegram !== seenLatest) {
     setSeenLatest(latestTelegram);
     if (latestTelegram) {
-      if (isReadTelegram(latestTelegram)) {
+      if (isGroupRead(latestTelegram)) {
         // eslint-disable-next-line react-hooks/refs -- remember this render's Read for the job that just sent it
         latestReadByAddressRef.current.set(latestTelegram.target_address.trim(), latestTelegram);
       }
       const addr = latestTelegram.target_address;
-      const kind = latestTelegram.simplified_type;
       setRows(rs => {
         let changed = false;
         const next = rs.map(r => {
@@ -1610,7 +1594,7 @@ export function WriteToBusPanel({
           if (isLiveJob(job) && job) {
             if (job.read) {
               // Only the row that sent this read adopts it. Color follows timestamps.
-              if (isReadTelegram(latestTelegram) && r.claimOwnRead) {
+              if (isGroupRead(latestTelegram) && r.claimOwnRead) {
                 changed = true;
                 return { ...r, statusTelegram: latestTelegram, claimOwnRead: false };
               }
@@ -1623,9 +1607,9 @@ export function WriteToBusPanel({
           // One-shot binding is per owning row — never share send/wait across rows.
           const wantWrite = r.statusWatch === 'write';
           const wantRead = r.statusWatch === 'read';
-          const isWrite = kind === 'Write' || latestTelegram.telegram_type?.includes('Write');
-          const isRead = kind === 'Read' || latestTelegram.telegram_type?.includes('Read');
-          const isResponse = kind === 'Response' || latestTelegram.telegram_type?.includes('Response');
+          const isWrite = isGroupWrite(latestTelegram);
+          const isRead = isGroupRead(latestTelegram);
+          const isResponse = isGroupResponse(latestTelegram);
           if (isWrite) {
             if (wantWrite && wantRead) {
               // Cyclic Write during an open Read wait: remember the send, keep waiting.
@@ -2514,7 +2498,7 @@ export function WriteToBusPanel({
         setRows(rs => rs.map(r => {
           if (!claimed.includes(r.id)) return r;
           const seen = latestReadByAddressRef.current.get(r.address.trim());
-          const currentMs = r.statusTelegram && isReadTelegram(r.statusTelegram)
+          const currentMs = r.statusTelegram && isGroupRead(r.statusTelegram)
             ? Date.parse(r.statusTelegram.timestamp)
             : Number.NEGATIVE_INFINITY;
           const seenMs = seen ? Date.parse(seen.timestamp) : NaN;
@@ -2594,7 +2578,7 @@ export function WriteToBusPanel({
         return base;
       }
       const tg = r.lastSentTelegram ?? r.statusTelegram;
-      if (!isWriteTelegram(tg) && !(cancelled.sends_done && cancelled.sends_done > 0)) return base;
+      if (!isGroupWrite(tg) && !(cancelled.sends_done && cancelled.sends_done > 0)) return base;
       const val = telegramValue(tg, r.value, r.dpt);
       return {
         ...base,
@@ -2631,7 +2615,7 @@ export function WriteToBusPanel({
       if (isLiveJob(cancelled) && !hasUnansweredRead(next)) {
         const tg = next.lastSentTelegram ?? next.statusTelegram;
         const addr = (cancelled.address ?? r.address).trim();
-        if (isWriteTelegram(tg) || (cancelled.sends_done && cancelled.sends_done > 0)) {
+        if (isGroupWrite(tg) || (cancelled.sends_done && cancelled.sends_done > 0)) {
           const val = telegramValue(tg, r.value, r.dpt);
           next = {
             ...next,

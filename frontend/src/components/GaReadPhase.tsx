@@ -5,7 +5,7 @@ import {
   gaReadPhases,
   readEventAnswered,
   type GaReadPhase,
-} from '../utils/telegramCellStyles';
+} from '../utils/groupValueEvents';
 
 type PhaseRow = {
   timestamp: string;

@@ -143,6 +143,7 @@ test('a READ row turns success green once a later Response arrives for its GA', 
   expect(answered).toBeTruthy();
   expect(answered?.textContent).toBe('Read');
   expect(container.querySelector('.tt-type-response')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Go to response' })).toBeInTheDocument();
 });
 
 test('a visible READ follows a response that is only in the read-phase source', () => {
@@ -164,6 +165,7 @@ test('a visible READ follows a response that is only in the read-phase source', 
   const { container, rerender } = renderTable([read]);
   expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
 
+  const onGotoTelegram = vi.fn();
   rerender(
     <TelegramTable
       telegrams={[read]}
@@ -174,10 +176,32 @@ test('a visible READ follows a response that is only in the read-phase source', 
       activeFilters={DEFAULT_FILTERS}
       onQuickFilter={vi.fn()}
       onQuickVisualize={vi.fn()}
+      onGotoTelegram={onGotoTelegram}
+    />,
+  );
+  // Primarily time-sorted: a Response that is not in the viewport does not
+  // paint the Read answered, but the goto to that Response stays.
+  expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
+  expect(container.querySelector('.tt-type-read')).toBeInTheDocument();
+  expect(container.querySelector('.tt-type-response')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Go to response' }));
+  expect(onGotoTelegram).toHaveBeenCalledWith(response);
+
+  rerender(
+    <TelegramTable
+      telegrams={[read]}
+      readPhaseTelegrams={[response, read]}
+      visibleColumns={visibleColumns}
+      sortConfig={[{ key: 'target_address', direction: 'asc' }]}
+      onSort={vi.fn()}
+      activeFilters={DEFAULT_FILTERS}
+      onQuickFilter={vi.fn()}
+      onQuickVisualize={vi.fn()}
+      onGotoTelegram={onGotoTelegram}
     />,
   );
   expect(container.querySelector('.tt-type-read-answered')?.textContent).toBe('Read');
-  expect(container.querySelector('.tt-type-response')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Go to response' })).toBeInTheDocument();
 
   rerender(
     <TelegramTable
@@ -193,6 +217,7 @@ test('a visible READ follows a response that is only in the read-phase source', 
   );
   expect(container.querySelector('.tt-type-read-answered')).not.toBeInTheDocument();
   expect(container.querySelector('.tt-type-read')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Go to response' })).not.toBeInTheDocument();
 });
 
 test('zebra stripes stay with their telegram when new ones are prepended (#266)', () => {

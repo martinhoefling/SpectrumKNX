@@ -11,7 +11,7 @@ import { compareKnxAddress } from '../utils/knxAddress';
 import { WriteControls } from './WriteControls';
 import { SendToGaPopover } from './SendToGaPopover';
 import { secondaryBtn, rowIconBtnStyle } from '../utils/buttonStyles';
-import { answeredReadIds } from '../utils/telegramCellStyles';
+import { answeredReadIds } from '../utils/groupValueEvents';
 import { EventTypeLabel } from './EventTypeLabel';
 import { GaReadPhaseProvider, useGaReadPhaseFor } from './GaReadPhase';
 

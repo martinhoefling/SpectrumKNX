@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { resolveFullBufferPaging, useTelegramCache } from './useTelegramCache';
-import { gaReadPhases } from '../utils/telegramCellStyles';
+import { gaReadPhases } from '../utils/groupValueEvents';
 import { makeTelegram } from '../test/telegramFactory';
 import { toEntry } from '../utils/telegramId';
 import { COVERAGE_STORAGE_KEY } from '../services/telegram-coverage-service';

@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { Radio } from 'lucide-react';
 
 import { BTN_DISABLED_MIX, BTN_MUTED_MIX } from '../utils/buttonStyles';
-import type { GaReadPhase } from '../utils/telegramCellStyles';
+import { busEventKind, isReadKind, type GaReadPhase } from '../utils/groupValueEvents';
 
 /** How far a Read-button radio fades while the button is inactive. */
 export type ReadIconDim = 'disabled' | 'muted';
@@ -10,13 +10,12 @@ export type ReadIconDim = 'disabled' | 'muted';
 /** Display color for an event-kind word (and its icon, when the icon is part of the label). */
 // eslint-disable-next-line react-refresh/only-export-components -- shared event color helper
 export function eventTypeColor(kind: string, answered = false): string {
-  const u = kind.trim().toUpperCase();
-  if (u === 'WRITE' || u.includes('WRITE')) return 'var(--accent-primary)';
-  if (u === 'RESPONSE' || u.includes('RESPONSE')) return 'var(--success)';
-  if (u === 'READ' || (u.includes('READ') && !u.includes('RESPONSE'))) {
-    return answered ? 'var(--success)' : 'var(--warning-text)';
+  switch (busEventKind(kind)) {
+    case 'write': return 'var(--accent-primary)';
+    case 'response': return 'var(--success)';
+    case 'read': return answered ? 'var(--success)' : 'var(--warning-text)';
+    default: return 'var(--text-dim)';
   }
-  return 'var(--text-dim)';
 }
 
 /** Radio color on a Read button: blue, then orange, then green.
@@ -31,11 +30,6 @@ export function readPhaseIconColor(phase: GaReadPhase, dim?: ReadIconDim): strin
   if (!dim) return base;
   const mix = dim === 'muted' ? BTN_MUTED_MIX : BTN_DISABLED_MIX;
   return `color-mix(in srgb, ${base} ${mix}%, transparent)`;
-}
-
-function isReadKind(kind: string): boolean {
-  const u = kind.trim().toUpperCase();
-  return u === 'READ' || (u.includes('READ') && !u.includes('RESPONSE'));
 }
 
 /**

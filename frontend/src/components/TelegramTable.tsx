@@ -19,8 +19,15 @@ import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
 import { moveColumn, readColumnOrderPref, writeColumnOrderPref } from '../utils/columnOrder';
 import { formatDpt } from '../utils/knxSend';
-import { TT, ttTypeClass, ttDirectionClass, ttDptDotClass, answeredReadIds } from '../utils/telegramCellStyles';
+import { TT, ttTypeClass, ttDirectionClass, ttDptDotClass } from '../utils/telegramCellStyles';
+import {
+  isGroupRead,
+  readAnsweredByVisible,
+  responsesFollowingReads,
+  rowsIntersectingViewport,
+} from '../utils/groupValueEvents';
 import { EventTypeLabel } from './EventTypeLabel';
+import { TelegramWhenJump } from './TelegramWhenJump';
 import { BusValueText } from './BusValueText';
 
 export type { SortKey, SortLevel, SortConfig };
@@ -495,11 +502,11 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // Time deltas between consecutive rows, by visual (sorted) order — always
   // computed regardless of sort column, respecting whatever hierarchy is
   // active (#311).
-  // A later Response on the same GA turns that Read green. The live list passes
-  // the full buffer, including the pause backlog. Without the prop, the rows
-  // passed as `telegrams` decide.
-  const answeredReads = useMemo(
-    () => answeredReadIds(readPhaseTelegrams ?? telegrams),
+  // A later Response on the same GA. The live list passes the full buffer,
+  // including the pause backlog, so the goto target stays available when the
+  // Response is off screen. Without the prop, `telegrams` is the buffer.
+  const responseByRead = useMemo(
+    () => responsesFollowingReads(readPhaseTelegrams ?? telegrams),
     [readPhaseTelegrams, telegrams],
   );
 
@@ -2164,6 +2171,17 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   };
 
   // ── Per-cell body content (keyed switch keeps body aligned with header order) ──
+  // Primarily time-sorted: a Read is green only when a later Response on the
+  // same GA intersects the scrollport. Any other primary sort trusts the buffer.
+  const viewportTelegrams = isTimeSort
+    ? rowsIntersectingViewport(
+      telegramRows,
+      virtualizer.getVirtualItems(),
+      parentRef.current?.scrollTop ?? 0,
+      viewportHeight,
+    )
+    : telegramRows;
+
   const renderCell = (id: ColId, t: TelegramRow): React.ReactNode => {
     switch (id) {
       case 'time':
@@ -2302,18 +2320,29 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
           </div>
         );
 
-      case 'type':
+      case 'type': {
+        const followed = isGroupRead(t)
+          ? responseByRead.get(`${t.timestamp}|${t.target_address}`)
+          : undefined;
+        const answered = Boolean(
+          followed && (!isTimeSort || readAnsweredByVisible(t, viewportTelegrams)),
+        );
         return (
           <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
               <EventTypeLabel
                 kind={t.simplified_type || t.telegram_type || ''}
-                answered={t.simplified_type === 'Read' && answeredReads.has(`${t.timestamp}|${t.target_address}`)}
-                className={ttTypeClass(
-                  t.simplified_type,
-                  t.simplified_type === 'Read' && answeredReads.has(`${t.timestamp}|${t.target_address}`),
-                )}
+                answered={answered}
+                className={ttTypeClass(t.simplified_type, answered)}
               />
+              {followed && (
+                <span onClick={e => e.stopPropagation()}>
+                  <TelegramWhenJump
+                    onJump={() => onGotoTelegram?.(followed)}
+                    jumpLabel="Go to response"
+                  />
+                </span>
+              )}
               <button
                 className={`quick-filter-btn ${activeFilters.types.includes(t.simplified_type || t.telegram_type) ? 'active' : ''}`}
                 onClick={(e) => { e.stopPropagation(); onQuickFilter('types', t.simplified_type || t.telegram_type); }}
@@ -2328,6 +2357,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
             </div>
           </div>
         );
+      }
 
       case 'dpt':
         return (
