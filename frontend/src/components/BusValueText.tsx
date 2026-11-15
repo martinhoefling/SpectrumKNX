@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { formatBusValueForDpt, type BusValueView } from '../utils/dptValues';
+import { isTextDptMain, parseDptMain } from '../utils/knxSend';
 import { TT } from '../utils/telegramCellStyles';
 
 interface Props {
@@ -17,6 +18,15 @@ interface Props {
   as?: 'strong' | 'span';
   /** Start in raw_hex mode when hex is available (TelegramTable DATA under VALUE). */
   defaultShowHex?: boolean;
+  /**
+   * When false, the toggle stays mouse-only (no Tab / focus ring). Use in the
+   * telegram-table scroll body where field focus is not allowed.
+   */
+  allowFocus?: boolean;
+  /** Incoming/Outgoing color + one-shot pulse. The node stays mounted in that color. */
+  pulse?: 'Incoming' | 'Outgoing' | null;
+  /** New key restarts the pulse animation without resetting decoded/hex state. */
+  pulseKey?: string | number | null;
 }
 
 /**
@@ -28,14 +38,22 @@ interface Props {
 export function BusValueText({
   value, dpt, style, rawStyle, className, rawClassName, as = 'strong',
   defaultShowHex = false,
+  allowFocus = true,
+  pulse = null,
+  pulseKey = null,
 }: Props) {
   const [showHex, setShowHex] = useState(defaultShowHex);
   const hex = (value.raw_hex ?? '').trim();
   const canToggle = hex !== '';
   const showingHex = showHex && canToggle;
   const decoded = formatBusValueForDpt(value, dpt);
+  const textDpt = isTextDptMain(dpt ? parseDptMain(dpt) : null);
+  const textStyle: CSSProperties | undefined = textDpt
+    ? { fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre', ...style }
+    : style;
 
   const Tag = as;
+  const pulseProps = pulse ? { 'data-bus-pulse': pulse } : {};
   const decodedClass = className ?? TT.value;
   const hexClass = rawClassName ?? TT.rawBadge;
   const decodedLabel = `${decoded.text}${decoded.unit ? ` ${decoded.unit}` : ''}`;
@@ -48,7 +66,7 @@ export function BusValueText({
 
   if (!canToggle) {
     return (
-      <Tag className={decodedClass} style={style}>
+      <Tag key={pulseKey ?? undefined} className={decodedClass} style={textStyle} {...pulseProps}>
         {decodedBody}
       </Tag>
     );
@@ -56,16 +74,22 @@ export function BusValueText({
 
   return (
     <Tag
+      key={pulseKey ?? undefined}
+      {...pulseProps}
       className={TT.valueToggle}
       role="button"
-      tabIndex={0}
+      tabIndex={allowFocus ? 0 : -1}
       title={showingHex ? 'Show decoded value' : 'Show raw hex'}
       aria-label={showingHex ? hex : decodedLabel}
+      onMouseDown={(e: MouseEvent) => {
+        if (!allowFocus) e.preventDefault();
+      }}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
         setShowHex(v => !v);
       }}
       onKeyDown={(e: KeyboardEvent) => {
+        if (!allowFocus) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           e.stopPropagation();
@@ -76,7 +100,7 @@ export function BusValueText({
     >
       <span
         className={decodedClass}
-        style={{ visibility: showingHex ? 'hidden' : 'visible', ...style }}
+        style={{ visibility: showingHex ? 'hidden' : 'visible', ...textStyle }}
         aria-hidden={showingHex}
       >
         {decodedBody}

@@ -4,7 +4,10 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Telegram } from '../hooks/useWebSocket';
 import { ChevronUp, ChevronDown, Filter, LineChart, ListFilter, X, Clock, Info, Power, Circle, CircleDot, Download } from 'lucide-react';
 import { dptKey, type ActiveFilters } from '../types/filters';
-import { SendToGaPopover } from './SendToGaPopover';
+import { SendToGaHost, SendToGaPopover, type ListScrollSnapshot } from './SendToGaPopover';
+import { type LinkedRowStatus } from './WriteToBusPanel';
+import type { SendCorrespondenceKey } from '../utils/sendCorrespondence';
+import type { BusPayload } from '../utils/dptValues';
 import { GotoTimeControl } from './GotoTimeControl';
 import { getPref, setPref } from '../utils/prefs';
 import type { SortKey, SortLevel, SortConfig } from '../utils/sortConfig';
@@ -16,13 +19,20 @@ import { adjacentMark } from '../utils/adjacentMark';
 import { peakRate } from '../utils/peakRate';
 import { moveColumn, readColumnOrderPref, writeColumnOrderPref } from '../utils/columnOrder';
 import { formatDpt } from '../utils/knxSend';
-import { TT, ttTypeClass, ttDirectionClass, ttDptDotClass } from '../utils/telegramCellStyles';
+import { TT, ttTypeClass, ttDirectionClass, ttDptDotClass, answeredReadIds } from '../utils/telegramCellStyles';
+import { EventTypeLabel } from './EventTypeLabel';
 import { BusValueText } from './BusValueText';
 
 export type { SortKey, SortLevel, SortConfig };
 
 interface TelegramTableProps {
   telegrams: Telegram[];
+  /**
+   * Telegrams that decide whether a visible Read is answered.
+   * The live list passes the full buffer, including the pause backlog.
+   * Omitted → the rows passed as `telegrams`.
+   */
+  readPhaseTelegrams?: Telegram[];
   visibleColumns: { [key: string]: boolean };
   sortConfig: SortConfig;
   /** `additive` (ctrl/cmd-click) adds/toggles a sort level instead of replacing the whole config (#311). */
@@ -35,6 +45,34 @@ interface TelegramTableProps {
   canSend?: boolean;
   /** Jump from the send popover's last-value timestamp to the telegram list. */
   onGotoTelegram?: (telegram: Telegram) => void;
+  /** Live bus feed for the send popover's wait-for-read-response. */
+  latestTelegram?: Telegram | null;
+  /** Alt-click on a row send icon → toggle the send panel. */
+  onAltSend?: () => void;
+  /** Ctrl/Cmd-click on a row send icon → clear or insert that GA in the send panel. */
+  onCtrlSend?: (info: {
+    address: string;
+    name?: string | null;
+    dptMain?: number | null;
+    dptSub?: number | null;
+  }) => void;
+  /** GAs present in the send panel (send-icon opaque/blue; panel open/closed irrelevant). */
+  sendPanelAddresses?: ReadonlySet<string>;
+  /** GAs with a live scheduled send-job (send-icon opaque, green). */
+  activeSendJobAddresses?: ReadonlySet<string>;
+  /** Live job status by GA — popover shows panel-like status when a job is active. */
+  gaJobStatuses?: Record<string, LinkedRowStatus>;
+  /** Linked send-panel row status while a popover job is active. */
+  linkedStatus?: LinkedRowStatus | null;
+  onScheduleCommit?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
+  onWriteWithSchedule?: (
+    draft: SendCorrespondenceKey & { name?: string | null },
+    payload: BusPayload,
+    opts?: { response?: boolean },
+  ) => void;
+  onReadWithSchedule?: (draft: SendCorrespondenceKey & { name?: string | null }) => void;
+  onCancelLinked?: (rowId?: string) => void;
+  onClearLinked?: (rowId?: string) => void;
 
   // Lifted Quick-Filter state (#280, #309, #341)
   quickFilterOpen?: boolean;
@@ -209,7 +247,11 @@ function countNewerThan(rows: { timestamp: string }[], newestMs: number, ascendi
 
 
 export const TelegramTable: React.FC<TelegramTableProps> = ({
-  telegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
+  telegrams, readPhaseTelegrams, visibleColumns, sortConfig, onSort, activeFilters, onQuickFilter, onQuickVisualize, onQuickLastSeen, canSend, onGotoTelegram,
+  latestTelegram, onAltSend, onCtrlSend, sendPanelAddresses,
+  activeSendJobAddresses,
+  gaJobStatuses,
+  linkedStatus = null, onScheduleCommit, onWriteWithSchedule, onReadWithSchedule, onCancelLinked, onClearLinked,
   quickFilterOpen, onQuickFilterOpenChange, quickFilterEnabled, onQuickFilterEnabledChange, quickPatterns, onQuickPatternsChange,
   onDeltaContextChange, onDeltaContextEnabledChange,
   listFollow, onListFollowChange, listAnchorKey, onListAnchorKeyChange,
@@ -453,6 +495,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   // Time deltas between consecutive rows, by visual (sorted) order — always
   // computed regardless of sort column, respecting whatever hierarchy is
   // active (#311).
+  // A later Response on the same GA turns that Read green. The live list passes
+  // the full buffer, including the pause backlog. Without the prop, the rows
+  // passed as `telegrams` decide.
+  const answeredReads = useMemo(
+    () => answeredReadIds(readPhaseTelegrams ?? telegrams),
+    [readPhaseTelegrams, telegrams],
+  );
+
   const naturalTelegramRows = useMemo<TelegramRow[]>(() => {
     return quickFiltered.map((t, idx) => {
       let deltaStr: string | null = null;
@@ -1198,6 +1248,72 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
   engageLiveTowardNewerRef.current = engageLiveTowardNewer;
   keyTowardNewerRef.current = keyTowardNewer;
   keyScrollDeltaRef.current = keyScrollDelta;
+
+  /**
+   * Pause live-follow for send-popover open / restore. Mirrors an edge click
+   * (#266) without replacing the pause/scroll rubber-band path.
+   */
+  const pauseLiveFollowForSend = () => {
+    if (!atEdgeRef.current) return;
+    atEdgeRef.current = false;
+    detachedFromEdgeRef.current = true;
+    setFollowingLive(false);
+    onListFollowChange?.(false);
+  };
+
+  /** Snapshot for send-popover "restore list position" (anchor key + viewport offset). */
+  const captureListScroll = useCallback((): ListScrollSnapshot | null => {
+    pauseLiveFollowForSend();
+    const el = parentRef.current;
+    if (!el) return null;
+    const scrollTop = el.scrollTop;
+    if (anchorRef.current) {
+      return { scrollTop, key: anchorRef.current.key, offset: anchorRef.current.offset };
+    }
+    const items = virtualizer.getVirtualItems();
+    const first = items[0];
+    if (first == null) return { scrollTop, key: null, offset: 0 };
+    const t = telegramRows[first.index];
+    if (!t) return { scrollTop, key: null, offset: 0 };
+    const key = anchorKey(t);
+    const offset = rowOffset(key) ?? (first.start - scrollTop);
+    anchorRef.current = { key, offset };
+    onListAnchorKeyChange?.(key);
+    return { scrollTop, key, offset };
+  }, [virtualizer, telegramRows, onListAnchorKeyChange]);
+
+  /** Restore the list to the send-popover open snapshot; pauses live-follow.
+   *  Resolves after the offset correction so the popover can re-anchor. */
+  const restoreListScroll = useCallback((snap: ListScrollSnapshot): Promise<void> => {
+    const el = parentRef.current;
+    if (!el) return Promise.resolve();
+    pauseLiveFollowForSend();
+    if (snap.key) {
+      const idx = telegramRows.findIndex(r => anchorKey(r) === snap.key);
+      if (idx >= 0) {
+        markProgrammatic();
+        virtualizer.scrollToIndex(idx, { align: 'start' });
+        return new Promise(resolve => {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            const found = rowOffset(snap.key!);
+            if (found != null) {
+              markProgrammatic();
+              el.scrollTop += found - snap.offset;
+              anchorRef.current = { key: snap.key!, offset: snap.offset };
+              onListAnchorKeyChange?.(snap.key!);
+            } else {
+              markProgrammatic();
+              el.scrollTop = snap.scrollTop;
+            }
+            resolve();
+          }));
+        });
+      }
+    }
+    markProgrammatic();
+    el.scrollTop = snap.scrollTop;
+    return Promise.resolve();
+  }, [virtualizer, telegramRows, onListAnchorKeyChange]);
 
   // Record the row to pin across list updates. `selectedKey` is the row the
   // user is working on; it wins while any part of it is inside the viewport, so
@@ -2153,8 +2269,25 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
                   name={t.target_name}
                   dptMain={t.dpt_main}
                   dptSub={t.dpt_sub}
+                  triggerId={anchorKey(t)}
                   buttonClassName="quick-send-btn"
+                  suppressTriggerFocus
                   onGotoTelegram={onGotoTelegram}
+                  latestTelegram={latestTelegram}
+                  onAltSend={onAltSend}
+                  onCtrlSend={onCtrlSend}
+                  panelMatched={Boolean(
+                    t.target_address && sendPanelAddresses?.has(t.target_address),
+                  )}
+                  jobActive={Boolean(
+                    t.target_address && activeSendJobAddresses?.has(t.target_address),
+                  )}
+                  linkedStatus={linkedStatus}
+                  onScheduleCommit={onScheduleCommit}
+                  onWriteWithSchedule={onWriteWithSchedule}
+                  onReadWithSchedule={onReadWithSchedule}
+                  onCancelLinked={onCancelLinked}
+                  onClearLinked={onClearLinked}
                 />
               )}
             </div>
@@ -2173,9 +2306,14 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         return (
           <div className={`${TT.cell} filterable-cell`} style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
-              <div className={ttTypeClass(t.simplified_type)}>
-                {t.simplified_type || t.telegram_type}
-              </div>
+              <EventTypeLabel
+                kind={t.simplified_type || t.telegram_type || ''}
+                answered={t.simplified_type === 'Read' && answeredReads.has(`${t.timestamp}|${t.target_address}`)}
+                className={ttTypeClass(
+                  t.simplified_type,
+                  t.simplified_type === 'Read' && answeredReads.has(`${t.timestamp}|${t.target_address}`),
+                )}
+              />
               <button
                 className={`quick-filter-btn ${activeFilters.types.includes(t.simplified_type || t.telegram_type) ? 'active' : ''}`}
                 onClick={(e) => { e.stopPropagation(); onQuickFilter('types', t.simplified_type || t.telegram_type); }}
@@ -2293,7 +2431,22 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
     : (telegramRows.length > 0 && (!rangeMeasured || justUnpaused) ? stickyNewerCountRef.current : 0);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div data-telegram-table style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <SendToGaHost
+        latestTelegram={latestTelegram}
+        onGotoTelegram={onGotoTelegram}
+        captureListScroll={captureListScroll}
+        restoreListScroll={restoreListScroll}
+        linkedStatus={linkedStatus}
+        gaJobStatuses={gaJobStatuses}
+        onScheduleCommit={onScheduleCommit}
+        onWriteWithSchedule={onWriteWithSchedule}
+        onReadWithSchedule={onReadWithSchedule}
+        onCancelLinked={onCancelLinked}
+        onClearLinked={onClearLinked}
+        onAltSend={onAltSend}
+        onCtrlSend={onCtrlSend}
+      >
       {/* Quick info bar (#311): collapsible summary directly above the header. */}
       {infoOpen && infoMetrics && (
         <div style={{
@@ -2621,6 +2774,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         <button
           onClick={jumpToLive}
           className="jump-to-live-pill"
+          data-jump-to-live-pill=""
           style={{
             position: 'absolute', left: '50%', transform: 'translateX(-50%)',
             [liveEdge]: '1rem', zIndex: 20,
@@ -2672,6 +2826,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       {markedKeysList.length > 0 && (
         <div
           className="marks-pill"
+          data-marks-pill=""
           style={{ position: 'absolute', right: '1rem', top: '0.75rem', zIndex: 20 }}
         >
           <button onClick={() => jumpToMark(-1)} disabled={markedIndices.length === 0} title="Jump to previous mark">
@@ -2689,6 +2844,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
       {/* Virtualized Body */}
       <div
         ref={parentRef}
+        data-telegram-scroll=""
         onScroll={handleScroll}
         onWheel={e => {
           noteUserScroll();
@@ -2833,6 +2989,7 @@ export const TelegramTable: React.FC<TelegramTableProps> = ({
         />
       </div>
       </div>
+      </SendToGaHost>
     </div>
   );
 };
@@ -2888,6 +3045,14 @@ style.textContent = `
     position: relative;
   }
 
+  .quick-filter-btn:focus, .quick-filter-btn:focus-visible,
+  .quick-visualize-btn:focus, .quick-visualize-btn:focus-visible,
+  .quick-last-seen-btn:focus, .quick-last-seen-btn:focus-visible,
+  .quick-send-btn:focus, .quick-send-btn:focus-visible {
+    /* Beat .log-row:hover … opacity: 0.6 so the focus ring stays full strength. */
+    opacity: 1 !important;
+  }
+
   .quick-filter-btn.active {
     opacity: 1;
     color: var(--accent-primary);
@@ -2913,11 +3078,42 @@ style.textContent = `
     opacity: 0.6;
   }
 
+  /* Lit send icons stay opaque after a bus pulse (!important beats transition glitches). */
+  .log-row:hover .quick-send-btn[data-send-popover-open],
+  .quick-send-btn[data-send-popover-open],
+  .log-row:hover .quick-send-btn[data-send-panel-match],
+  .quick-send-btn[data-send-panel-match] {
+    opacity: 1 !important;
+    color: var(--accent-primary);
+  }
+
+  .log-row:hover .quick-send-btn[data-send-job-active],
+  .quick-send-btn[data-send-job-active] {
+    opacity: 1 !important;
+    color: var(--tt-outgoing);
+  }
+
+  /* While the shared bus-pulse runs, keep the icon opaque and let keyframes own motion. */
+  .log-row:hover .quick-send-btn[data-bus-pulse],
+  .quick-send-btn[data-bus-pulse] {
+    opacity: 1 !important;
+    transition: none;
+  }
+
   .quick-filter-btn:hover, .quick-visualize-btn:hover, .quick-last-seen-btn:hover, .quick-send-btn:hover {
     opacity: 1 !important;
     background: var(--bg-hover);
     color: var(--accent-primary);
     transform: scale(1.1);
+  }
+
+  .quick-send-btn[data-send-job-active]:hover,
+  .quick-send-btn[data-bus-pulse="Outgoing"]:hover {
+    color: var(--tt-outgoing);
+  }
+
+  .quick-send-btn[data-bus-pulse="Incoming"]:hover {
+    color: var(--tt-incoming);
   }
 
   .quick-visualize-btn:hover {
