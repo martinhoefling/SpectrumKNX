@@ -11,6 +11,9 @@ ARG TARGET_MAJOR="18"
 # every historical versioned .so (PG15: 2.11.0-2.28.3, PG18: 2.23.0-2.29.2), so
 # this version is loadable by both majors — that overlap is what makes
 # pg_upgrade possible across the TimescaleDB boundary.
+# The loader must be pinned to the same version: it ships timescaledb.control,
+# whose default_version is what ALTER EXTENSION UPDATE targets. An unpinned
+# loader newer than the extension package points at scripts that aren't there.
 ARG TS_VERSION_SOURCE="2.28.3~debian12-1518"
 ARG TS_VERSION_TARGET="2.29.2~debian12-1804"
 
@@ -36,11 +39,13 @@ RUN curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
 RUN apt-get update \
     && for m in $SOURCE_MAJORS; do \
          apt-get install -y --no-install-recommends \
-           "postgresql-$m" "timescaledb-2-postgresql-$m=$TS_VERSION_SOURCE"; \
+           "postgresql-$m" "timescaledb-2-postgresql-$m=$TS_VERSION_SOURCE" \
+           "timescaledb-2-loader-postgresql-$m=$TS_VERSION_SOURCE"; \
        done \
     && apt-get install -y --no-install-recommends \
          "postgresql-$TARGET_MAJOR" "postgresql-client-$TARGET_MAJOR" \
          "timescaledb-2-postgresql-$TARGET_MAJOR=$TS_VERSION_TARGET" \
+         "timescaledb-2-loader-postgresql-$TARGET_MAJOR=$TS_VERSION_TARGET" \
     && rm -rf /var/lib/apt/lists/*
 
 COPY packaging/pg-migrate/migrate.sh /usr/local/bin/pg-migrate

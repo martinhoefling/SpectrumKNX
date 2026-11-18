@@ -42,6 +42,9 @@ RUN curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
 # extension at the version the old cluster recorded. 2.28.3 is the newest that
 # still supports PG15, and the PG18 package bundles every historical versioned
 # .so (2.23.0-2.29.2) — that overlap is what makes the upgrade possible.
+# Each loader is pinned to its extension package: the loader ships
+# timescaledb.control, so an unpinned (newer) loader sets a default_version
+# whose scripts aren't installed, and CREATE/ALTER EXTENSION fails.
 ARG PG_MAJOR=18
 ARG PG_MIGRATE_FROM_MAJOR=15
 ARG TS_VERSION_NEW="2.29.2~debian12-1804"
@@ -50,8 +53,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-${PG_MAJOR} \
     postgresql-client-${PG_MAJOR} \
     timescaledb-2-postgresql-${PG_MAJOR}=${TS_VERSION_NEW} \
+    timescaledb-2-loader-postgresql-${PG_MAJOR}=${TS_VERSION_NEW} \
     postgresql-${PG_MIGRATE_FROM_MAJOR} \
     timescaledb-2-postgresql-${PG_MIGRATE_FROM_MAJOR}=${TS_VERSION_OLD} \
+    timescaledb-2-loader-postgresql-${PG_MIGRATE_FROM_MAJOR}=${TS_VERSION_OLD} \
     && rm -rf /var/lib/apt/lists/*
 
 # In-place major-version migration, shared with the standalone image.
