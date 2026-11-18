@@ -570,6 +570,51 @@ def write_enabled() -> bool:
     return ALLOW_WRITE and is_connected()
 
 
+# Bit width and signedness for a bare DPT main ("2"), which xknx cannot transcode.
+# Mirrors `BARE_INT_MAINS` in frontend/src/utils/knxSend.ts. Widths of 6 bits or
+# less travel in the APCI byte (DPTBinary); wider mains are big-endian bytes.
+_BARE_INT_MAINS: dict[int, tuple[int, bool]] = {
+    1: (1, False),
+    2: (2, False),
+    3: (4, False),
+    23: (2, False),
+    4: (8, False),
+    5: (8, False),
+    17: (8, False),
+    18: (8, False),
+    20: (8, False),
+    21: (8, False),
+    25: (8, False),
+    26: (8, False),
+    238: (8, False),
+    6: (8, True),
+    7: (16, False),
+    22: (16, False),
+    8: (16, True),
+    12: (32, False),
+    27: (32, False),
+    13: (32, True),
+    29: (64, True),
+}
+
+
+def _encode_bare_int(payload: int, main: int, bits: int, signed: bool) -> DPTArray | DPTBinary:
+    if signed:
+        lo = -(1 << (bits - 1))
+        hi = (1 << (bits - 1)) - 1
+    else:
+        lo = 0
+        hi = (1 << bits) - 1
+    if payload < lo or payload > hi:
+        raise ValueError(f"Value {payload} is out of range for DPT {main} ({lo}–{hi})")
+    if bits <= 6:
+        return DPTBinary(payload)
+    raw = payload & ((1 << bits) - 1)
+    nbytes = bits // 8
+    data = [(raw >> (8 * (nbytes - 1 - i))) & 0xFF for i in range(nbytes)]
+    return DPTArray(data)
+
+
 def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
     """Encode a value into a KNX payload. With a DPT the value is transcoded;
     without one the payload is treated as raw bytes (int -> DPTBinary)."""
@@ -619,6 +664,19 @@ def _encode_payload(payload: Any, dpt: str | None) -> DPTArray | DPTBinary:
                             }
                         except ValueError:
                             pass
+
+        if dpt.isdigit():
+            spec = _BARE_INT_MAINS.get(int(dpt))
+            if spec is not None:
+                # bool is an int subclass; a switch word still encodes as 0/1.
+                if isinstance(payload, bool):
+                    as_int: int | None = int(payload)
+                elif isinstance(payload, int):
+                    as_int = payload
+                else:
+                    as_int = None
+                if as_int is not None:
+                    return _encode_bare_int(as_int, int(dpt), spec[0], spec[1])
 
         transcoder = DPTBase.parse_transcoder(dpt)
         if transcoder is None:

@@ -73,3 +73,29 @@ test('defaultShowHex starts in raw-badge mode and toggles to decoded', () => {
   expect(screen.getByRole('button', { name: 'decrease 0' })).toBe(el);
   expect(el.querySelector(`.${TT.value}`)).toHaveStyle({ visibility: 'visible' });
 });
+
+test('text DPTs render padded values in monospace', () => {
+  const { container } = render(
+    <BusValueText value={{ value_formatted: 'Hi' }} dpt="16.000" />,
+  );
+  const el = container.querySelector(`.${TT.value}`) as HTMLElement;
+  expect(el).toHaveTextContent('Hi');
+  expect(el.textContent).toBe('Hi'.padEnd(14, ' '));
+  expect(el).toHaveStyle({ fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre' });
+});
+
+test('allowFocus=false keeps the toggle out of the tab order', () => {
+  render(
+    <BusValueText
+      value={{ value_formatted: 'On', raw_hex: '0x01' }}
+      dpt="1.001"
+      allowFocus={false}
+    />,
+  );
+  const el = screen.getByRole('button', { name: 'on' });
+  expect(el).toHaveAttribute('tabIndex', '-1');
+  fireEvent.mouseDown(el);
+  expect(el).not.toHaveFocus();
+  fireEvent.click(el);
+  expect(screen.getByRole('button', { name: '0x01' })).toBe(el);
+});

@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { Clock } from 'lucide-react';
 
 import type { Telegram } from '../hooks/useWebSocket';
+import { EventTypeLabel } from './EventTypeLabel';
 
 /** Shared event timestamp shape used by send panel, popover, and building views. */
 // eslint-disable-next-line react-refresh/only-export-components -- shared timestamp helper
@@ -13,18 +14,22 @@ export function formatTelegramWhen(timestamp: string | Date | undefined | null):
   return format(d, 'yyyy-MM-dd HH:mm:ss');
 }
 
-/** Prefer simplified_type (Read / Write / Response); fall back to telegram_type. */
+/** Prefer simplified_type (READ / WRITE / RESPONSE); fall back to telegram_type. */
 // eslint-disable-next-line react-refresh/only-export-components -- shared telegram helper
 export function telegramEventType(telegram: Pick<Telegram, 'simplified_type' | 'telegram_type'> | null | undefined): string {
   if (!telegram) return '';
-  return (telegram.simplified_type ?? telegram.telegram_type ?? '').trim();
+  const raw = (telegram.simplified_type ?? telegram.telegram_type ?? '').trim();
+  if (raw === 'Write' || raw === 'Read' || raw === 'Response') return raw.toUpperCase();
+  return raw;
 }
 
 interface Props {
   /** ISO timestamp or Date of the bus event. */
   timestamp?: string | Date | null;
-  /** Optional event kind shown after the jump (Read / Write / Response). */
+  /** Optional event kind shown after the jump (READ / WRITE / RESPONSE). */
   eventType?: string | null;
+  /** When the kind is a Read, color it green once a later Response has answered it. */
+  readAnswered?: boolean;
   /** When set, render the jump button immediately right of the timestamp. */
   onJump?: () => void;
   /** aria-label / title for the jump button. */
@@ -44,6 +49,7 @@ interface Props {
 export function TelegramWhenJump({
   timestamp,
   eventType,
+  readAnswered = false,
   onJump,
   jumpLabel = 'Go to telegram',
   empty = false,
@@ -98,7 +104,9 @@ export function TelegramWhenJump({
       ) : (
         jump
       )}
-      {typeLabel ? <span style={{ flexShrink: 0 }}>{typeLabel}</span> : null}
+      {typeLabel ? (
+        <EventTypeLabel kind={typeLabel} answered={readAnswered} style={{ flexShrink: 0 }} />
+      ) : null}
     </span>
   );
 }

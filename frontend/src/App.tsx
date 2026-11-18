@@ -50,7 +50,19 @@ import { LastSeenOverlay } from './components/LastSeenOverlay';
 import { StatisticsOverlay } from './components/StatisticsOverlay';
 import { BuildingOverlay, type DeviceNode } from './components/BuildingOverlay';
 import { DatabaseOverlay } from './components/DatabaseOverlay';
-import { WriteToBusPanel } from './components/WriteToBusPanel';
+import {
+  WriteToBusPanel,
+  type CtrlSendRequest,
+  type SendPanelCommand,
+  type LinkedRowStatus,
+} from './components/WriteToBusPanel';
+import {
+  correspondenceKeyFromDraft,
+  type SendCorrespondenceKey,
+} from './utils/sendCorrespondence';
+import type { BusPayload } from './utils/dptValues';
+import { DptCatalogProvider } from './components/DptCatalogContext';
+import { GaReadPhaseProvider } from './components/GaReadPhase';
 import { UpdateNotification } from './components/UpdateNotification';
 import { LegacyTimestampBanner } from './components/LegacyTimestampBanner';
 import { LoginScreen } from './components/LoginScreen';
@@ -279,6 +291,27 @@ function App() {
   const [latestTelegram, setLatestTelegram] = useState<Telegram | null>(null);
   const [isDatabaseOpen, setIsDatabaseOpen] = useState(initialWorkspace?.view === 'database');
   const [isSendOpen, setIsSendOpen] = useState(false);
+  /** GAs currently present in the send panel (TT send-icon opaque/blue; panel visibility irrelevant). */
+  const [sendPanelAddresses, setSendPanelAddresses] = useState<ReadonlySet<string>>(() => new Set());
+  /** Ctrl-click send-icon request consumed by WriteToBusPanel (clear or insert top row). */
+  const [ctrlSendRequest, setCtrlSendRequest] = useState<CtrlSendRequest | null>(null);
+  const ctrlSendNonceRef = useRef(0);
+  /** Popover ↔ panel schedule correspondence. */
+  const [sendPanelCommand, setSendPanelCommand] = useState<SendPanelCommand | null>(null);
+  const sendPanelCmdNonceRef = useRef(0);
+  const [popoverLinkedRowId, setPopoverLinkedRowId] = useState<string | null>(null);
+  const [linkedRowStatuses, setLinkedRowStatuses] = useState<Record<string, LinkedRowStatus>>({});
+  const [gaJobStatuses, setGaJobStatuses] = useState<Record<string, LinkedRowStatus>>({});
+  const activeSendJobAddresses = useMemo(
+    () => new Set(Object.keys(gaJobStatuses)),
+    [gaJobStatuses],
+  );
+  const pendingEnsureRef = useRef<{
+    nonce: number;
+    kind: 'write' | 'read';
+    payload?: BusPayload;
+    response?: boolean;
+  } | null>(null);
   const [backendVersion, setBackendVersion] = useState<string>('loading...');
   const [projectStatus, setProjectStatus] = useState<{
     upload_feature_active: boolean;
@@ -329,6 +362,7 @@ function App() {
   // reappear instantly after a reload and only the gaps are fetched (#211).
   const {
     telegrams: liveTelegrams,
+    ingested: ingestedTelegrams,
     addLive,
     setConnected: setCacheConnected,
     setPaused: setCachePaused,
@@ -343,6 +377,8 @@ function App() {
   // Snapshot frozen in auto/manual; flush moves mode to playing without
   // necessarily enabling live-follow (edge flush keeps the viewport + pill).
   const isPaused = cachePausedForMode(pauseMode);
+  // Popover, send panel, and list READ color follow the full buffer, including
+  // telegrams still sitting in the pause backlog.
 
   // ── Rate Estimation ─────────────────────────────────────────────────────────
   const [busRate, setBusRate] = useState(0);
@@ -774,6 +810,127 @@ function App() {
     setListGoto({ id: listGotoSeq.current, telegram });
   }, [handleListFollowChange]);
 
+  const handleAltSend = useCallback(() => {
+    setIsSendOpen(o => {
+      if (o) setCtrlSendRequest(null);
+      return !o;
+    });
+  }, []);
+
+  const handleCtrlSend = useCallback((info: {
+    address: string;
+    name?: string | null;
+    dptMain?: number | null;
+    dptSub?: number | null;
+  }) => {
+    setIsSendOpen(true);
+    ctrlSendNonceRef.current += 1;
+    setCtrlSendRequest({ ...info, nonce: ctrlSendNonceRef.current });
+  }, []);
+
+  const handleCtrlSendHandled = useCallback(() => {
+    setCtrlSendRequest(null);
+  }, []);
+
+  const handlePanelAddressesChange = useCallback((addresses: string[]) => {
+    setSendPanelAddresses(prev => {
+      if (prev.size === addresses.length && addresses.every(a => prev.has(a))) return prev;
+      return new Set(addresses);
+    });
+  }, []);
+
+  const handleLinkedRowStatusesChange = useCallback((statuses: Record<string, LinkedRowStatus>) => {
+    setLinkedRowStatuses(statuses);
+  }, []);
+
+  const handleGaJobStatusesChange = useCallback((byAddress: Record<string, LinkedRowStatus>) => {
+    setGaJobStatuses(byAddress);
+  }, []);
+
+  // Delay/every commit only drops the link. The panel row is created when Write/Read starts the job.
+  const handleScheduleCommit = useCallback((draft: SendCorrespondenceKey & { name?: string | null }) => {
+    const key = correspondenceKeyFromDraft(draft);
+    if (!key.delay && !key.every) setPopoverLinkedRowId(null);
+  }, []);
+
+  const handleWriteWithSchedule = useCallback((
+    draft: SendCorrespondenceKey & { name?: string | null },
+    payload: BusPayload,
+    opts?: { response?: boolean },
+  ) => {
+    const key = correspondenceKeyFromDraft(draft);
+    sendPanelCmdNonceRef.current += 1;
+    const nonce = sendPanelCmdNonceRef.current;
+    pendingEnsureRef.current = { nonce, kind: 'write', payload, response: opts?.response };
+    setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
+  }, []);
+
+  const handleReadWithSchedule = useCallback((
+    draft: SendCorrespondenceKey & { name?: string | null },
+  ) => {
+    const key = correspondenceKeyFromDraft(draft);
+    sendPanelCmdNonceRef.current += 1;
+    const nonce = sendPanelCmdNonceRef.current;
+    pendingEnsureRef.current = { nonce, kind: 'read' };
+    setSendPanelCommand({ type: 'ensureRow', nonce, key, name: draft.name });
+  }, []);
+
+  const handleCancelLinked = useCallback((rowId?: string) => {
+    const id = rowId ?? popoverLinkedRowId;
+    if (!id) return;
+    sendPanelCmdNonceRef.current += 1;
+    setSendPanelCommand({
+      type: 'cancelRow',
+      nonce: sendPanelCmdNonceRef.current,
+      rowId: id,
+    });
+  }, [popoverLinkedRowId]);
+
+  const handleClearLinked = useCallback((rowId?: string) => {
+    const id = rowId ?? popoverLinkedRowId;
+    if (!id) return;
+    sendPanelCmdNonceRef.current += 1;
+    setSendPanelCommand({
+      type: 'clearRow',
+      nonce: sendPanelCmdNonceRef.current,
+      rowId: id,
+    });
+  }, [popoverLinkedRowId]);
+
+  const handleSendPanelCommandHandled = useCallback((result: {
+    nonce: number;
+    rowId: string | null;
+    created: boolean;
+    matched: boolean;
+  }) => {
+    const pending = pendingEnsureRef.current;
+    if (pending && pending.nonce === result.nonce) {
+      pendingEnsureRef.current = null;
+      if (result.rowId) setPopoverLinkedRowId(result.rowId);
+      if (pending.kind === 'write' && result.rowId && pending.payload) {
+        sendPanelCmdNonceRef.current += 1;
+        setSendPanelCommand({
+          type: 'writeViaRow',
+          nonce: sendPanelCmdNonceRef.current,
+          rowId: result.rowId,
+          payload: pending.payload,
+          response: pending.response,
+        });
+        return;
+      }
+      if (pending.kind === 'read' && result.rowId) {
+        sendPanelCmdNonceRef.current += 1;
+        setSendPanelCommand({
+          type: 'readViaRow',
+          nonce: sendPanelCmdNonceRef.current,
+          rowId: result.rowId,
+        });
+        return;
+      }
+    }
+    setSendPanelCommand(null);
+  }, []);
+
   const handleQuickLastSeen = useCallback((address: string | string[], mode: 'ga' | 'pa') => {
     setLastSeenAddresses(Array.isArray(address) ? address : [address]);
     setLastSeenMode(mode);
@@ -876,6 +1033,8 @@ function App() {
   }
 
   return (
+    <DptCatalogProvider value={filterOptions.dpts}>
+    <GaReadPhaseProvider rows={ingestedTelegrams}>
     <div className="container dashboard-grid" style={{ padding: '1.5rem', gap: '1.5rem' }}>
 
       {/* ── Main area (Full Width) ─── */}
@@ -1020,7 +1179,12 @@ function App() {
                   }}>
                     <button
                       className="icon-button"
-                      onClick={() => setIsSendOpen(o => !o)}
+                      onClick={() => {
+                        setIsSendOpen(o => {
+                          if (o) setCtrlSendRequest(null);
+                          return !o;
+                        });
+                      }}
                       title="Send / read telegrams"
                       aria-pressed={isSendOpen}
                       style={{
@@ -1304,14 +1468,25 @@ function App() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {/* Full width of main, above the filter column so the bar is not
                 inset beside the filter pane. */}
-            {isSendOpen && serverConfig?.status?.write_enabled && (
-              <WriteToBusPanel
-                targets={filterOptions.targets}
-                dptCatalog={filterOptions.dpts}
-                onClose={() => setIsSendOpen(false)}
-                latestTelegram={latestTelegram}
-                onGotoTelegram={handleGotoTelegram}
-              />
+            {serverConfig?.status?.write_enabled && (
+              <div
+                style={{ display: isSendOpen ? undefined : 'none' }}
+                aria-hidden={!isSendOpen}
+              >
+                <WriteToBusPanel
+                  targets={filterOptions.targets}
+                  dptCatalog={filterOptions.dpts}
+                  latestTelegram={latestTelegram}
+                  onGotoTelegram={handleGotoTelegram}
+                  onPanelAddressesChange={handlePanelAddressesChange}
+                  ctrlSendRequest={ctrlSendRequest}
+                  onCtrlSendHandled={handleCtrlSendHandled}
+                  sendPanelCommand={sendPanelCommand}
+                  onSendPanelCommandHandled={handleSendPanelCommandHandled}
+                  onLinkedRowStatusesChange={handleLinkedRowStatusesChange}
+                  onGaJobStatusesChange={handleGaJobStatusesChange}
+                />
+              </div>
             )}
             {/* Content row: filter panel + table */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
@@ -1438,6 +1613,7 @@ function App() {
                     </div>
                     <TelegramTable
                     telegrams={filteredLiveTelegrams}
+                    readPhaseTelegrams={ingestedTelegrams}
                     visibleColumns={visibleColumns}
                     sortConfig={sortConfig}
                     onSort={handleSort}
@@ -1447,6 +1623,18 @@ function App() {
                     onQuickLastSeen={handleQuickLastSeen}
                     canSend={serverConfig?.status?.write_enabled}
                     onGotoTelegram={handleGotoTelegram}
+                    onAltSend={handleAltSend}
+                    onCtrlSend={handleCtrlSend}
+                    sendPanelAddresses={sendPanelAddresses}
+                    activeSendJobAddresses={activeSendJobAddresses}
+                    gaJobStatuses={gaJobStatuses}
+                    linkedStatus={popoverLinkedRowId ? linkedRowStatuses[popoverLinkedRowId] ?? null : null}
+                    onScheduleCommit={handleScheduleCommit}
+                    onWriteWithSchedule={handleWriteWithSchedule}
+                    onReadWithSchedule={handleReadWithSchedule}
+                    onCancelLinked={handleCancelLinked}
+                    onClearLinked={handleClearLinked}
+                    latestTelegram={latestTelegram}
                     quickFilterOpen={quickFilterOpen}
                     onQuickFilterOpenChange={setQuickFilterOpen}
                     quickFilterEnabled={quickFilterEnabled}
@@ -1574,6 +1762,8 @@ function App() {
         .subtitle-name { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       `}</style>
     </div>
+    </GaReadPhaseProvider>
+    </DptCatalogProvider>
   );
 }
 

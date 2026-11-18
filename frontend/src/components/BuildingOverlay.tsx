@@ -387,6 +387,7 @@ const KoRow: React.FC<{
                 dptSub={ko.dpts[0]?.sub}
                 buttonStyle={iconBtnStyle}
                 onGotoTelegram={onGotoTelegram}
+                latestTelegram={latestTelegram}
               />
             </div>
           )}

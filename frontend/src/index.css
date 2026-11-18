@@ -28,6 +28,9 @@
   --warning: #f59e0b;
   /* Amber as text: bright on dark, darkened on light where #fbbf24 is unreadable (#438) */
   --warning-text: #fbbf24;
+  /* Direction colors: sky vs fuchsia — no traffic-light red/amber/green */
+  --tt-incoming: #38bdf8;
+  --tt-outgoing: #e879f9;
   --info: #3b82f6;
   /* Native form controls (date picker icon, select popup) follow the theme (#438) */
   --native-scheme: dark;
@@ -98,6 +101,8 @@
     --gradient-1: rgba(99, 102, 241, 0.07);
     --gradient-2: rgba(168, 85, 247, 0.05);
     --warning-text: #a04a08;
+    --tt-incoming: #0369a1;
+    --tt-outgoing: #a21caf;
     --success: #13733a;
     --error: #c81e1e;
     --native-scheme: light;
@@ -125,6 +130,8 @@
   --gradient-1: rgba(99, 102, 241, 0.15);
   --gradient-2: rgba(168, 85, 247, 0.1);
   --warning-text: #fbbf24;
+  --tt-incoming: #38bdf8;
+  --tt-outgoing: #e879f9;
   --success: #22c55e;
   --native-scheme: dark;
 }
@@ -150,6 +157,8 @@
   --gradient-1: rgba(99, 102, 241, 0.07);
   --gradient-2: rgba(168, 85, 247, 0.05);
   --warning-text: #a04a08;
+  --tt-incoming: #0369a1;
+  --tt-outgoing: #a21caf;
   --success: #13733a;
   --error: #c81e1e;
   --native-scheme: light;
@@ -356,6 +365,7 @@ code, pre {
 
 .tt-type-write { color: var(--accent-primary); }
 .tt-type-read { color: var(--warning-text); }
+.tt-type-read-answered { color: var(--success); }
 .tt-type-response { color: var(--success); }
 .tt-type-other { color: var(--text-dim); }
 
@@ -364,8 +374,8 @@ code, pre {
   font-size: var(--tt-direction-size);
   margin-top: 0.1rem;
 }
-.tt-direction-in { color: var(--success); }
-.tt-direction-out { color: var(--warning-text); }
+.tt-direction-in { color: var(--tt-incoming); }
+.tt-direction-out { color: var(--tt-outgoing); }
 
 .tt-dpt {
   font-size: var(--tt-dpt-size);
@@ -419,6 +429,49 @@ code, pre {
   font-size: var(--tt-value-unit-size);
   color: var(--tt-value-unit-color);
   font-weight: var(--tt-value-unit-weight);
+}
+
+/* One-shot direction pulse (send icon and last value). No fill — motion ends on its own. */
+@keyframes bus-pulse {
+  0% { filter: brightness(1); transform: scale(1); }
+  35% { filter: brightness(1.85); transform: scale(1.18); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+
+/* Buttons skip the filter. A filter keyframe on the SVG glyph stays blank after it ends. */
+@keyframes bus-pulse-motion {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+[data-bus-pulse="Incoming"] {
+  color: var(--tt-incoming);
+  animation: bus-pulse 0.42s ease-out;
+}
+
+[data-bus-pulse="Outgoing"] {
+  color: var(--tt-outgoing);
+  animation: bus-pulse 0.42s ease-out;
+}
+
+button[data-bus-pulse="Incoming"],
+button[data-bus-pulse="Outgoing"] {
+  animation-name: bus-pulse-motion;
+}
+
+[data-bus-pulse="Incoming"] .tt-value,
+[data-bus-pulse="Incoming"] .tt-value-unit {
+  color: var(--tt-incoming);
+}
+
+[data-bus-pulse="Outgoing"] .tt-value,
+[data-bus-pulse="Outgoing"] .tt-value-unit {
+  color: var(--tt-outgoing);
+}
+
+[data-bus-pulse]:not(button):not(.tt-value-toggle) {
+  display: inline-block;
 }
 
 .raw-badge {

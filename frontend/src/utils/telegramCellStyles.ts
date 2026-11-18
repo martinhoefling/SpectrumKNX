@@ -1,8 +1,10 @@
 /**
  * Telegram-table cell style class names. Visual tokens live as `--tt-*` CSS
  * variables / `.tt-*` classes in index.css so future prefs can restyle cells
- * without touching call sites.
+ * without touching call sites. Read/Response detection lives in groupValueEvents.
  */
+
+import { busEventKind } from './groupValueEvents';
 
 export const TT = {
   cell: 'tt-cell',
@@ -18,6 +20,8 @@ export const TT = {
   type: 'tt-type',
   typeWrite: 'tt-type-write',
   typeRead: 'tt-type-read',
+  /** Read whose GA later received a Response — same green as the send-panel status. */
+  typeReadAnswered: 'tt-type-read-answered',
   typeResponse: 'tt-type-response',
   typeOther: 'tt-type-other',
   directionIn: 'tt-direction-in',
@@ -36,11 +40,11 @@ export const TT = {
 } as const;
 
 /** Type label class for Write / Read / Response (falls back to other). */
-export function ttTypeClass(simplified: string | null | undefined): string {
-  switch (simplified) {
-    case 'Write': return `${TT.type} ${TT.typeWrite}`;
-    case 'Read': return `${TT.type} ${TT.typeRead}`;
-    case 'Response': return `${TT.type} ${TT.typeResponse}`;
+export function ttTypeClass(simplified: string | null | undefined, answered = false): string {
+  switch (busEventKind(simplified)) {
+    case 'write': return `${TT.type} ${TT.typeWrite}`;
+    case 'read': return `${TT.type} ${answered ? TT.typeReadAnswered : TT.typeRead}`;
+    case 'response': return `${TT.type} ${TT.typeResponse}`;
     default: return `${TT.type} ${TT.typeOther}`;
   }
 }
