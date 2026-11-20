@@ -17,7 +17,10 @@ export function pauseModeForListFollow(mode: PauseMode, listFollow: boolean): Pa
  * Buffer pause button:
  * - Playing → Pause latches as manual
  * - While already paused (Pause icon): toggle auto ↔ manual (stay frozen)
- * Resume to playing is jump-to-live / auto edge-flush / follow-while-auto — not this click.
+ * Resume to playing is the newer pill while auto-paused, a Ctrl-click on that
+ * pill while manually paused, an auto edge-flush, or follow-while-auto — not
+ * this click. A plain newer-pill click leaves manual pause latched and shows
+ * the backlog.
  */
 export function pauseModeForToggle(mode: PauseMode): PauseMode {
   if (mode === 'playing') return 'manual';
@@ -25,9 +28,10 @@ export function pauseModeForToggle(mode: PauseMode): PauseMode {
 }
 
 /**
- * Snapshot is frozen in auto or manual. Reaching the frozen live edge (or
- * jumpToLive / Play) moves mode to playing and flushes — independently of
- * whether live-follow stays on after the flush.
+ * Snapshot is frozen in auto or manual. Auto pause moves to playing on the
+ * newer pill, a Ctrl-click on that pill while manually paused, when the
+ * frozen edge flushes, or when follow turns back on. A plain click on the
+ * pill leaves manual pause latched and publishes the backlog.
  */
 export function cachePausedForMode(mode: PauseMode): boolean {
   return mode !== 'playing';

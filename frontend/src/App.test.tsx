@@ -37,8 +37,19 @@ vi.mock('./hooks/useTelegramCache', () => {
         }
       };
       cacheCtl.addLive = addLive as (t: { timestamp: string }) => void;
+      // Newest first, like the real cache; re-read whenever the count changes.
+      const pausedTelegrams = React.useMemo(
+        () => backlogRef.current.slice().reverse(),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [pausedCount],
+      );
+      const ingested = React.useMemo(
+        () => (pausedCount > 0 ? pausedTelegrams.concat(telegrams) : telegrams),
+        [pausedCount, pausedTelegrams, telegrams],
+      );
       return {
         telegrams,
+        ingested,
         addLive,
         setConnected: () => {},
         setPaused: (paused: boolean) => {
@@ -52,6 +63,7 @@ vi.mock('./hooks/useTelegramCache', () => {
           }
         },
         pausedCount,
+        pausedTelegrams,
         revealPaused: (n: number) => {
           cacheCtl.revealCalls.push(n);
           if (!pausedRef.current || n <= 0) return backlogRef.current.length;
@@ -114,6 +126,36 @@ test('manual pause latches as Paused manually', async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole('button', { name: 'Playing' }));
   expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+});
+
+test('newer pill does not leave manual pause', async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Playing' }));
+  await act(async () => {
+    cacheCtl.addLive!(makeTelegram({
+      timestamp: new Date().toISOString(),
+      raw_hex: '0xmanual',
+    }));
+  });
+  const revealsBefore = cacheCtl.revealCalls.length;
+  fireEvent.click(screen.getByRole('button', { name: '1 newer telegram' }));
+  expect(screen.getByRole('button', { name: 'Paused manually' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /newer telegram/ })).not.toBeInTheDocument();
+  expect(cacheCtl.revealCalls.slice(revealsBefore)).toEqual([1]);
+});
+
+test('ctrl-click on the newer pill leaves manual pause and flushes the backlog', async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Playing' }));
+  await act(async () => {
+    cacheCtl.addLive!(makeTelegram({
+      timestamp: new Date().toISOString(),
+      raw_hex: '0xctrl',
+    }));
+  });
+  fireEvent.click(screen.getByRole('button', { name: '1 newer telegram' }), { ctrlKey: true });
+  expect(screen.getByRole('button', { name: 'Playing' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '1 newer telegram' })).not.toBeInTheDocument();
 });
 
 test('Pause icon toggles Paused manually ↔ Paused automatically', async () => {
@@ -205,7 +247,7 @@ test('manual → auto pause with the fill spacer on screen reveals one backlog r
     port.scrollTop = 0;
     fireEvent.scroll(port);
   });
-  expect(screen.getByTestId('fill-rubber-pause-label-left')).toHaveTextContent('...paused manually...');
+  expect(screen.getByTestId('fill-rubber-pause-label')).toHaveTextContent('...paused manually...');
   expect(cacheCtl.revealCalls).toEqual([]);
 
   // Switching to auto pause fills the slot with the oldest backlog row only.

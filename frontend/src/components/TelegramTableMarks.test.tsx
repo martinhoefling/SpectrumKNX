@@ -90,6 +90,28 @@ test('Ctrl/Cmd+Shift+click adds the range to existing marks', () => {
   expect(marked(container)).toEqual([true, true, false, false, true]);
 });
 
+test('wheel over the marks pill scrolls the port and does not activate a button', () => {
+  const { container } = renderTable();
+  fireEvent.click(rows(container)[0]);
+  fireEvent.click(rows(container)[2], { ctrlKey: true });
+  expect(marked(container).filter(Boolean)).toHaveLength(2);
+
+  const port = container.querySelector('.custom-scrollbar') as HTMLElement;
+  // jsdom does not implement Element.scrollBy; the browser does.
+  const scrollBy = vi.fn();
+  port.scrollBy = scrollBy;
+  const pill = container.querySelector('.marks-pill') as HTMLElement;
+  fireEvent.wheel(pill, { deltaY: 80, deltaX: 0 });
+  expect(scrollBy).toHaveBeenCalledWith({ top: 80, left: 0 });
+  expect(marked(container).filter(Boolean)).toHaveLength(2);
+
+  scrollBy.mockClear();
+  fireEvent.wheel(screen.getByTitle('Clear all marks'), { deltaY: -30, deltaX: 0 });
+  expect(scrollBy).toHaveBeenCalledWith({ top: -30, left: 0 });
+  expect(marked(container).filter(Boolean)).toHaveLength(2);
+  expect(screen.getByTitle('Clear all marks')).toBeInTheDocument();
+});
+
 test('clear-marks pill appears only when marked and removes every mark', () => {
   const { container } = renderTable();
   expect(screen.queryByTitle('Clear all marks')).not.toBeInTheDocument();

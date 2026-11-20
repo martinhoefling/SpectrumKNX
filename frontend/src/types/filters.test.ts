@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_FILTERS, countFilterOptions, countSelections, dptKey, effectiveDeltaContext, enabledFilters, hasActiveFilters, isFilterDisabled, matchesDpt, matchesTelegram, pruneDisabled, toggleFilterDisabled } from './filters';
+import { DEFAULT_FILTERS, adjustFilterCounts, countFilterOptions, countSelections, dptKey, effectiveDeltaContext, enabledFilters, hasActiveFilters, isFilterDisabled, matchesDpt, matchesTelegram, pruneDisabled, toggleFilterDisabled } from './filters';
 
 describe('effectiveDeltaContext', () => {
   test('returns the stored before/after values when enabled', () => {
@@ -120,6 +120,20 @@ test('countFilterOptions tallies telegrams per filter option', () => {
   expect(counts.directions).toEqual({ Incoming: 5 });
   // Subtypes count under their own key and under the bare main type.
   expect(counts.dpts).toEqual({ '9.001': 2, '9.004': 1, '9': 3, '14': 1 });
+});
+
+test('adjustFilterCounts matches a full recount after a prepend and a tail drop', () => {
+  const t = (source_address: string, target_address: string, simplified_type: string, dpt_main: number | null, dpt_sub: number | null) =>
+    ({ source_address, target_address, simplified_type, direction: 'Incoming', dpt_main, dpt_sub });
+  const older = [
+    t('1.1.1', '1/0/1', 'Write', 9, 1),
+    t('1.1.2', '1/0/1', 'Read', 9, 1),
+  ];
+  const added = t('1.1.3', '3/0/0', 'Write', 14, null);
+  const base = countFilterOptions(older);
+  const adjusted = adjustFilterCounts(base, [added], [older[1]]);
+  expect(adjusted).toEqual(countFilterOptions([added, older[0]]));
+  expect(adjusted.sources['1.1.2']).toBeUndefined();
 });
 
 describe('switching single filters off (#437)', () => {

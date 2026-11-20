@@ -188,25 +188,53 @@ export interface FilterCounts {
   dpts: Record<string, number>;
 }
 
+function emptyCounts(): FilterCounts {
+  return { sources: {}, targets: {}, types: {}, directions: {}, dpts: {} };
+}
+
+function bump(bucket: Record<string, number>, key: string, delta: number) {
+  const next = (bucket[key] ?? 0) + delta;
+  if (next === 0) delete bucket[key];
+  else bucket[key] = next;
+}
+
+function tally(counts: FilterCounts, t: FilterableTelegram, delta: number) {
+  bump(counts.sources, t.source_address, delta);
+  bump(counts.targets, t.target_address, delta);
+  if (t.simplified_type) bump(counts.types, t.simplified_type, delta);
+  if (t.direction) bump(counts.directions, t.direction, delta);
+  if (t.dpt_main != null) {
+    bump(counts.dpts, dptKey(t.dpt_main, t.dpt_sub), delta);
+    // A bare-main option ("all 1.x") counts every subtype
+    if (t.dpt_sub != null) bump(counts.dpts, `${t.dpt_main}`, delta);
+  }
+}
+
 /** Telegrams per filter option, for the count bubbles in the filter pane. */
 export function countFilterOptions(telegrams: FilterableTelegram[]): FilterCounts {
-  const sources: Record<string, number> = {};
-  const targets: Record<string, number> = {};
-  const types: Record<string, number> = {};
-  const directions: Record<string, number> = {};
-  const dpts: Record<string, number> = {};
+  const counts = emptyCounts();
+  for (const t of telegrams) tally(counts, t, 1);
+  return counts;
+}
 
-  for (const t of telegrams) {
-    sources[t.source_address] = (sources[t.source_address] ?? 0) + 1;
-    targets[t.target_address] = (targets[t.target_address] ?? 0) + 1;
-    if (t.simplified_type) types[t.simplified_type] = (types[t.simplified_type] ?? 0) + 1;
-    if (t.direction) directions[t.direction] = (directions[t.direction] ?? 0) + 1;
-    if (t.dpt_main != null) {
-      const key = dptKey(t.dpt_main, t.dpt_sub);
-      dpts[key] = (dpts[key] ?? 0) + 1;
-      // A bare-main option ("all 1.x") counts every subtype
-      if (t.dpt_sub != null) dpts[`${t.dpt_main}`] = (dpts[`${t.dpt_main}`] ?? 0) + 1;
-    }
-  }
-  return { sources, targets, types, directions, dpts };
+/**
+ * Same tallies as `countFilterOptions` after a short head insert and tail drop.
+ * Zeroed keys are removed so the result matches a full recount.
+ */
+export function adjustFilterCounts(
+  base: FilterCounts,
+  added: readonly FilterableTelegram[],
+  removed: readonly FilterableTelegram[],
+): FilterCounts {
+  if (added.length === 0 && removed.length === 0) return base;
+  const counts: FilterCounts = {
+    sources: { ...base.sources },
+    targets: { ...base.targets },
+    types: { ...base.types },
+    directions: { ...base.directions },
+    dpts: { ...base.dpts },
+  };
+  for (const t of added) tally(counts, t, 1);
+  for (const t of removed) tally(counts, t, -1);
+  return counts;
 }
